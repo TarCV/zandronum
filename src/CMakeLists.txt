@@ -8,6 +8,7 @@ include( CheckCXXSourceCompiles )
 include( CheckFunctionExists )
 include( CheckCXXCompilerFlag )
 include( FindPkgConfig )
+include( FindOpenGL )
 
 option( NO_ASM "Disable assembly code" )
 if( "${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" )
@@ -201,6 +202,22 @@ else( WIN32 )
 	endif( FPU_CONTROL_DIR )
 endif( WIN32 )
 
+if( X64 )
+	set( NO_ASM ON )
+endif( X64 )
+
+# Check if we have OpenGL
+
+if( NOT OPENGL_FOUND )
+	message( FATAL_ERROR "OpenGL is required for building." )
+endif( NOT OPENGL_FOUND )
+if( NOT OPENGL_GLU_FOUND )
+	message( FATAL_ERROR "OpenGL GLU is required for building." )
+endif( NOT OPENGL_GLU_FOUND )
+
+set( ZDOOM_LIBS ${ZDOOM_LIBS} ${OPENGL_LIBRARIES} )
+include_directories( ${OPENGL_INCLUDE_DIR} )
+
 # Decide on the name of the FMOD library we want to use.
 
 if( NOT FMOD_LIB_NAME AND MSVC )
@@ -354,6 +371,20 @@ if( NOT NO_ASM )
 	ENDMACRO( ADD_ASM_FILE )
 endif( NOT NO_ASM )
 
+# OpenGL on OS X: Search for GLEW include files
+
+if( APPLE )
+	find_path( GLEW_INCLUDE_DIR GL/glew.h
+		PATHS "/usr/include"
+		"/usr/local/include" )
+
+	if( GLEW_INCLUDE_DIR )
+		message( STATUS "GLEW include files found at ${GLEW_INCLUDE_DIR}" )
+	else( GLEW_INCLUDE_DIR )
+		message( SEND_ERROR "Could not find GLEW include files" )
+	endif( GLEW_INCLUDE_DIR )
+endif( APPLE )
+
 # Decide on SSE setup
 
 set( SSE_MATTERS NO )
@@ -505,6 +536,12 @@ if( FLUIDSYNTH_FOUND )
   endif( NOT DYN_FLUIDSYNTH )
 endif( FLUIDSYNTH_FOUND )
 
+# OpenGL on OS X: GLEW include directory
+
+if( APPLE )
+	include_directories( "${GLEW_INCLUDE_DIR}" )
+endif( APPLE )
+
 # Start defining source files for ZDoom
 
 if( WIN32 )
@@ -528,6 +565,7 @@ if( WIN32 )
 		win32/i_movie.cpp
 		win32/i_system.cpp
 		win32/st_start.cpp
+		win32/win32gliface.cpp
 		win32/win32video.cpp )
 	if( "${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" )
 		# CMake is not set up to compile and link rc files with GCC. :(
@@ -549,6 +587,7 @@ else( WIN32 )
 		sdl/i_main.cpp
 		sdl/i_movie.cpp
 		sdl/i_system.cpp
+		sdl/sdlglvideo.cpp
 		sdl/sdlvideo.cpp
 		sdl/st_start.cpp )
 	if( APPLE )
@@ -842,6 +881,57 @@ add_executable( zdoom WIN32
 	menu/playermenu.cpp
 	menu/readthis.cpp
 	menu/videomenu.cpp
+	gl/data/gl_sections.cpp
+	gl/data/gl_data.cpp
+	gl/data/gl_portaldata.cpp
+	gl/data/gl_setup.cpp
+	gl/data/gl_vertexbuffer.cpp
+	gl/dynlights/a_dynlight.cpp
+	gl/utility/gl_clock.cpp
+	gl/utility/gl_cycler.cpp
+	gl/utility/gl_geometric.cpp
+	gl/renderer/gl_renderer.cpp
+	gl/renderer/gl_renderstate.cpp
+	gl/renderer/gl_lightdata.cpp
+	gl/textures/gl_hwtexture.cpp
+	gl/textures/gl_texture.cpp
+	gl/textures/gl_material.cpp
+	gl/textures/gl_hirestex.cpp
+	gl/textures/gl_bitmap.cpp
+	gl/textures/gl_translate.cpp
+	gl/textures/gl_hqresize.cpp
+	gl/textures/gl_skyboxtexture.cpp
+	gl/scene/gl_bsp.cpp
+	gl/scene/gl_fakeflat.cpp
+	gl/scene/gl_clipper.cpp
+	gl/scene/gl_decal.cpp
+	gl/scene/gl_drawinfo.cpp
+	gl/scene/gl_flats.cpp
+	gl/scene/gl_walls.cpp
+	gl/scene/gl_sprite.cpp
+	gl/scene/gl_skydome.cpp
+	gl/scene/gl_renderhacks.cpp
+	gl/scene/gl_weapon.cpp
+	gl/scene/gl_scene.cpp
+	gl/scene/gl_sky.cpp
+	gl/scene/gl_portal.cpp
+	gl/scene/gl_walls_draw.cpp
+	gl/scene/gl_vertex.cpp
+	gl/scene/gl_spritelight.cpp
+	gl/dynlights/gl_dynlight.cpp
+	gl/dynlights/gl_glow.cpp
+	gl/dynlights/gl_dynlight1.cpp
+	gl/dynlights/gl_lightbuffer.cpp
+	gl/shaders/gl_shader.cpp
+	gl/shaders/gl_texshader.cpp
+	gl/system/gl_interface.cpp
+	gl/system/gl_framebuffer.cpp
+	gl/system/gl_menu.cpp
+	gl/system/gl_wipe.cpp
+	gl/models/gl_models_md3.cpp
+	gl/models/gl_models_md2.cpp
+	gl/models/gl_models.cpp
+	gl/models/gl_voxels.cpp
 	oplsynth/fmopl.cpp
 	oplsynth/mlopl.cpp
 	oplsynth/mlopl_io.cpp
