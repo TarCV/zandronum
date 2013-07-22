@@ -1,5 +1,5 @@
 cmake_minimum_required( VERSION 2.4 )
-project(ZDoom)
+project(GZDoom)
 
 # Generator expression are available some time in CMake 2.8. Due to
 # cmake_minimum_required, we can assume a minor version of > 7 implies major >= 2
@@ -41,7 +41,7 @@ IF( NOT CMAKE_BUILD_TYPE )
 ENDIF( NOT CMAKE_BUILD_TYPE )
 
 set( ZDOOM_OUTPUT_DIR ${CMAKE_BINARY_DIR} CACHE PATH "Directory where zdoom.pk3 and the executable will be created." )
-set( ZDOOM_EXE_NAME "zdoom" CACHE FILEPATH "Name of the executable to create." )
+set( ZDOOM_EXE_NAME "gzdoom" CACHE FILEPATH "Name of the executable to create" )
 
 if( "${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" )
 	set( PROFILE 0 CACHE BOOL "Enable profiling with gprof for Debug and RelWithDebInfo build types." )
@@ -142,6 +142,8 @@ add_subdirectory( game-music-emu )
 add_subdirectory( dumb )
 add_subdirectory( gdtoa )
 add_subdirectory( wadsrc )
+add_subdirectory( wadsrc_bm )
+add_subdirectory( wadsrc_lights )
 add_subdirectory( src )
 
 if( NOT WIN32 AND NOT APPLE )
