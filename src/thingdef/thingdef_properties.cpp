@@ -433,7 +433,7 @@ DEFINE_PROPERTY(skip_super, 0, Actor)
 		return;
 	}
 
-	memcpy (defaults, GetDefault<AActor>(), sizeof(AActor));
+	memcpy ((void *)defaults, (void *)GetDefault<AActor>(), sizeof(AActor));
 	if (bag.DropItemList != NULL)
 	{
 		FreeDropItemChain (bag.DropItemList);
@@ -1286,7 +1286,8 @@ DEFINE_PROPERTY(clearflags, 0, Actor)
 		defaults->flags3 =
 		defaults->flags4 =
 		defaults->flags5 =
-		defaults->flags6 = 0;
+		defaults->flags6 =
+		defaults->flags7 = 0;
 	defaults->flags2 &= MF2_ARGSDEFINED;	// this flag must not be cleared
 }
 
