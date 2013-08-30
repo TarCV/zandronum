@@ -4250,6 +4250,7 @@ enum EACSFunctions
 	ACSF_SpawnDecal,
 	ACSF_CheckFont,
 	ACSF_DropItem,
+	ACSF_CheckFlag,
 
 	// ZDaemon
 	ACSF_GetTeamScore = 19620,	// (int team)
@@ -5281,6 +5282,16 @@ doplaysound:			if (funcIndex == ACSF_PlayActorSound)
 					}
 				}
 				return cnt;
+			}
+			break;
+		}
+
+		case ACSF_CheckFlag:
+		{
+			AActor *actor = SingleActorFromTID(args[0], activator);
+			if (actor != NULL)
+			{
+				return !!CheckActorFlag(actor, FBehavior::StaticLookupString(args[1]));
 			}
 			break;
 		}
