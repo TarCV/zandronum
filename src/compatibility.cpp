@@ -98,6 +98,9 @@ static FCompatOption Options[] =
 	{ "sectorsounds",			COMPATF_SECTORSOUNDS, 0 },
 	{ "missileclip",			COMPATF_MISSILECLIP, 0 },
 	{ "crossdropoff",			COMPATF_CROSSDROPOFF, 0 },
+	{ "wallrun",				COMPATF_WALLRUN, 0 },		// [GZ] Added for CC MAP29
+	{ "anybossdeath",			COMPATF_ANYBOSSDEATH, 0},	// [GZ] Added for UAC_DEAD
+	{ "mushroom",				COMPATF_MUSHROOM, 0},
 	{ NULL, 0, 0 }
 };
 

@@ -4,7 +4,8 @@
 #include "doomtype.h"
 #include "v_palette.h"
 #include "tarray.h"
-#include "gl_values.h"
+#include "gl/old_renderer/gl1_values.h"
+#include "gl/old_renderer/gl1_texture.h"
 #include "textures/textures.h"
 
 struct vertex_t;
@@ -15,46 +16,11 @@ struct subsector_t;
 struct sector_t;
 struct FGLSection;
 
+namespace GLRendererOld
+{
 extern DWORD gl_fixedcolormap;
-class FGLTexture;
+}
 
-struct GL_RECT
-{
-	float left,top;
-	float width,height;
-
-
-	void Offset(float xofs,float yofs)
-	{
-		left+=xofs;
-		top+=yofs;
-	}
-	void Scale(float xfac,float yfac)
-	{
-		left*=xfac;
-		width*=xfac;
-		top*=yfac;
-		height*=yfac;
-	}
-	void Scale(fixed_t xfac,fixed_t yfac)
-	{
-		Scale(xfac/(float)FRACUNIT,yfac/(float)FRACUNIT);
-	}
-};
-
-
-struct GL_IRECT
-{
-	int left,top;
-	int width,height;
-
-
-	void Offset(int xofs,int yofs)
-	{
-		left+=xofs;
-		top+=yofs;
-	}
-};
 
 
   // for internal use
@@ -81,7 +47,7 @@ struct FColormap
 	void GetFixedColormap()
 	{
 		Clear();
-		LightColor.a = gl_fixedcolormap<CM_LIMIT? gl_fixedcolormap:CM_DEFAULT;
+		LightColor.a = GLRendererOld::gl_fixedcolormap<CM_LIMIT? GLRendererOld::gl_fixedcolormap:CM_DEFAULT;
 	}
 
 	FColormap & operator=(FDynamicColormap * from)
@@ -99,13 +65,6 @@ struct FColormap
 		LightColor.a = from->Desaturate>>3;
 		blendfactor = from->Color.a;
 	}
-};
-
-struct GLVertex
-{
-	float x,z,y;	// world coordinates
-	float u,v;		// texture coordinates
-	vertex_t * vt;	// real vertex
 };
 
 typedef struct
@@ -126,7 +85,7 @@ struct GLSkyInfo
 {
 	float x_offset[2];
 	float y_offset;		// doubleskies don't have a y-offset
-	FGLTexture * texture[2];
+	GLRendererOld::FGLTexture * texture[2];
 	FTextureID skytexno1;
 	bool mirrored;
 	bool doublesky;
@@ -149,51 +108,5 @@ struct GLSectorStackInfo
 	fixed_t deltaz;
 	bool isupper;	
 };
-
-
-extern TArray<GLVertex> gl_vertices;
-
-struct FGLSectionLine
-{
-	vertex_t *start;
-	vertex_t *end;
-	side_t *sidedef;
-	line_t *linedef;
-	seg_t *refseg;			// we need to reference at least one seg for each line.
-	subsector_t *polysub;	// If this is part of a polyobject we need a reference to the containing subsector
-	int otherside;
-};
-
-struct FGLSectionLoop
-{
-	int startline;
-	int numlines;
-
-	FGLSectionLine *GetLine(int no);
-};
-
-struct FGLSection
-{
-	sector_t *sector;
-	TArray<subsector_t *> subsectors;
-	int startloop;
-	int numloops;
-
-	FGLSectionLoop *GetLoop(int no);
-};
-
-extern TArray<FGLSectionLine> SectionLines;
-extern TArray<FGLSectionLoop> SectionLoops;
-extern TArray<FGLSection> Sections;
-
-inline FGLSectionLine *FGLSectionLoop::GetLine(int no)
-{
-	return &SectionLines[startline + no];
-}
-
-inline FGLSectionLoop *FGLSection::GetLoop(int no)
-{
-	return &SectionLoops[startloop + no];
-}
 
 #endif

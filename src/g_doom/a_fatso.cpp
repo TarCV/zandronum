@@ -50,8 +50,8 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FatAttack1)
 	{
 		missile->angle += FATSPREAD;
 		an = missile->angle >> ANGLETOFINESHIFT;
-		missile->momx = FixedMul (missile->Speed, finecosine[an]);
-		missile->momy = FixedMul (missile->Speed, finesine[an]);
+		missile->velx = FixedMul (missile->Speed, finecosine[an]);
+		missile->vely = FixedMul (missile->Speed, finesine[an]);
 
 		// [BC] If we're the server, tell clients to spawn the missile.
 		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
@@ -86,8 +86,8 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FatAttack2)
 	{
 		missile->angle -= FATSPREAD*2;
 		an = missile->angle >> ANGLETOFINESHIFT;
-		missile->momx = FixedMul (missile->Speed, finecosine[an]);
-		missile->momy = FixedMul (missile->Speed, finesine[an]);
+		missile->velx = FixedMul (missile->Speed, finecosine[an]);
+		missile->vely = FixedMul (missile->Speed, finesine[an]);
 
 		// [BC] If we're the server, tell clients to spawn the missile.
 		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
@@ -115,8 +115,8 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FatAttack3)
 	{
 		missile->angle -= FATSPREAD/2;
 		an = missile->angle >> ANGLETOFINESHIFT;
-		missile->momx = FixedMul (missile->Speed, finecosine[an]);
-		missile->momy = FixedMul (missile->Speed, finesine[an]);
+		missile->velx = FixedMul (missile->Speed, finecosine[an]);
+		missile->vely = FixedMul (missile->Speed, finesine[an]);
 
 		// [BC] If we're the server, tell clients to spawn the missile.
 		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
@@ -128,8 +128,8 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FatAttack3)
 	{
 		missile->angle += FATSPREAD/2;
 		an = missile->angle >> ANGLETOFINESHIFT;
-		missile->momx = FixedMul (missile->Speed, finecosine[an]);
-		missile->momy = FixedMul (missile->Speed, finesine[an]);
+		missile->velx = FixedMul (missile->Speed, finecosine[an]);
+		missile->vely = FixedMul (missile->Speed, finesine[an]);
 
 		// [BC] If we're the server, tell clients to spawn the missile.
 		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
@@ -142,13 +142,16 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FatAttack3)
 // Original idea: Linguica
 //
 
+AActor * P_OldSpawnMissile(AActor * source, AActor * dest, const PClass *type);
+
 DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_Mushroom)
 {
 	int i, j;
 
-	ACTION_PARAM_START(2);
+	ACTION_PARAM_START(3);
 	ACTION_PARAM_CLASS(spawntype, 0);
 	ACTION_PARAM_INT(n, 1);
+	ACTION_PARAM_INT(flags, 2);
 
 	if (n == 0) n = self->GetMissileDamage (0, 1);
 	if (spawntype == NULL) spawntype = PClass::FindClass("FatShot");
@@ -170,12 +173,19 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_Mushroom)
 			target->x = self->x + (i << FRACBITS); // Aim in many directions from source
 			target->y = self->y + (j << FRACBITS);
 			target->z = self->z + (P_AproxDistance(i,j) << (FRACBITS+2)); // Aim up fairly high
-			mo = P_SpawnMissile (self, target, spawntype); // Launch fireball
+			if (flags == 0 && (self->state->Misc1 == 0 || !(i_compatflags & COMPATF_MUSHROOM)))
+			{
+				mo = P_SpawnMissile (self, target, spawntype); // Launch fireball
+			}
+			else
+			{
+				mo = P_OldSpawnMissile (self, target, spawntype); // Launch fireball
+			}
 			if (mo != NULL)
 			{
-				mo->momx >>= 1;
-				mo->momy >>= 1;				  // Slow it down a bit
-				mo->momz >>= 1;
+				mo->velx >>= 1;
+				mo->vely >>= 1;				  // Slow it down a bit
+				mo->velz >>= 1;
 				mo->flags &= ~MF_NOGRAVITY;   // Make debris fall under gravity
 			}
 		}

@@ -45,12 +45,11 @@
 #include "c_console.h"
 #include "g_game.h"
 #include "gl_models.h"
-#include "gl_texture.h"
-#include "gl_values.h"
-#include "gl_renderstruct.h"
+#include "gl/old_renderer/gl1_texture.h"
+#include "gl/old_renderer/gl1_renderstruct.h"
 #include "doomstat.h"
 #include "g_level.h"
-#include "gl_geometric.h"
+#include "gl/common/glc_geometric.h"
 #include "gl_intern.h"
 
 static inline float GetTimeFloat()
@@ -594,6 +593,9 @@ float gl_RollAgainstAngleHelper ( const AActor *actor )
 	return angleDiff;
 }
 
+namespace GLRendererOld
+{
+
 void gl_RenderModel(GLSprite * spr, int cm)
 {
 	FSpriteModelFrame * smf = spr->modelframe;
@@ -636,9 +638,9 @@ void gl_RenderModel(GLSprite * spr, int cm)
 		// [BB] Workaround for the missing pitch information.
 		else if ( (smf->flags & MDL_PITCHFROMMOMENTUM) )
 		{
-			const double x = static_cast<double>(spr->actor->momx);
-			const double y = static_cast<double>(spr->actor->momy);
-			const double z = static_cast<double>(spr->actor->momz);
+			const double x = static_cast<double>(spr->actor->velx);
+			const double y = static_cast<double>(spr->actor->vely);
+			const double z = static_cast<double>(spr->actor->velz);
 			// [BB] Calculate the pitch using spherical coordinates.
 			const double pitch = atan( z/sqrt(x*x+y*y) ) / M_PI * 180;
 
@@ -699,9 +701,9 @@ void gl_RenderModel(GLSprite * spr, int cm)
 		// [BB] Workaround for the missing pitch information.
 		else if ( (smf->flags & MDL_PITCHFROMMOMENTUM) )
 		{
-			const double x = static_cast<double>(spr->actor->momx);
-			const double y = static_cast<double>(spr->actor->momy);
-			const double z = static_cast<double>(spr->actor->momz);
+			const double x = static_cast<double>(spr->actor->velx);
+			const double y = static_cast<double>(spr->actor->vely);
+			const double z = static_cast<double>(spr->actor->velz);
 			// [BB] Calculate the pitch using spherical coordinates.
 			const double pitch = atan( z/sqrt(x*x+y*y) ) / M_PI * 180;
 
@@ -806,6 +808,8 @@ void gl_RenderHUDModel(pspdef_t *psp, fixed_t ofsx, fixed_t ofsy, int cm)
 	gl.DepthFunc(GL_LESS);
 	if (!( playermo->RenderStyle == LegacyRenderStyles[STYLE_Normal] ))
 		gl.Disable(GL_CULL_FACE);
+}
+
 }
 
 

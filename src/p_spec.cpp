@@ -207,7 +207,7 @@ bool CheckIfExitIsGood (AActor *self, level_info_t *info)
 	     || (( survival ) && ( SURVIVAL_GetState( ) == SURVS_COUNTDOWN ))
 	   )
 	{
-		P_DamageMobj (self, self, self, 1000000, NAME_Exit);
+		P_DamageMobj (self, self, self, TELEFRAG_DAMAGE, NAME_Exit);
 		return false;
 	}
 	// Is this a singleplayer game and the next map is part of the same hub and we're dead?
@@ -876,17 +876,17 @@ CUSTOM_CVAR (Bool, forcewater, false, CVAR_ARCHIVE|CVAR_SERVERINFO)
 
 		for (i = 0; i < numsectors; i++)
 		{
-			if (sectors[i].heightsec &&
-				!(sectors[i].heightsec->MoreFlags & SECF_IGNOREHEIGHTSEC) &&
+			sector_t *hsec = sectors[i].GetHeightSec();
+			if (hsec &&
 				!(sectors[i].heightsec->MoreFlags & SECF_UNDERWATER))
 			{
 				if (self)
 				{
-					sectors[i].heightsec->MoreFlags |= SECF_FORCEDUNDERWATER;
+					hsec->MoreFlags |= SECF_FORCEDUNDERWATER;
 				}
 				else
 				{
-					sectors[i].heightsec->MoreFlags &= ~SECF_FORCEDUNDERWATER;
+					hsec->MoreFlags &= ~SECF_FORCEDUNDERWATER;
 				}
 			}
 		}
@@ -1335,6 +1335,7 @@ void P_SpawnSpecials (void)
 			{
 				sectors[s].heightsec = sec;
 				sec->e->FakeFloor.Sectors.Push(&sectors[s]);
+				sectors[s].AdjustFloorClip();
 			}
 			break;
 
@@ -1898,7 +1899,7 @@ static void P_SpawnScrollers(void)
 // phares 3/12/98: Start of friction effects
 
 // As the player moves, friction is applied by decreasing the x and y
-// momentum values on each tic. By varying the percentage of decrease,
+// velocity values on each tic. By varying the percentage of decrease,
 // we can simulate muddy or icy conditions. In mud, the player slows
 // down faster. In ice, the player slows down more slowly.
 //
@@ -1997,7 +1998,7 @@ void P_SetSectorFriction (int tag, int amount, bool alterFlag)
 	// the move distance is multiplied by 'friction/0x10000', so a
 	// higher friction value actually means 'less friction'.
 
-	// [RH] Twiddled these values so that momentum on ice (with
+	// [RH] Twiddled these values so that velocity on ice (with
 	//		friction 0xf900) is the same as in Heretic/Hexen.
 	if (friction >= ORIG_FRICTION)	// ice
 //		movefactor = ((0x10092 - friction)*(0x70))/0x158;
@@ -2204,8 +2205,8 @@ void DPusher::Tick ()
 					if (m_Source->GetClass()->TypeName == NAME_PointPusher)
 						pushangle += ANG180;    // away
 					pushangle >>= ANGLETOFINESHIFT;
-					thing->momx += FixedMul (speed, finecosine[pushangle]);
-					thing->momy += FixedMul (speed, finesine[pushangle]);
+					thing->velx += FixedMul (speed, finecosine[pushangle]);
+					thing->vely += FixedMul (speed, finesine[pushangle]);
 				}
 			}
 		}
@@ -2229,10 +2230,10 @@ void DPusher::Tick ()
 		if ( thing->player && thing->player->bSpectating )
 			continue;
 
+		sector_t *hsec = sec->GetHeightSec();
 		if (m_Type == p_wind)
 		{
-			if (sec->heightsec == NULL ||
-				sec->heightsec->MoreFlags & SECF_IGNOREHEIGHTSEC)
+			if (hsec == NULL)
 			{ // NOT special water sector
 				if (thing->z > thing->floorz) // above ground
 				{
@@ -2247,7 +2248,7 @@ void DPusher::Tick ()
 			}
 			else // special water sector
 			{
-				ht = sec->heightsec->floorplane.ZatPoint (thing->x, thing->y);
+				ht = hsec->floorplane.ZatPoint (thing->x, thing->y);
 				if (thing->z > ht) // above ground
 				{
 					xspeed = m_Xmag; // full force
@@ -2268,14 +2269,13 @@ void DPusher::Tick ()
 		{
 			const secplane_t *floor;
 
-			if (sec->heightsec == NULL ||
-				(sec->heightsec->MoreFlags & SECF_IGNOREHEIGHTSEC))
+			if (hsec == NULL)
 			{ // NOT special water sector
 				floor = &sec->floorplane;
 			}
 			else
 			{ // special water sector
-				floor = &sec->heightsec->floorplane;
+				floor = &hsec->floorplane;
 			}
 			if (thing->z > floor->ZatPoint (thing->x, thing->y))
 			{ // above ground
@@ -2287,8 +2287,8 @@ void DPusher::Tick ()
 				yspeed = m_Ymag;
 			}
 		}
-		thing->momx += xspeed<<(FRACBITS-PUSH_FACTOR);
-		thing->momy += yspeed<<(FRACBITS-PUSH_FACTOR);
+		thing->velx += xspeed<<(FRACBITS-PUSH_FACTOR);
+		thing->vely += yspeed<<(FRACBITS-PUSH_FACTOR);
 	}
 }
 

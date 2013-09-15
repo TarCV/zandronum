@@ -67,7 +67,6 @@
 #include "r_translate.h"
 #include "a_morph.h"
 #include "colormatcher.h"
-#include "autosegs.h"
 #include "teaminfo.h"
 
 
@@ -150,6 +149,8 @@ void HandleDeprecatedFlags(AActor *defaults, FActorInfo *info, bool set, int ind
 			static_cast<AInventory*>(defaults)->PickupFlash = NULL;
 		}
 		break;
+	case DEPF_INTERHUBSTRIP: // Old system was 0 or 1, so if the flag is cleared, assume 1.
+		static_cast<AInventory*>(defaults)->InterHubAmount = set ? 0 : 1;
 	default:
 		break;	// silence GCC
 	}
@@ -491,6 +492,24 @@ DEFINE_PROPERTY(attacksound, S, Actor)
 //==========================================================================
 //
 //==========================================================================
+DEFINE_PROPERTY(bouncesound, S, Actor)
+{
+	PROP_STRING_PARM(str, 0);
+	defaults->BounceSound = str;
+}
+
+//==========================================================================
+//
+//==========================================================================
+DEFINE_PROPERTY(wallbouncesound, S, Actor)
+{
+	PROP_STRING_PARM(str, 0);
+	defaults->WallBounceSound = str;
+}
+
+//==========================================================================
+//
+//==========================================================================
 DEFINE_PROPERTY(painsound, S, Actor)
 {
 	PROP_STRING_PARM(str, 0);
@@ -727,6 +746,15 @@ DEFINE_PROPERTY(missileheight, F, Actor)
 //==========================================================================
 //
 //==========================================================================
+DEFINE_PROPERTY(pushfactor, F, Actor)
+{
+	PROP_FIXED_PARM(id, 0);
+	defaults->pushfactor = id;
+}
+
+//==========================================================================
+//
+//==========================================================================
 DEFINE_PROPERTY(translation, L, Actor)
 {
 	PROP_INT_PARM(type, 0);
@@ -956,7 +984,7 @@ DEFINE_PROPERTY(cameraheight, F, Actor)
 DEFINE_PROPERTY(vspeed, F, Actor)
 {
 	PROP_FIXED_PARM(i, 0);
-	defaults->momz = i;
+	defaults->velz = i;
 }
 
 //==========================================================================
@@ -985,8 +1013,12 @@ DEFINE_PROPERTY(species, S, Actor)
 //==========================================================================
 DEFINE_PROPERTY(clearflags, 0, Actor)
 {
-	defaults->flags=defaults->flags3=defaults->flags4=defaults->flags5=0;
-	defaults->flags2&=MF2_ARGSDEFINED;	// this flag must not be cleared
+	defaults->flags =
+		defaults->flags3 =
+		defaults->flags4 =
+		defaults->flags5 =
+		defaults->flags6 = 0;
+	defaults->flags2 &= MF2_ARGSDEFINED;	// this flag must not be cleared
 
 	// [BC] Also zero out ST's flags.
 	defaults->ulSTFlags = 0;
@@ -1237,6 +1269,15 @@ DEFINE_CLASS_PROPERTY(icon, S, Inventory)
 //==========================================================================
 //
 //==========================================================================
+DEFINE_CLASS_PROPERTY(interhubamount, I, Inventory)
+{
+	PROP_INT_PARM(i, 0);
+	defaults->InterHubAmount = i;
+}
+
+//==========================================================================
+//
+//==========================================================================
 DEFINE_CLASS_PROPERTY(maxamount, I, Inventory)
 {
 	PROP_INT_PARM(i, 0);
@@ -1262,15 +1303,6 @@ DEFINE_CLASS_PROPERTY(pickupflash, S, Inventory)
 }
 
 //==========================================================================
-// [BC]
-//==========================================================================
-DEFINE_CLASS_PROPERTY(pickupannouncerentry, S, Inventory)
-{
-	PROP_STRING_PARM(str, 0);
-	sprintf( defaults->szPickupAnnouncerEntry, "%s", str );
-}
-
-//==========================================================================
 //
 //==========================================================================
 DEFINE_CLASS_PROPERTY(pickupmessage, S, Inventory)
@@ -1289,6 +1321,16 @@ DEFINE_CLASS_PROPERTY(pickupsound, S, Inventory)
 }
 
 //==========================================================================
+// Dummy for Skulltag compatibility...
+//==========================================================================
+DEFINE_CLASS_PROPERTY(pickupannouncerentry, S, Inventory)
+{
+	PROP_STRING_PARM(str, 0);
+	// [BB] Not a dummy in Zandronum.
+	sprintf( defaults->szPickupAnnouncerEntry, "%s", str );
+}
+
+//==========================================================================
 //
 //==========================================================================
 DEFINE_CLASS_PROPERTY(respawntics, I, Inventory)
@@ -1304,24 +1346,6 @@ DEFINE_CLASS_PROPERTY(usesound, S, Inventory)
 {
 	PROP_STRING_PARM(str, 0);
 	defaults->UseSound = str;
-}
-
-//==========================================================================
-//
-//==========================================================================
-DEFINE_CLASS_PROPERTY(bouncesound, S, Inventory)
-{
-	PROP_STRING_PARM(str, 0);
-	defaults->BounceSound = str;
-}
-
-//==========================================================================
-//
-//==========================================================================
-DEFINE_CLASS_PROPERTY(wallbouncesound, S, Inventory)
-{
-	PROP_STRING_PARM(str, 0);
-	defaults->WallBounceSound = str;
 }
 
 //==========================================================================
@@ -1617,6 +1641,11 @@ DEFINE_CLASS_PROPERTY_PREFIX(powerup, color, C_f, Inventory)
 			*pBlendColor = GREENCOLOR;
 			return;
 		}
+		else if (!stricmp(name, "BLUEMAP"))
+		{
+			*pBlendColor = BLUECOLOR;
+			return;
+		}
 
 		color = V_GetColor(NULL, name);
 	}
@@ -1649,7 +1678,7 @@ DEFINE_CLASS_PROPERTY_PREFIX(powerup, duration, I, Inventory)
 	}
 	else
 	{
-		I_Error("\"powerup.color\" requires an actor of type \"Powerup\"\n");
+		I_Error("\"powerup.duration\" requires an actor of type \"Powerup\"\n");
 		return;
 	}
 
@@ -1660,10 +1689,49 @@ DEFINE_CLASS_PROPERTY_PREFIX(powerup, duration, I, Inventory)
 //==========================================================================
 //
 //==========================================================================
-DEFINE_CLASS_PROPERTY_PREFIX(powerup, mode, S, PowerupGiver)
+DEFINE_CLASS_PROPERTY_PREFIX(powerup, strength, F, Inventory)
+{
+	fixed_t *pStrength;
+
+	if (info->Class->IsDescendantOf(RUNTIME_CLASS(APowerup)))
+	{
+		pStrength = &((APowerup*)defaults)->Strength;
+	}
+	else if (info->Class->IsDescendantOf(RUNTIME_CLASS(APowerupGiver)))
+	{
+		pStrength = &((APowerupGiver*)defaults)->Strength;
+	}
+	else
+	{
+		I_Error("\"powerup.strength\" requires an actor of type \"Powerup\"\n");
+		return;
+	}
+	// Puts a percent value in the 0.0..1.0 range
+	PROP_FIXED_PARM(f, 0);
+	*pStrength = f / 100;
+}
+
+//==========================================================================
+//
+//==========================================================================
+DEFINE_CLASS_PROPERTY_PREFIX(powerup, mode, S, Inventory)
 {
 	PROP_STRING_PARM(str, 0);
-	defaults->mode = (FName)str;
+	FName *pMode;
+	if (info->Class->IsDescendantOf(RUNTIME_CLASS(APowerup)))
+	{
+		pMode = &((APowerup*)defaults)->Mode;
+	}
+	else if (info->Class->IsDescendantOf(RUNTIME_CLASS(APowerupGiver)))
+	{
+		pMode = &((APowerupGiver*)defaults)->Mode;
+	}
+	else
+	{
+		I_Error("\"powerup.mode\" requires an actor of type \"Powerup\"\n");
+		return;
+	}
+	*pMode = (FName)str;
 }
 
 //==========================================================================
@@ -1880,6 +1948,15 @@ DEFINE_CLASS_PROPERTY_PREFIX(player, maxhealth, I, PlayerPawn)
 //==========================================================================
 //
 //==========================================================================
+DEFINE_CLASS_PROPERTY_PREFIX(player, mugshotmaxhealth, I, PlayerPawn)
+{
+	PROP_INT_PARM(z, 0);
+	defaults->MugShotMaxHealth = z;
+}
+
+//==========================================================================
+//
+//==========================================================================
 DEFINE_CLASS_PROPERTY_PREFIX(player, runhealth, I, PlayerPawn)
 {
 	PROP_INT_PARM(z, 0);
@@ -1935,9 +2012,7 @@ DEFINE_CLASS_PROPERTY_PREFIX(player, crouchsprite, S, PlayerPawn)
 DEFINE_CLASS_PROPERTY_PREFIX(player, damagescreencolor, C, PlayerPawn)
 {
 	PROP_COLOR_PARM(c, 0);
-	defaults->RedDamageFade = RPART (c);
-	defaults->GreenDamageFade = GPART (c);
-	defaults->BlueDamageFade = BPART (c);
+	defaults->DamageFade = c;
 }
 
 //==========================================================================

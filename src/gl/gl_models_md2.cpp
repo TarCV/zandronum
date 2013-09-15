@@ -43,15 +43,15 @@
 #include "sc_man.h"
 #include "m_crc32.h"
 #include "gl_models.h"
-#include "gl_texture.h"
-#include "gl_values.h"
-#include "gl_renderstruct.h"
-#include "gl/gl_shader.h"
+#include "gl/old_renderer/gl1_texture.h"
+#include "gl/old_renderer/gl1_renderstruct.h"
+#include "gl/old_renderer/gl1_shader.h"
 
 static float   avertexnormals[NUMVERTEXNORMALS][3] = {
 #include "tab_anorms.h"
 };
 
+using namespace GLRendererOld;
 
 //===========================================================================
 //
@@ -328,7 +328,7 @@ void FDMDModel::RenderFrame(FTexture * skin, int frameno, int cm, Matrix3x4 *mod
 	/*
 	if(info.numLODs > 1 && rend_model_lod != 0)
 	{
-	float   lodFactor = rend_model_lod * screen->Width() / 640.0f / (currentFoV / 90.0f);
+	float   lodFactor = rend_model_lod * screen->Width() / 640.0f / (GLRenderer->mCurrentFoV / 90.0f);
 	if(lodFactor) lodFactor = 1 / lodFactor;
 
 	// Determine the LOD we will be using.

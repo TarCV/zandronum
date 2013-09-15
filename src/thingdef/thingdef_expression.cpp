@@ -49,7 +49,6 @@
 #include "p_lnspec.h"
 #include "doomstat.h"
 #include "thingdef_exp.h"
-#include "autosegs.h"
 
 int testglobalvar = 1337;	// just for having one global variable to test with
 DEFINE_GLOBAL_VARIABLE(testglobalvar)
@@ -69,9 +68,12 @@ DEFINE_MEMBER_VARIABLE(waterlevel, AActor)
 DEFINE_MEMBER_VARIABLE(x, AActor)
 DEFINE_MEMBER_VARIABLE(y, AActor)
 DEFINE_MEMBER_VARIABLE(z, AActor)
-DEFINE_MEMBER_VARIABLE(momx, AActor)
-DEFINE_MEMBER_VARIABLE(momy, AActor)
-DEFINE_MEMBER_VARIABLE(momz, AActor)
+DEFINE_MEMBER_VARIABLE(velx, AActor)
+DEFINE_MEMBER_VARIABLE(vely, AActor)
+DEFINE_MEMBER_VARIABLE(velz, AActor)
+DEFINE_MEMBER_VARIABLE_ALIAS(momx, velx, AActor)
+DEFINE_MEMBER_VARIABLE_ALIAS(momy, vely, AActor)
+DEFINE_MEMBER_VARIABLE_ALIAS(momz, velz, AActor)
 DEFINE_MEMBER_VARIABLE(Damage, AActor)
 
 //==========================================================================
@@ -2807,7 +2809,7 @@ int FStateExpressions::ResolveAll()
 		if (expressions[i].cloned)
 		{
 			// Now that everything coming before has been resolved we may copy the actual pointer.
-			intptr_t ii = ((intptr_t)expressions[i].expr);
+			unsigned ii = unsigned((intptr_t)expressions[i].expr);
 			expressions[i].expr = expressions[ii].expr;
 		}
 		else if (expressions[i].expr != NULL)

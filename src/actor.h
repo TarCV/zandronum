@@ -257,12 +257,12 @@ enum
 	MF4_LOOKALLAROUND	= 0x00010000,	// Monster has eyes in the back of its head
 	MF4_STANDSTILL		= 0x00020000,	// Monster should not chase targets unless attacked?
 	MF4_SPECTRAL		= 0x00040000,
-	MF4_SCROLLMOVE		= 0x00080000,	// momentum has been applied by a scroller
+	MF4_SCROLLMOVE		= 0x00080000,	// velocity has been applied by a scroller
 	MF4_NOSPLASHALERT	= 0x00100000,	// Splashes don't alert this monster
 	MF4_SYNCHRONIZED	= 0x00200000,	// For actors spawned at load-time only: Do not randomize tics
 	MF4_NOTARGETSWITCH	= 0x00400000,	// monster never switches target until current one is dead
 	MF4_VFRICTION		= 0x00800000,	// Internal flag used by A_PainAttack to push a monster down
-	MF4_DONTHURTSPECIES	= 0x01000000,	// Don't hurt one's own kind with explosions (hitscans, too?)
+	MF4_DONTHARMCLASS	= 0x01000000,	// Don't hurt one's own kind with explosions (hitscans, too?)
 	MF4_SHIELDREFLECT	= 0x02000000,
 	MF4_DEFLECT			= 0x04000000,	// different projectile reflection styles
 	MF4_ALLOWPARTICLES	= 0x08000000,	// this puff type can be replaced by particles
@@ -308,6 +308,12 @@ enum
 	MF6_NOBOSSRIP		= 0x00000001,	// For rippermissiles: Don't rip through bosses.
 	MF6_THRUSPECIES		= 0x00000002,	// Actors passes through other of the same species.
 	MF6_MTHRUSPECIES	= 0x00000004,	// Missile passes through actors of its shooter's species.
+	MF6_FORCEPAIN		= 0x00000008,	// forces target into painstate (unless it has the NOPAIN flag)
+	MF6_NOFEAR			= 0x00000010,	// Not scared of frightening players
+	MF6_BUMPSPECIAL		= 0x00000020,	// Actor executes its special when being collided (as the ST flag)
+	MF6_DONTHARMSPECIES = 0x00000040,	// Don't hurt one's own species with explosions (hitscans, too?)
+	MF6_STEPMISSILE		= 0x00000080,	// Missile can "walk" up steps
+	MF6_NOTELEFRAG		= 0x00000100,	// [HW] Actor can't be telefragged
 
 	// [BC] More object flags for Skulltag.
 
@@ -327,7 +333,7 @@ enum
 	//STFL_IMPALE			= 0x00000010,
 
 	// Execute this object's special when a players bumps into it.
-	STFL_BUMPSPECIAL	= 0x00000020,
+	//STFL_BUMPSPECIAL	= 0x00000020,
 
 	// *** THE FOLLOWING FLAGS ARE IDENTIFERS FOR BOTS ***
 	// ... eh, there's probably a better way to do this.
@@ -736,6 +742,9 @@ public:
 	// Die. Now.
 	virtual bool Massacre ();
 
+	// Transforms the actor into a finely-ground paste
+	bool Grind(bool items);
+
 	// Is the other actor on my team?
 	bool IsTeammate (AActor *other);
 
@@ -750,6 +759,9 @@ public:
 	
 	// Enter the crash state
 	void Crash();
+
+	// Return starting health adjusted by skill level
+	int SpawnHealth();
 
 	// Check for monsters that count as kill but excludes all friendlies.
 	bool CountsAsKill() const
@@ -796,7 +808,7 @@ public:
 	FTextureID		ceilingpic;			// contacted sec ceilingpic
 	fixed_t			radius, height;		// for movement checking
 	fixed_t			projectilepassheight;	// height for clipping projectile movement against this actor
-	fixed_t			momx, momy, momz;	// momentums
+	fixed_t			velx, vely, velz;	// velocity
 	SDWORD			tics;				// state tic counter
 	FState			*state;
 	SDWORD			Damage;			// For missiles and monster railgun
@@ -870,6 +882,8 @@ public:
 	int				bouncecount;	// Strife's grenades only bounce twice before exploding
 	fixed_t			gravity;		// [GRB] Gravity factor
 	int 			FastChaseStrafeCount;
+	fixed_t			pushfactor;
+	int				lastpush;
 	int				DesignatedTeam;	// Allow for friendly fire cacluations to be done on non-players.
 
 	AActor			*BlockingMobj;	// Actor that blocked the last move

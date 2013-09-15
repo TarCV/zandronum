@@ -60,7 +60,6 @@
 #include "gamemode.h"
 
 
-extern FTexture *CrosshairImage;
 extern fixed_t globaluclip, globaldclip;
 
 
@@ -421,9 +420,9 @@ void R_InitSpriteDefs ()
 	for (i = 0; i < max; ++i)
 	{
 		FTexture *tex = TexMan.ByIndex(i);
-		if (tex->UseType == FTexture::TEX_Sprite && strlen (tex->Name) >= 6)
+		if (tex->UseType == FTexture::TEX_Sprite && strlen(tex->Name) >= 6)
 		{
-			DWORD bucket = *(DWORD *)tex->Name % max;
+			DWORD bucket = tex->dwName % max;
 			hashes[i].Next = hashes[bucket].Head;
 			hashes[bucket].Head = i;
 		}
@@ -439,14 +438,14 @@ void R_InitSpriteDefs ()
 		}
 				
 		maxframe = -1;
-		intname = *(DWORD *)sprites[i].name;
+		intname = sprites[i].dwName;
 
 		// scan the lumps, filling in the frames for whatever is found
 		int hash = hashes[intname % max].Head;
 		while (hash != -1)
 		{
 			FTexture *tex = TexMan[hash];
-			if (*(DWORD *)tex->Name == intname)
+			if (tex->dwName == intname)
 			{
 				R_InstallSpriteLump (FTextureID(hash), tex->Name[4] - 'A', tex->Name[5], false);
 
@@ -827,7 +826,7 @@ void R_InitSkins (void)
 				{
 					char name[9];
 					Wads.GetLumpName (name, base+1);
-					intname = *(DWORD *)name;
+					memcpy(&intname, name, 4);
 				}
 
 				int basens = Wads.GetLumpNamespace(base);
@@ -867,8 +866,10 @@ void R_InitSkins (void)
 							continue;
 
 						char lname[9];
+						DWORD lnameint;
 						Wads.GetLumpName( lname, k );
-						if ( *(DWORD *)lname == intname )
+						memcpy(&lnameint, lname, 4);
+						if (lnameint == intname)
 						{
 							FTextureID picnum = TexMan.CreateTexture(k, FTexture::TEX_SkinSprite);
 							if (!picnum.isValid())
@@ -1692,14 +1693,9 @@ void R_ProjectSprite (AActor *thing, int fakeside, F3DFloor *fakefloor, F3DFloor
 	// from the viewer, by either water or fake ceilings
 	// killough 4/11/98: improve sprite clipping for underwater/fake ceilings
 
-	heightsec = thing->Sector->heightsec;
+	heightsec = thing->Sector->GetHeightSec();
 
-	if (heightsec != NULL && heightsec->MoreFlags & SECF_IGNOREHEIGHTSEC)
-	{
-		heightsec = NULL;
-	}
-
-	if (heightsec)	// only clip things which are in special sectors
+	if (heightsec != NULL)	// only clip things which are in special sectors
 	{
 		if (fakeside == FAKED_AboveCeiling)
 		{
@@ -2904,7 +2900,7 @@ void R_FindParticleSubsectors ()
 	for (WORD i = ActiveParticles; i != NO_PARTICLE; i = Particles[i].tnext)
 	{
 		subsector_t *ssec = R_PointInSubsector (Particles[i].x, Particles[i].y);
-		int ssnum = ssec-subsectors;
+		int ssnum = int(ssec-subsectors);
 		Particles[i].subsector = ssec;
 		Particles[i].snext = ParticlesInSubsec[ssnum];
 		ParticlesInSubsec[ssnum] = i;
@@ -2976,12 +2972,7 @@ void R_ProjectParticle (particle_t *particle, const sector_t *sector, int shade,
 		return;
 
 	// Clip particles above the ceiling or below the floor.
-	heightsec = sector->heightsec;
-
-	if (heightsec != NULL && heightsec->MoreFlags & SECF_IGNOREHEIGHTSEC)
-	{
-		heightsec = NULL;
-	}
+	heightsec = sector->GetHeightSec();
 
 	const secplane_t *topplane;
 	const secplane_t *botplane;

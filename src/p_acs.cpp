@@ -3081,7 +3081,7 @@ int DLevelScript::GetActorProperty (int tid, int property)
 							}
 							else
 							{
-								return actor->GetDefault()->health;
+								return actor->SpawnHealth();
 							}
 
 	case APROP_JumpZ:		if (actor->IsKindOf (RUNTIME_CLASS (APlayerPawn)))
@@ -3381,9 +3381,9 @@ enum EACSFunctions
 	ACSF_GetSectorUDMFFixed,
 	ACSF_GetSideUDMFInt,
 	ACSF_GetSideUDMFFixed,
-	ACSF_GetActorMomX,
-	ACSF_GetActorMomY,
-	ACSF_GetActorMomZ,
+	ACSF_GetActorVelX,
+	ACSF_GetActorVelY,
+	ACSF_GetActorVelZ,
 	ACSF_SetActivator,
 	ACSF_SetActivatorToTarget,
 	ACSF_GetActorViewHeight,
@@ -3469,17 +3469,17 @@ int DLevelScript::CallFunction(int argCount, int funcIndex, SDWORD *args)
 		case ACSF_GetSideUDMFFixed:
 			return GetUDMFFixed(UDMF_Side, SideFromID(args[0], args[1]), FBehavior::StaticLookupString(args[2]));
 
-		case ACSF_GetActorMomX:
+		case ACSF_GetActorVelX:
 			actor = SingleActorFromTID(args[0], activator);
-			return actor != NULL? actor->momx : 0;
+			return actor != NULL? actor->velx : 0;
 
-		case ACSF_GetActorMomY:
+		case ACSF_GetActorVelY:
 			actor = SingleActorFromTID(args[0], activator);
-			return actor != NULL? actor->momy : 0;
+			return actor != NULL? actor->vely : 0;
 
-		case ACSF_GetActorMomZ:
+		case ACSF_GetActorVelZ:
 			actor = SingleActorFromTID(args[0], activator);
-			return actor != NULL? actor->momz : 0;
+			return actor != NULL? actor->velz : 0;
 
 		case ACSF_SetActivator:
 			activator = SingleActorFromTID(args[0], NULL);
@@ -7314,6 +7314,11 @@ DLevelScript::DLevelScript (AActor *who, line_t *where, int num, const ScriptPtr
 
 	Link ();
 
+	if (level.flags2 & LEVEL2_HEXENHACK)
+	{
+		PutLast();
+	}
+
 	DPrintf ("Script %d started.\n", num);
 }
 
@@ -7567,7 +7572,7 @@ bool ACS_IsScriptClientSide( const ScriptPtr *pScriptData )
 		return ( false );
 
 	// [BB] Some existing maps rely on Skulltag's old net script handling.
-	if ( ( pScriptData->Flags & SCRIPTF_Net ) && ( compatflags2 & COMPATF2_NETSCRIPTS_ARE_CLIENTSIDE ) )
+	if ( ( pScriptData->Flags & SCRIPTF_Net ) && ( zacompatflags & ZACOMPATF_NETSCRIPTS_ARE_CLIENTSIDE ) )
 		return ( true );
 
 	if ( pScriptData->Flags & SCRIPTF_ClientSide )

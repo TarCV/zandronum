@@ -1,10 +1,41 @@
 
 
 #include "gl/gl_include.h"
+#include "c_cvars.h"
+#include "c_dispatch.h"
 #include "m_menu.h"
 #include "v_video.h"
 #include "gl/gl_intern.h"
+#include "gl/common/glc_renderer.h"
 #include "version.h"
+
+// GL related CVARs
+CVAR(Bool, gl_portals, true, 0)
+CVAR(Bool, gl_noquery, false, 0)
+
+CUSTOM_CVAR(Int, r_mirror_recursions,4,CVAR_GLOBALCONFIG|CVAR_ARCHIVE)
+{
+	if (self<0) self=0;
+	if (self>10) self=10;
+}
+bool gl_plane_reflection_i;	// This is needed in a header that cannot include the CVAR stuff...
+CUSTOM_CVAR(Bool, gl_plane_reflection, true, CVAR_GLOBALCONFIG|CVAR_ARCHIVE)
+{
+	gl_plane_reflection_i = self;
+}
+
+CVAR(Bool,gl_mirrors,true,0)	// This is for debugging only!
+CVAR(Bool,gl_mirror_envmap, true, CVAR_GLOBALCONFIG|CVAR_ARCHIVE)
+CVAR(Bool, gl_render_segs, false, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+CVAR(Bool, gl_seamless, false, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+CVAR(Bool, gl_fakecontrast, true, CVAR_ARCHIVE|CVAR_GLOBALCONFIG|CVAR_NOINITCALL)
+
+CUSTOM_CVAR(Bool, gl_render_precise, false, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+{
+	gl_render_segs=self;
+	gl_seamless=self;
+}
+
 
 
 extern value_t YesNo[2];
@@ -30,7 +61,6 @@ EXTERN_CVAR (Bool, vid_vsync)
 EXTERN_CVAR(Int, gl_spriteclip)
 EXTERN_CVAR(Int, gl_lightmode)
 EXTERN_CVAR(Bool, gl_blendcolormaps)
-EXTERN_CVAR(Bool, gl_texture_usehires)
 EXTERN_CVAR(Bool, gl_precache)
 EXTERN_CVAR(Bool, gl_render_precise)
 EXTERN_CVAR(Bool, gl_sprite_blend)

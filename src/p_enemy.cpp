@@ -72,7 +72,7 @@ static FRandom pr_slook ("SlooK");
 static FRandom pr_skiptarget("SkipTarget");
 
 // movement interpolation is fine for objects that are moved by their own
-// momentum. But for monsters it is problematic.
+// velocity. But for monsters it is problematic.
 // 1. They don't move every tic
 // 2. Their animation is not designed for movement interpolation
 // The result is that they tend to 'glide' across the floor
@@ -482,8 +482,8 @@ bool P_Move (AActor *actor)
 		actor->x = origx;
 		actor->y = origy;
 		movefactor *= FRACUNIT / ORIG_FRICTION_FACTOR / 4;
-		actor->momx += FixedMul (deltax, movefactor);
-		actor->momy += FixedMul (deltay, movefactor);
+		actor->velx += FixedMul (deltax, movefactor);
+		actor->vely += FixedMul (deltay, movefactor);
 	}
 
 	if (!try_ok)
@@ -813,11 +813,14 @@ void P_NewChaseDir(AActor * actor)
 		deltax = actor->target->x - actor->x;
 		deltay = actor->target->y - actor->y;
 
-		if ((actor->target->player != NULL && (actor->target->player->cheats & CF_FRIGHTENING)) || 
-			(actor->flags4 & MF4_FRIGHTENED))
+		if (!(actor->flags6 & MF6_NOFEAR))
 		{
-			deltax = -deltax;
-			deltay = -deltay;
+			if ((actor->target->player != NULL && (actor->target->player->cheats & CF_FRIGHTENING)) || 
+				(actor->flags4 & MF4_FRIGHTENED))
+			{
+				deltax = -deltax;
+				deltay = -deltay;
+			}
 		}
 	}
 	else
@@ -923,7 +926,7 @@ void P_RandomChaseDir (AActor *actor)
 		// [BB] Don't try to head towards a spectator.
 		if ( (actor->FriendPlayer != 0 ) && ( players[actor->FriendPlayer - 1].bSpectating == false ) )
 		{
-			player = players[actor->FriendPlayer - 1].mo;
+			player = players[i = actor->FriendPlayer - 1].mo;
 		}
 		else
 		{
@@ -939,89 +942,89 @@ void P_RandomChaseDir (AActor *actor)
 			}
 			player = players[i].mo;
 		}
-
-		// [BB] It's possible that player == NULL. For instance this happens,
-		// if a player uses summonfriend online and leaves the server afterwards.
-		// [BB] The else block above possibly selects a spectating player. In that case
-		// don't try to move towards the spectator. This is not exactly the same as
-		// skipping spectators in the above loop, but should work well enough.
-		if ( player && (pr_newchasedir() & 1 || !P_CheckSight (actor, player))
-			&& player->player && ( player->player->bSpectating == false ) )
+		if (player != NULL && playeringame[i])
 		{
-			deltax = player->x - actor->x;
-			deltay = player->y - actor->y;
-
-			if (deltax>128*FRACUNIT)
-				d[1]= DI_EAST;
-			else if (deltax<-128*FRACUNIT)
-				d[1]= DI_WEST;
-			else
-				d[1]=DI_NODIR;
-
-			if (deltay<-128*FRACUNIT)
-				d[2]= DI_SOUTH;
-			else if (deltay>128*FRACUNIT)
-				d[2]= DI_NORTH;
-			else
-				d[2]=DI_NODIR;
-
-			// try direct route
-			if (d[1] != DI_NODIR && d[2] != DI_NODIR)
+			// [BB] The else block above possibly selects a spectating player. In that case
+			// don't try to move towards the spectator. This is not exactly the same as
+			// skipping spectators in the above loop, but should work well enough.
+			if ((pr_newchasedir() & 1 || !P_CheckSight (actor, player))
+				&& player->player && ( player->player->bSpectating == false ) )
 			{
-				actor->movedir = diags[((deltay<0)<<1) + (deltax>0)];
-				if (actor->movedir != turnaround && P_TryWalk(actor))
+				deltax = player->x - actor->x;
+				deltay = player->y - actor->y;
+
+				if (deltax>128*FRACUNIT)
+					d[1]= DI_EAST;
+				else if (deltax<-128*FRACUNIT)
+					d[1]= DI_WEST;
+				else
+					d[1]=DI_NODIR;
+
+				if (deltay<-128*FRACUNIT)
+					d[2]= DI_SOUTH;
+				else if (deltay>128*FRACUNIT)
+					d[2]= DI_NORTH;
+				else
+					d[2]=DI_NODIR;
+
+				// try direct route
+				if (d[1] != DI_NODIR && d[2] != DI_NODIR)
 				{
-					// [BC] Set the thing's movement direction. Also, update the thing's
-					// position.
-					if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					actor->movedir = diags[((deltay<0)<<1) + (deltax>0)];
+					if (actor->movedir != turnaround && P_TryWalk(actor))
 					{
-						SERVERCOMMANDS_MoveThing( actor, CM_X|CM_Y|CM_Z|CM_MOVEDIR );
+						// [BC] Set the thing's movement direction. Also, update the thing's
+						// position.
+						if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+						{
+							SERVERCOMMANDS_MoveThing( actor, CM_X|CM_Y|CM_Z|CM_MOVEDIR );
+						}
+						return;
 					}
-					return;
 				}
-			}
 
-			// try other directions
-			if (pr_newchasedir() > 200 || abs(deltay) > abs(deltax))
-			{
-				swap (d[1], d[2]);
-			}
-
-			if (d[1] == turnaround)
-				d[1] = DI_NODIR;
-			if (d[2] == turnaround)
-				d[2] = DI_NODIR;
-				
-			if (d[1] != DI_NODIR)
-			{
-				actor->movedir = d[1];
-				if (P_TryWalk (actor))
+				// try other directions
+				if (pr_newchasedir() > 200 || abs(deltay) > abs(deltax))
 				{
-					// [BC] Set the thing's movement direction. Also, update the thing's
-					// position.
-					if ( NETWORK_GetState( ) == NETSTATE_SERVER )
-					{
-						SERVERCOMMANDS_MoveThing( actor, CM_X|CM_Y|CM_Z|CM_MOVEDIR );
-					}
-
-					// either moved forward or attacked
-					return;
+					swap (d[1], d[2]);
 				}
-			}
 
-			if (d[2] != DI_NODIR)
-			{
-				actor->movedir = d[2];
-				if (P_TryWalk (actor))
+				if (d[1] == turnaround)
+					d[1] = DI_NODIR;
+				if (d[2] == turnaround)
+					d[2] = DI_NODIR;
+					
+				if (d[1] != DI_NODIR)
 				{
-					// [BC] Set the thing's movement direction. Also, update the thing's
-					// position.
-					if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					actor->movedir = d[1];
+					if (P_TryWalk (actor))
 					{
-						SERVERCOMMANDS_MoveThing( actor, CM_X|CM_Y|CM_Z|CM_MOVEDIR );
-					}
+						// [BC] Set the thing's movement direction. Also, update the thing's
+						// position.
+						if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+						{
+							SERVERCOMMANDS_MoveThing( actor, CM_X|CM_Y|CM_Z|CM_MOVEDIR );
+						}
 
-					return;
+						// either moved forward or attacked
+						return;
+					}
+				}
+
+				if (d[2] != DI_NODIR)
+				{
+					actor->movedir = d[2];
+					if (P_TryWalk (actor))
+					{
+						// [BC] Set the thing's movement direction. Also, update the thing's
+						// position.
+						if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+						{
+							SERVERCOMMANDS_MoveThing( actor, CM_X|CM_Y|CM_Z|CM_MOVEDIR );
+						}
+
+						return;
+					}
 				}
 			}
 		}
@@ -1448,7 +1451,7 @@ AActor *LookForEnemiesInBlock (AActor *lookee, int index)
 		{
 			AActor *targ = other->target;
 			if (targ && targ->target == other && pr_skiptarget() > 100 && lookee->IsFriend (targ) &&
-				targ->health*2 >= targ->GetDefault()->health)
+				targ->health*2 >= targ->SpawnHealth())
 			{
 				continue;
 			}
@@ -1607,7 +1610,7 @@ bool P_LookForPlayers (AActor *actor, INTBOOL allaround)
 		}
 
 		// [BB] We have to make sure that P_Random (the old RNG from Doom) is not used here
-		// (it is called by M_Random() if COMPATF2_OLD_RANDOM_GENERATOR) since it never
+		// (it is called by M_Random() if ZACOMPATF_OLD_RANDOM_GENERATOR) since it never
 		// returns a few of the integers in [0,255] causing this while loop to never terminate.
 		pnum = M_Random( MAXPLAYERS );
 		if ( abSearched[pnum] == true )
@@ -1679,7 +1682,7 @@ bool P_LookForPlayers (AActor *actor, INTBOOL allaround)
 		{
 			if ((P_AproxDistance (player->mo->x - actor->x,
 					player->mo->y - actor->y) > 2*MELEERANGE)
-				&& P_AproxDistance (player->mo->momx, player->mo->momy)
+				&& P_AproxDistance (player->mo->velx, player->mo->vely)
 				< 5*FRACUNIT)
 			{ // Player is sneaking - can't detect
 				return false;
@@ -2281,8 +2284,8 @@ void A_DoChase (AActor *actor, bool fastchase, FState *meleestate, FState *missi
 		else
 		{
 			actor->FastChaseStrafeCount = 0;
-			actor->momx = 0;
-			actor->momy = 0;
+			actor->velx = 0;
+			actor->vely = 0;
 			fixed_t dist = P_AproxDistance (actor->x - actor->target->x, actor->y - actor->target->y);
 			if (dist < CLASS_BOSS_STRAFE_RANGE)
 			{
@@ -2291,8 +2294,8 @@ void A_DoChase (AActor *actor, bool fastchase, FState *meleestate, FState *missi
 					angle_t ang = R_PointToAngle2(actor->x, actor->y, actor->target->x, actor->target->y);
 					if (pr_chase() < 128) ang += ANGLE_90;
 					else ang -= ANGLE_90;
-					actor->momx = 13 * finecosine[ang>>ANGLETOFINESHIFT];
-					actor->momy = 13 * finesine[ang>>ANGLETOFINESHIFT];
+					actor->velx = 13 * finecosine[ang>>ANGLETOFINESHIFT];
+					actor->vely = 13 * finesine[ang>>ANGLETOFINESHIFT];
 					actor->FastChaseStrafeCount = 3;		// strafe time
 
 					// [Dusk] Update the strafecount to the clients. It is necessary
@@ -2514,7 +2517,7 @@ static bool P_CheckForResurrection(AActor *self, bool usevilestates)
 				 abs(corpsehit-> y - viletryy) > maxdist )
 				continue;			// not actually touching
 
-			corpsehit->momx = corpsehit->momy = 0;
+			corpsehit->velx = corpsehit->vely = 0;
 			// [RH] Check against real height and radius
 
 			fixed_t oldheight = corpsehit->height;
@@ -2777,8 +2780,8 @@ DEFINE_ACTION_FUNCTION(AActor, A_MonsterRail)
 	// Let the aim trail behind the player
 	self->angle = R_PointToAngle2 (self->x,
 									self->y,
-									self->target->x - self->target->momx * 3,
-									self->target->y - self->target->momy * 3);
+									self->target->x - self->target->velx * 3,
+									self->target->y - self->target->vely * 3);
 
 	if (self->target->flags & MF_SHADOW)
     {
@@ -2994,14 +2997,14 @@ void P_TossItem (AActor *item)
 	
 	if (style==2)
 	{
-		item->momx += pr_dropitem.Random2(7) << FRACBITS;
-		item->momy += pr_dropitem.Random2(7) << FRACBITS;
+		item->velx += pr_dropitem.Random2(7) << FRACBITS;
+		item->vely += pr_dropitem.Random2(7) << FRACBITS;
 	}
 	else
 	{
-		item->momx = pr_dropitem.Random2() << 8;
-		item->momy = pr_dropitem.Random2() << 8;
-		item->momz = FRACUNIT*5 + (pr_dropitem() << 10);
+		item->velx = pr_dropitem.Random2() << 8;
+		item->vely = pr_dropitem.Random2() << 8;
+		item->velz = FRACUNIT*5 + (pr_dropitem() << 10);
 	}
 }
 
@@ -3177,7 +3180,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_BossDeath)
 						LEVEL_SORCERER2SPECIAL)) == 0)
 		return;
 
-	if (
+	if ((i_compatflags & COMPATF_ANYBOSSDEATH) || ( // [GZ] Added for UAC_DEAD
 		((level.flags & LEVEL_MAP07SPECIAL) && (type == NAME_Fatso || type == NAME_Arachnotron)) ||
 		((level.flags & LEVEL_BRUISERSPECIAL) && (type == NAME_BaronOfHell)) ||
 		((level.flags & LEVEL_CYBORGSPECIAL) && (type == NAME_Cyberdemon)) ||
@@ -3185,7 +3188,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_BossDeath)
 		((level.flags & LEVEL_HEADSPECIAL) && (type == NAME_Ironlich)) ||
 		((level.flags & LEVEL_MINOTAURSPECIAL) && (type == NAME_Minotaur)) ||
 		((level.flags & LEVEL_SORCERER2SPECIAL) && (type == NAME_Sorcerer2))
-	   )
+	   ))
 		;
 	else
 		return;

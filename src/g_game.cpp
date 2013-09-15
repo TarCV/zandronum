@@ -44,6 +44,7 @@
 #include "m_random.h"
 #include "m_crc32.h"
 #include "i_system.h"
+#include "i_input.h"
 #include "p_saveg.h"
 #include "p_tick.h"
 #include "d_main.h"
@@ -77,6 +78,7 @@
 #include "d_net.h"
 #include "d_event.h"
 #include "p_acs.h"
+#include "m_joy.h"
 // [BB] New #includes.
 #include "network.h"
 #include "chat.h"
@@ -368,7 +370,7 @@ CCMD(crouch)
 CCMD (land)
 {
 	// [BB] Landing is not allowed, so don't do anything.
-	if ( compatflags2 & COMPATF2_NO_LAND )
+	if ( zacompatflags & ZACOMPATF_NO_LAND )
 		return;
 
 	SendLand = true;
@@ -677,6 +679,18 @@ CCMD (select)
 	who->player->inventorytics = 5*TICRATE;
 }
 
+static inline int joyint(double val)
+{
+	if (val >= 0)
+	{
+		return int(ceil(val));
+	}
+	else
+	{
+		return int(floor(val));
+	}
+}
+
 //
 // G_BuildTiccmd
 // Builds a ticcmd from all of the available inputs
@@ -796,22 +810,39 @@ void G_BuildTiccmd (ticcmd_t *cmd)
 	if (Button_MoveUp.bDown)		cmd->ucmd.buttons |= BT_MOVEUP;
 	if (Button_ShowScores.bDown)	cmd->ucmd.buttons |= BT_SHOWSCORES;
 
-	// [RH] Scale joystick moves to full range of allowed speeds
-	if (JoyAxes[JOYAXIS_PITCH] != 0)
+	// Handle joysticks/game controllers.
+	float joyaxes[NUM_JOYAXIS];
+
+	I_GetAxes(joyaxes);
+
+	// Remap some axes depending on button state.
+	if (Button_Strafe.bDown || (Button_Mlook.bDown && lookstrafe))
 	{
-		G_AddViewPitch (int((JoyAxes[JOYAXIS_PITCH] * 2048) / 256));
+		joyaxes[JOYAXIS_Side] = joyaxes[JOYAXIS_Yaw];
+		joyaxes[JOYAXIS_Yaw] = 0;
+	}
+	if (Button_Mlook.bDown)
+	{
+		joyaxes[JOYAXIS_Pitch] = joyaxes[JOYAXIS_Forward];
+		joyaxes[JOYAXIS_Forward] = 0;
+	}
+
+	if (joyaxes[JOYAXIS_Pitch] != 0)
+	{
+		G_AddViewPitch(joyint(joyaxes[JOYAXIS_Pitch] * 2048));
 		LocalKeyboardTurner = true;
 	}
-	if (JoyAxes[JOYAXIS_YAW] != 0)
+	if (joyaxes[JOYAXIS_Yaw] != 0)
 	{
-		G_AddViewAngle (int((-1280 * JoyAxes[JOYAXIS_YAW]) / 256));
+		G_AddViewAngle(joyint(-1280 * joyaxes[JOYAXIS_Yaw]));
 		LocalKeyboardTurner = true;
 	}
 
-	side += int((MAXPLMOVE * JoyAxes[JOYAXIS_SIDE]) / 256);
-	forward += int((JoyAxes[JOYAXIS_FORWARD] * MAXPLMOVE) / 256);
-	fly += int(JoyAxes[JOYAXIS_UP] * 8);
+	side -= joyint(sidemove[speed] * joyaxes[JOYAXIS_Side]);
+	forward += joyint(joyaxes[JOYAXIS_Forward] * forwardmove[speed]);
+	fly += joyint(joyaxes[JOYAXIS_Up] * 2048);
 
+	// Handle mice.
 	if (!Button_Mlook.bDown && !freelook)
 	{
 		forward += (int)((float)mousey * m_forward);
@@ -830,6 +861,7 @@ void G_BuildTiccmd (ticcmd_t *cmd)
 
 	mousex = mousey = 0;
 
+	// Build command.
 	if (forward > MAXPLMOVE)
 		forward = MAXPLMOVE;
 	else if (forward < -MAXPLMOVE)
@@ -1007,7 +1039,7 @@ static void ChangeSpy (bool forward)
 	}
 
 	// Otherwise, cycle to the next player.
-	int pnum = players[consoleplayer].camera->player - players;
+	int pnum = int(players[consoleplayer].camera->player - players);
 	int step = forward ? 1 : -1;
 
 	// [SP] Let's ignore special LMS settigns if we're playing a demo. Otherwise, we need to enforce
@@ -1222,7 +1254,7 @@ bool G_Responder (event_t *ev)
 				stricmp (cmd, "bumpgamma") &&
 				stricmp (cmd, "screenshot")))
 			{
-				M_StartControlPanel (true);
+				M_StartControlPanel (true, true);
 				return true;
 			}
 			else
@@ -1901,7 +1933,8 @@ void G_PlayerFinishLevel (int player, EFinishLevelType mode, bool resetinventory
 		next = item->Inventory;
 		if (item->IsKindOf (RUNTIME_CLASS(APowerup)))
 		{
-			if (deathmatch || mode != FINISH_SameHub || !(item->ItemFlags & IF_HUBPOWER))
+			if (deathmatch || ((mode != FINISH_SameHub || !(item->ItemFlags & IF_HUBPOWER))
+				&& !(item->ItemFlags & IF_PERSISTENTPOWER))) // Keep persistent powers in non-deathmatch games
 			{
 				item->Destroy ();
 			}
@@ -1932,7 +1965,7 @@ void G_PlayerFinishLevel (int player, EFinishLevelType mode, bool resetinventory
 		while (item != NULL)
 		{
 			next = item->Inventory;
-			if (item->ItemFlags & IF_INTERHUBSTRIP)
+			if (item->InterHubAmount < 1)
 			{
 				item->Destroy ();
 			}
@@ -1941,14 +1974,13 @@ void G_PlayerFinishLevel (int player, EFinishLevelType mode, bool resetinventory
 	}
 
 	if (mode == FINISH_NoHub && !(level.flags2 & LEVEL2_KEEPFULLINVENTORY))
-	{ // Reduce all owned (visible) inventory to 1 item each
+	{ // Reduce all owned (visible) inventory to defined maximum interhub amount
 		for (item = p->mo->Inventory; item != NULL; item = item->Inventory)
 		{
-			// There may be depletable items with an amount of 0.
-			// Those need to stay at 0; the rest get dropped to 1.
-			if (item->ItemFlags & IF_INVBAR && item->Amount > 1)
+			// If the player is carrying more samples of an item than allowed, reduce amount accordingly
+			if (item->ItemFlags & IF_INVBAR && item->Amount > item->InterHubAmount)
 			{
-				item->Amount = 1;
+				item->Amount = item->InterHubAmount;
 			}
 		}
 	}
@@ -3211,7 +3243,7 @@ void GAME_ResetMap( bool bRunEnterScripts )
 	GAMEMODE_ResetSpecalGamemodeStates();
 
 	// [BB] If a PowerTimeFreezer was in effect, the sound could be paused. Make sure that it is resumed.
-	S_ResumeSound();
+	S_ResumeSound( false );
 
 	// [BB] We are going to reset the map now, so any request for a reset is fulfilled.
 	g_bResetMap = false;
@@ -4985,7 +5017,7 @@ bool G_ProcessIFFDemo (char *mapname)
 	if (uncompSize > 0)
 	{
 		BYTE *uncompressed = new BYTE[uncompSize];
-		int r = uncompress (uncompressed, &uncompSize, demo_p, zdembodyend - demo_p);
+		int r = uncompress (uncompressed, &uncompSize, demo_p, uLong(zdembodyend - demo_p));
 		if (r != Z_OK)
 		{
 			Printf ("Could not decompress demo!\n");
@@ -5175,7 +5207,7 @@ bool G_CheckDemoStatus (void)
 			// a compressed version. If the BODY successfully compresses, the
 			// contents of the COMP chunk will be changed to indicate the
 			// uncompressed size of the BODY.
-			uLong len = demo_p - demobodyspot;
+			uLong len = uLong(demo_p - demobodyspot);
 			uLong outlen = (len + len/100 + 12);
 			Byte *compressed = new Byte[outlen];
 			int r = compress2 (compressed, &outlen, demobodyspot, len, 9);
@@ -5190,9 +5222,9 @@ bool G_CheckDemoStatus (void)
 		}
 		FinishChunk (&demo_p);
 		formlen = demobuffer + 4;
-		WriteLong (demo_p - demobuffer - 8, &formlen);
+		WriteLong (int(demo_p - demobuffer - 8), &formlen);
 
-		M_WriteFile (demoname, demobuffer, demo_p - demobuffer); 
+		M_WriteFile (demoname, demobuffer, int(demo_p - demobuffer)); 
 		M_Free (demobuffer); 
 		demorecording = false;
 		stoprecording = false;

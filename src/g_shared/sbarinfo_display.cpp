@@ -96,20 +96,6 @@ enum
 
 ////////////////////////////////////////////////////////////////////////////////
 
-SBarInfoCoordinate::SBarInfoCoordinate(int coord, bool relCenter) :
-	value(coord), relCenter(relCenter)
-{
-}
-
-SBarInfoCoordinate::SBarInfoCoordinate(int value)
-{
-	relCenter = ((value & REL_CENTER) != 0);
-	if(value < 0)
-		this->value = (value | REL_CENTER);
-	else
-		this->value = (value & (~REL_CENTER));
-}
-
 SBarInfoCoordinate &SBarInfoCoordinate::Add(int add)
 {
 	value += add;
@@ -274,10 +260,13 @@ void DSBarInfo::Draw (EHudState state)
 	{
 		hud = STBAR_NONE;
 	}
+	bool oldhud_scale = hud_scale;
 	if(script->huds[hud].forceScaled) //scale the statusbar
 	{
 		SetScaled(true, true);
 		setsizeneeded = true;
+		if(script->huds[hud].fullScreenOffsets)
+			hud_scale = true;
 	}
 	doCommands(script->huds[hud], 0, 0, script->huds[hud].alpha);
 	if(CPlayer->inventorytics > 0 && !(level.flags & LEVEL_NOINVENTORYBAR))
@@ -310,6 +299,8 @@ void DSBarInfo::Draw (EHudState state)
 		doCommands(script->huds[popbar], script->popups[currentPopup-1].getXOffset(), script->popups[currentPopup-1].getYOffset(),
 			script->popups[currentPopup-1].getAlpha(script->huds[popbar].alpha));
 	}
+	if(script->huds[hud].forceScaled && script->huds[hud].fullScreenOffsets)
+		hud_scale = oldhud_scale;
 }
 
 void DSBarInfo::NewGame ()
@@ -733,6 +724,13 @@ void DSBarInfo::doCommands(SBarInfoBlock &block, int xOffset, int yOffset, int a
 						value = 0;
 					}
 				}
+				else if(cmd.flags & DRAWNUMBER_AIRTIME)
+				{
+					if(CPlayer->mo->waterlevel < 3)
+						value = level.airsupply/TICRATE;
+					else
+						value = clamp<int>((CPlayer->air_finished - level.time + (TICRATE-1))/TICRATE, 0, INT_MAX);
+				}
 				bool fillzeros = !!(cmd.flags & DRAWNUMBER_FILLZEROS);
 				bool drawshadow = !!(cmd.flags & DRAWNUMBER_DRAWSHADOW);
 				EColorRange translation = cmd.translation;
@@ -776,7 +774,7 @@ void DSBarInfo::doCommands(SBarInfoBlock &block, int xOffset, int yOffset, int a
 						{
 							drawingFont = cmd.font;
 						}
-						DrawNumber(CPlayer->mo->InvSel->Amount, 3, cmd.special2, cmd.special3, xOffset, yOffset, alpha, block.fullScreenOffsets, cmd.translation, cmd.special4, false, !!(cmd.flags & DRAWSELECTEDINVENTORY_DRAWSHADOW));
+						DrawNumber(CPlayer->mo->InvSel->Amount, 3, cmd.sbcoord2, cmd.sbcoord3, xOffset, yOffset, alpha, block.fullScreenOffsets, cmd.translation, cmd.special4, false, !!(cmd.flags & DRAWSELECTEDINVENTORY_DRAWSHADOW));
 					}
 				}
 				else if((cmd.flags & DRAWSELECTEDINVENTORY_ALTERNATEONEMPTY))
@@ -805,7 +803,7 @@ void DSBarInfo::doCommands(SBarInfoBlock &block, int xOffset, int yOffset, int a
 				{
 					drawingFont = cmd.font;
 				}
-				DrawInventoryBar(cmd.special, cmd.value, cmd.x, cmd.y, xOffset, yOffset, alpha, block.fullScreenOffsets, alwaysshow, cmd.special2, cmd.special3, cmd.translation, artibox, noarrows, alwaysshowcounter, bgalpha);
+				DrawInventoryBar(cmd.special, cmd.value, cmd.x, cmd.y, xOffset, yOffset, alpha, block.fullScreenOffsets, alwaysshow, cmd.sbcoord2, cmd.sbcoord3, cmd.translation, artibox, noarrows, alwaysshowcounter, bgalpha);
 				break;
 			}
 			case SBARINFO_DRAWBAR:
@@ -948,6 +946,11 @@ void DSBarInfo::doCommands(SBarInfoBlock &block, int xOffset, int yOffset, int a
 						else
 							max = powerupGiver->EffectTics + 1;
 					}
+				}
+				else if(cmd.flags & DRAWNUMBER_AIRTIME)
+				{
+					value = clamp<int>(CPlayer->air_finished - level.time, 0, INT_MAX);
+					max = level.airsupply;
 				}
 				if(cmd.special3 != 0)
 					value = max - value; //invert since the new drawing method requires drawing the bg on the fg.
@@ -1219,8 +1222,8 @@ void DSBarInfo::doCommands(SBarInfoBlock &block, int xOffset, int yOffset, int a
 						int tmpX = *x;
 						int tmpY = *y;
 						screen->VirtualToRealCoordsInt(tmpX, tmpY, w, h, 320, 200, true);
-						x = tmpX;
-						y = tmpY;
+						x.SetCoord(tmpX);
+						y.SetCoord(tmpY);
 					}
 				}
 				else

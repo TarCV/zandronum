@@ -382,7 +382,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_PlaySoundEx)
 			return;
 	}
 
-	int attenuation;
+	float attenuation;
 	switch (attenuation_raw)
 	{
 		case -1: attenuation = ATTN_STATIC;	break; // drop off rapidly
@@ -745,11 +745,12 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_Explode)
 		return;
 	}
 
-	ACTION_PARAM_START(4);
+	ACTION_PARAM_START(5);
 	ACTION_PARAM_INT(damage, 0);
 	ACTION_PARAM_INT(distance, 1);
 	ACTION_PARAM_BOOL(hurtSource, 2);
 	ACTION_PARAM_BOOL(alert, 3);
+	ACTION_PARAM_INT(fulldmgdistance, 4);
 
 	if (damage < 0)	// get parameters from metadata
 	{
@@ -763,7 +764,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_Explode)
 		if (distance <= 0) distance = damage;
 	}
 
-	P_RadiusAttack (self, self->target, damage, distance, self->DamageType, hurtSource);
+	P_RadiusAttack (self, self->target, damage, distance, self->DamageType, hurtSource, true, fulldmgdistance);
 	if (self->z <= self->floorz + (distance<<FRACBITS))
 	{
 		P_HitFloor (self);
@@ -915,17 +916,17 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomMissile)
 				self->y-=y;
 
 				// It is not necessary to use the correct angle here.
-				// The only important thing is that the horizontal momentum is correct.
+				// The only important thing is that the horizontal velocity is correct.
 				// Therefore use 0 as the missile's angle and simplify the calculations accordingly.
-				// The actual momentum vector is set below.
+				// The actual velocity vector is set below.
 				if (missile)
 				{
 					fixed_t vx = finecosine[pitch>>ANGLETOFINESHIFT];
 					fixed_t vz = finesine[pitch>>ANGLETOFINESHIFT];
 
-					missile->momx = FixedMul (vx, missile->Speed);
-					missile->momy = 0;
-					missile->momz = FixedMul (vz, missile->Speed);
+					missile->velx = FixedMul (vx, missile->Speed);
+					missile->vely = 0;
+					missile->velz = FixedMul (vz, missile->Speed);
 				}
 
 				break;
@@ -933,17 +934,17 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomMissile)
 
 			if (missile)
 			{
-				// Use the actual momentum instead of the missile's Speed property
+				// Use the actual velocity instead of the missile's Speed property
 				// so that this can handle missiles with a high vertical velocity 
 				// component properly.
-				FVector3 velocity (missile->momx, missile->momy, 0);
+				FVector3 velocity (missile->velx, missile->vely, 0);
 
 				fixed_t missilespeed = (fixed_t)velocity.Length();
 
 				missile->angle += Angle;
 				ang = missile->angle >> ANGLETOFINESHIFT;
-				missile->momx = FixedMul (missilespeed, finecosine[ang]);
-				missile->momy = FixedMul (missilespeed, finesine[ang]);
+				missile->velx = FixedMul (missilespeed, finecosine[ang]);
+				missile->vely = FixedMul (missilespeed, finesine[ang]);
 	
 				// handle projectile shooting projectiles - track the
 				// links back to a real owner
@@ -1408,12 +1409,12 @@ void A_FireCustomMissileHelper ( AActor * self,
 		{
 			// This original implementation is to aim straight ahead and then offset
 			// the angle from the resulting direction. 
-			FVector3 velocity(misl->momx, misl->momy, 0);
+			FVector3 velocity(misl->velx, misl->vely, 0);
 			fixed_t missilespeed = (fixed_t)velocity.Length();
 			misl->angle += Angle;
 			angle_t an = misl->angle >> ANGLETOFINESHIFT;
-			misl->momx = FixedMul (missilespeed, finecosine[an]);
-			misl->momy = FixedMul (missilespeed, finesine[an]);
+			misl->velx = FixedMul (missilespeed, finecosine[an]);
+			misl->vely = FixedMul (missilespeed, finesine[an]);
 		}
 		if (misl->flags4&MF4_SPECTRAL) misl->health=-1;
 
@@ -1485,12 +1486,12 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FireCustomMissile)
 			{
 				// This original implementation is to aim straight ahead and then offset
 				// the angle from the resulting direction. 
-				FVector3 velocity(misl->momx, misl->momy, 0);
+				FVector3 velocity(misl->velx, misl->vely, 0);
 				fixed_t missilespeed = (fixed_t)velocity.Length();
 				misl->angle += Angle;
 				angle_t an = misl->angle >> ANGLETOFINESHIFT;
-				misl->momx = FixedMul (missilespeed, finecosine[an]);
-				misl->momy = FixedMul (missilespeed, finesine[an]);
+				misl->velx = FixedMul (missilespeed, finecosine[an]);
+				misl->vely = FixedMul (missilespeed, finesine[an]);
 			}
 
 			// [BC] If we're the server, tell clients to spawn this missile.
@@ -1581,6 +1582,12 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomPunch)
 }
 
 
+enum
+{	
+	RAF_SILENT = 1,
+	RAF_NOPIERCE = 2
+};
+
 //==========================================================================
 //
 // customizable railgun attack function
@@ -1594,9 +1601,9 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_RailAttack)
 	ACTION_PARAM_BOOL(UseAmmo, 2);
 	ACTION_PARAM_COLOR(Color1, 3);
 	ACTION_PARAM_COLOR(Color2, 4);
-	ACTION_PARAM_BOOL(Silent, 5);
+	ACTION_PARAM_INT(Flags, 5);
 	ACTION_PARAM_FLOAT(MaxDiff, 6);
-	ACTION_PARAM_CLASS(PuffType, 7);
+	ACTION_PARAM_CLASS(PuffType, 7);	
 
 	if (!self->player) return;
 
@@ -1617,7 +1624,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_RailAttack)
 			return;
 	}
 
-	P_RailAttackWithPossibleSpread (self, Damage, Spawnofs_XY, Color1, Color2, MaxDiff, Silent, PuffType);
+	P_RailAttackWithPossibleSpread (self, Damage, Spawnofs_XY, Color1, Color2, MaxDiff, (Flags & RAF_SILENT), PuffType, (!(Flags & RAF_NOPIERCE)));
 }
 
 //==========================================================================
@@ -1639,7 +1646,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomRailgun)
 	ACTION_PARAM_INT(Spawnofs_XY, 1);
 	ACTION_PARAM_COLOR(Color1, 2);
 	ACTION_PARAM_COLOR(Color2, 3);
-	ACTION_PARAM_BOOL(Silent, 4);
+	ACTION_PARAM_INT(Flags, 4);
 	ACTION_PARAM_INT(aim, 5);
 	ACTION_PARAM_FLOAT(MaxDiff, 6);
 	ACTION_PARAM_CLASS(PuffType, 7);
@@ -1677,8 +1684,8 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomRailgun)
 	if (aim)
 	{
 		saved_angle = self->angle = R_PointToAngle2 (self->x, self->y,
-										self->target->x - self->target->momx * 3,
-										self->target->y - self->target->momy * 3);
+										self->target->x - self->target->velx * 3,
+										self->target->y - self->target->vely * 3);
 
 		if (aim == CRF_AIMDIRECT)
 		{
@@ -1688,8 +1695,8 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomRailgun)
 			self->y += Spawnofs_XY * finesine[self->angle];
 			Spawnofs_XY = 0;
 			self->angle = R_PointToAngle2 (self->x, self->y,
-											self->target->x - self->target->momx * 3,
-											self->target->y - self->target->momy * 3);
+											self->target->x - self->target->velx * 3,
+											self->target->y - self->target->vely * 3);
 		}
 
 		if (self->target->flags & MF_SHADOW)
@@ -1702,7 +1709,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomRailgun)
 
 	angle_t angle = (self->angle - ANG90) >> ANGLETOFINESHIFT;
 
-	P_RailAttackWithPossibleSpread (self, Damage, Spawnofs_XY, Color1, Color2, MaxDiff, Silent, PuffType);
+	P_RailAttackWithPossibleSpread (self, Damage, Spawnofs_XY, Color1, Color2, MaxDiff, (Flags & RAF_SILENT), PuffType, (!(Flags & RAF_NOPIERCE)));
 
 	self->x = saved_x;
 	self->y = saved_y;
@@ -1884,7 +1891,7 @@ enum SIX_Flags
 	SIXF_TRANSFERTRANSLATION=1,
 	SIXF_ABSOLUTEPOSITION=2,
 	SIXF_ABSOLUTEANGLE=4,
-	SIXF_ABSOLUTEMOMENTUM=8,
+	SIXF_ABSOLUTEVELOCITY=8,
 	SIXF_SETMASTER=16,
 	SIXF_NOCHECKPOSITION=32,
 	SIXF_TELEFRAG=64,
@@ -1892,6 +1899,7 @@ enum SIX_Flags
 	SIXF_CLIENTSIDESPAWN=128,
 	SIXF_TRANSFERAMBUSHFLAG=256,
 	SIXF_TRANSFERPITCH=512,
+	SIXF_TRANSFERPOINTERS=1024,
 };
 
 
@@ -1905,6 +1913,12 @@ static bool InitSpawnedItem(AActor *self, AActor *mo, int flags)
 		if ((flags & SIXF_TRANSFERTRANSLATION) && !(mo->flags2 & MF2_DONTTRANSLATE))
 		{
 			mo->Translation = self->Translation;
+		}
+		if (flags & SIXF_TRANSFERPOINTERS)
+		{
+			mo->target = self->target;
+			mo->master = self->master; // This will be overridden later if SIXF_SETMASTER is set
+			mo->tracer = self->tracer;
 		}
 
 		mo->angle=self->angle;
@@ -1945,7 +1959,7 @@ static bool InitSpawnedItem(AActor *self, AActor *mo, int flags)
 				{
 					// A player always spawns a monster friendly to him
 					mo->flags|=MF_FRIENDLY;
-					mo->FriendPlayer = originator->player-players+1;
+					mo->FriendPlayer = int(originator->player-players+1);
 
 					AActor * attacker=originator->player->attacker;
 					if (attacker)
@@ -1960,7 +1974,7 @@ static bool InitSpawnedItem(AActor *self, AActor *mo, int flags)
 				}
 			}
 		}
-		else 
+		else if (!(flags & SIXF_TRANSFERPOINTERS))
 		{
 			// If this is a missile or something else set the target to the originator
 			mo->target=originator? originator : self;
@@ -2055,9 +2069,9 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_SpawnItemEx)
 	ACTION_PARAM_FIXED(xofs, 1);
 	ACTION_PARAM_FIXED(yofs, 2);
 	ACTION_PARAM_FIXED(zofs, 3);
-	ACTION_PARAM_FIXED(xmom, 4);
-	ACTION_PARAM_FIXED(ymom, 5);
-	ACTION_PARAM_FIXED(zmom, 6);
+	ACTION_PARAM_FIXED(xvel, 4);
+	ACTION_PARAM_FIXED(yvel, 5);
+	ACTION_PARAM_FIXED(zvel, 6);
 	ACTION_PARAM_ANGLE(Angle, 7);
 	ACTION_PARAM_INT(flags, 8);
 	ACTION_PARAM_INT(chance, 9);
@@ -2095,28 +2109,29 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_SpawnItemEx)
 		y = self->y + FixedMul(xofs, finesine[ang]) - FixedMul(yofs, finecosine[ang]);
 	}
 
-	if (!(flags & SIXF_ABSOLUTEMOMENTUM))
+	if (!(flags & SIXF_ABSOLUTEVELOCITY))
 	{
 		// Same orientation issue here!
-		fixed_t newxmom = FixedMul(xmom, finecosine[ang]) + FixedMul(ymom, finesine[ang]);
-		ymom = FixedMul(xmom, finesine[ang]) - FixedMul(ymom, finecosine[ang]);
-		xmom = newxmom;
+		fixed_t newxvel = FixedMul(xvel, finecosine[ang]) + FixedMul(yvel, finesine[ang]);
+		yvel = FixedMul(xvel, finesine[ang]) - FixedMul(yvel, finecosine[ang]);
+		xvel = newxvel;
 	}
 
 	// [BB] Should the actor not be spawned, taking in account client side only actors?
 	if ( shouldActorNotBeSpawned ( self, missile, !!( flags & SIXF_CLIENTSIDESPAWN ) ) )
 		return;
 
-	AActor * mo = Spawn( missile, x, y, self->z - self->floorclip + zofs, ALLOW_REPLACE);
+	AActor * mo = Spawn(missile, x, y, self->z - self->floorclip + zofs, ALLOW_REPLACE);
 	bool res = InitSpawnedItem(self, mo, flags);
 	ACTION_SET_RESULT(res);	// for an inventory item's use state
 	if (mo)
 	{
-		mo->momx=xmom;
-		mo->momy=ymom;
-		mo->momz=zmom;
-		mo->angle=Angle;
-		if (flags & SIXF_TRANSFERAMBUSHFLAG) mo->flags = (mo->flags&~MF_AMBUSH) | (self->flags & MF_AMBUSH);
+		mo->velx = xvel;
+		mo->vely = yvel;
+		mo->velz = zvel;
+		mo->angle = Angle;
+		if (flags & SIXF_TRANSFERAMBUSHFLAG)
+			mo->flags = (mo->flags&~MF_AMBUSH) | (self->flags & MF_AMBUSH);
 
 		// [BB] If we're the server and the spawn was not blocked, tell clients to spawn the item
 		if ( res && (NETWORK_GetState( ) == NETSTATE_SERVER) )
@@ -2151,8 +2166,8 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_ThrowGrenade)
 	ACTION_PARAM_START(5);
 	ACTION_PARAM_CLASS(missile, 0);
 	ACTION_PARAM_FIXED(zheight, 1);
-	ACTION_PARAM_FIXED(xymom, 2);
-	ACTION_PARAM_FIXED(zmom, 3);
+	ACTION_PARAM_FIXED(xyvel, 2);
+	ACTION_PARAM_FIXED(zvel, 3);
 	ACTION_PARAM_BOOL(useammo, 4);
 
 	if (missile == NULL) return;
@@ -2184,19 +2199,15 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_ThrowGrenade)
 		int pitch = self->pitch;
 
 		P_PlaySpawnSound(bo, self);
-		if (xymom) bo->Speed=xymom;
-		bo->angle = self->angle+(((pr_grenade()&7)-4)<<24);
-		bo->momz = zmom + 2*finesine[pitch>>ANGLETOFINESHIFT];
+		if (xyvel)
+			bo->Speed = xyvel;
+		bo->angle = self->angle + (((pr_grenade()&7) - 4) << 24);
+		bo->velz = zvel + 2*finesine[pitch>>ANGLETOFINESHIFT];
 		bo->z += 2 * finesine[pitch>>ANGLETOFINESHIFT];
 		P_ThrustMobj(bo, bo->angle, bo->Speed);
-		bo->momx += self->momx>>1;
-		bo->momy += self->momy>>1;
+		bo->velx += self->velx >> 1;
+		bo->vely += self->vely >> 1;
 		bo->target= self;
-		if (bo->flags4&MF4_RANDOMIZE) 
-		{
-			bo->tics -= pr_grenade()&3;
-			if (bo->tics<1) bo->tics=1;
-		}
 
 		// [BC] Tell clients to spawn this missile.
 		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
@@ -2216,7 +2227,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_ThrowGrenade)
 DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_Recoil)
 {
 	ACTION_PARAM_START(1);
-	ACTION_PARAM_FIXED(xymom, 0);
+	ACTION_PARAM_FIXED(xyvel, 0);
 
 	// [BB] For non-player non-clientsideonly actors, this is server side.
 	// Note: I'm not sure whether this should be server side also for players.
@@ -2229,8 +2240,8 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_Recoil)
 
 	angle_t angle = self->angle + ANG180;
 	angle >>= ANGLETOFINESHIFT;
-	self->momx += FixedMul (xymom, finecosine[angle]);
-	self->momy += FixedMul (xymom, finesine[angle]);
+	self->velx += FixedMul (xyvel, finecosine[angle]);
+	self->vely += FixedMul (xyvel, finesine[angle]);
 
 	// [BB] Set the thing's momentum, also resync the position.
 	if ( ( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( self->player == NULL ) )
@@ -2387,9 +2398,10 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FadeIn)
 //===========================================================================
 DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FadeOut)
 {
-	ACTION_PARAM_START(1);
+	ACTION_PARAM_START(2);
 	ACTION_PARAM_FIXED(reduce, 0);
-	
+	ACTION_PARAM_BOOL(remove, 1);
+
 	// [BB] This is handled server-side.
 	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
 		( CLIENTDEMO_IsPlaying( )))
@@ -2415,7 +2427,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FadeOut)
 	}
 
 	// [BB] Only destroy the actor if it's not needed for a map reset. Otherwise just hide it.
-	if (self->alpha<=0)
+	if (self->alpha<=0 && remove)
 	{
 		// [BB] Deleting player bodies is a very bad idea.
 		if ( self->player && ( self->player->mo == self ) )
@@ -2466,9 +2478,9 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_SpawnDebris)
 		if (mo && i < mo->GetClass()->ActorInfo->NumOwnedStates)
 		{
 			mo->SetState (mo->GetClass()->ActorInfo->OwnedStates + i);
-			mo->momz = FixedMul(mult_v, ((pr_spawndebris()&7)+5)*FRACUNIT);
-			mo->momx = FixedMul(mult_h, pr_spawndebris.Random2()<<(FRACBITS-6));
-			mo->momy = FixedMul(mult_h, pr_spawndebris.Random2()<<(FRACBITS-6));
+			mo->velz = FixedMul(mult_v, ((pr_spawndebris()&7)+5)*FRACUNIT);
+			mo->velx = FixedMul(mult_h, pr_spawndebris.Random2()<<(FRACBITS-6));
+			mo->vely = FixedMul(mult_h, pr_spawndebris.Random2()<<(FRACBITS-6));
 		}
 	}
 }
@@ -2506,28 +2518,6 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CheckSight)
 	}
 
 	ACTION_JUMP(jump, false);	// [BC] This is hopefully okay.
-
-}
-
-
-//===========================================================================
-//
-// A_JumpIfTargetInSight
-// jumps if monster can see its target
-//
-//===========================================================================
-DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_JumpIfTargetInSight)
-{
-	ACTION_PARAM_START(1);
-	ACTION_PARAM_STATE(jump, 0);
-
-	// [BB] This is handled by the server.
-	if ( NETWORK_InClientModeAndActorNotClientHandled( self ) )
-		return;
-
-	ACTION_SET_RESULT(false);	// Jumps should never set the result for inventory state chains!
-	if (self->target == NULL || !P_CheckSight(self, self->target,4)) return; 
-	ACTION_JUMP(jump,CLIENTUPDATE_FRAME);	// [BB] Since monsters don't have targets on the client end, we need to send an update.
 
 }
 
@@ -2712,7 +2702,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_Burst)
 
    if (chunk == NULL) return;
 
-   self->momx = self->momy = self->momz = 0;
+   self->velx = self->vely = self->velz = 0;
    self->height = self->GetDefault()->height;
 
    // [RH] In Hexen, this creates a random number of shards (range [24,56])
@@ -2731,9 +2721,9 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_Burst)
 
 	  if (mo)
       {
-         mo->momz = FixedDiv(mo->z-self->z, self->height)<<2;
-         mo->momx = pr_burst.Random2 () << (FRACBITS-7);
-         mo->momy = pr_burst.Random2 () << (FRACBITS-7);
+         mo->velz = FixedDiv(mo->z - self->z, self->height)<<2;
+         mo->velx = pr_burst.Random2 () << (FRACBITS-7);
+         mo->vely = pr_burst.Random2 () << (FRACBITS-7);
          mo->RenderStyle = self->RenderStyle;
          mo->alpha = self->alpha;
 		 mo->CopyFriendliness(self, true);
@@ -2771,19 +2761,50 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CheckFloor)
 
 //===========================================================================
 //
+// A_CheckCeiling
+// [GZ] Totally copied on A_CheckFloor, jumps if actor touches ceiling
+//
+//===========================================================================
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CheckCeiling)
+{
+	ACTION_PARAM_START(1);
+	ACTION_PARAM_STATE(jump, 0);
+
+	ACTION_SET_RESULT(false);
+	if (self->z+self->height >= self->ceilingz) // Height needs to be counted
+	{
+		ACTION_JUMP(jump, false);	// [BB] Clients have ceiling information.
+	}
+
+}
+
+//===========================================================================
+//
 // A_Stop
-// resets all momentum of the actor to 0
+// resets all velocity of the actor to 0
 //
 //===========================================================================
 DEFINE_ACTION_FUNCTION(AActor, A_Stop)
 {
-	self->momx = self->momy = self->momz = 0;
+	self->velx = self->vely = self->velz = 0;
 	if (self->player && self->player->mo == self /*&& !(self->player->cheats & CF_PREDICTING)*/)
 	{
-		self->player->mo->PlayIdle ();
-		self->player->momx = self->player->momy = 0;
+		self->player->mo->PlayIdle();
+		self->player->velx = self->player->vely = 0;
 	}
-	
+}
+
+static void CheckStopped(AActor *self)
+{
+	if (self->player != NULL &&
+		self->player->mo == self &&
+		// [BB] Zandronum handles prediction differently.
+		//!(self->player->cheats & CF_PREDICTING) &&
+		!(self->velx | self->vely | self->velz))
+	{
+		self->player->mo->PlayIdle();
+		self->player->velx = self->player->vely = 0;
+	}
 }
 
 //===========================================================================
@@ -2965,6 +2986,66 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_JumpIfTargetInLOS)
 	// movement prediction.
 	ACTION_JUMP(jump, CLIENTUPDATE_FRAME|( !self->player ? CLIENTUPDATE_POSITION : 0 ));
 }
+
+
+//==========================================================================
+//
+// A_JumpIfInTargetLOS (state label, optional fixed fov, optional bool
+// projectiletarget)
+//
+//==========================================================================
+
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_JumpIfInTargetLOS)
+{
+	ACTION_PARAM_START(3);
+	ACTION_PARAM_STATE(jump, 0);
+	ACTION_PARAM_ANGLE(fov, 1);
+	ACTION_PARAM_BOOL(projtarg, 2);
+
+	angle_t an;
+	AActor *target;
+
+	// [BB] This is handled by the server.
+	if ( NETWORK_InClientModeAndActorNotClientHandled( self ) )
+		return;
+
+	ACTION_SET_RESULT(false);	// Jumps should never set the result for inventory state chains!
+
+	if (self->flags & MF_MISSILE && projtarg)
+	{
+		if (self->flags2 & MF2_SEEKERMISSILE)
+			target = self->tracer;
+		else
+			target = NULL;
+	}
+	else
+	{
+		target = self->target;
+	}
+
+	if (!target) return; // [KS] Let's not call P_CheckSight unnecessarily in this case.
+
+	if (!P_CheckSight (target, self, 1))
+		return;
+
+	if (fov && (fov < ANGLE_MAX))
+	{
+		an = R_PointToAngle2 (self->x,
+							  self->y,
+							  target->x,
+							  target->y)
+			- self->angle;
+
+		if (an > (fov / 2) && an < (ANGLE_MAX - (fov / 2)))
+		{
+			return; // [KS] Outside of FOV - return
+		}
+
+	}
+
+	ACTION_JUMP(jump,CLIENTUPDATE_FRAME);	// [BB] Since monsters don't have targets on the client end, we need to send an update.
+}
+
 
 //===========================================================================
 //
@@ -3270,6 +3351,78 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_RemoveChildren)
 
 //===========================================================================
 // 
+// A_RemoveSiblings
+//
+//===========================================================================
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_RemoveSiblings)
+{
+   TThinkerIterator<AActor> it;
+   AActor * mo;
+   ACTION_PARAM_START(1);
+   ACTION_PARAM_BOOL(removeall,0);
+
+   while ( (mo = it.Next()) )
+   {
+      if ( ( mo->master == self->master ) && ( mo != self ) && ( ( mo->health <= 0 ) || removeall) )
+      {
+		P_RemoveThing(mo);
+      }
+   }
+}
+
+//===========================================================================
+//
+// A_RaiseMaster
+//
+//===========================================================================
+DEFINE_ACTION_FUNCTION(AActor, A_RaiseMaster)
+{
+   if (self->master != NULL)
+   {
+      P_Thing_Raise(self->master);
+   }
+}
+
+//===========================================================================
+//
+// A_RaiseChildren
+//
+//===========================================================================
+DEFINE_ACTION_FUNCTION(AActor, A_RaiseChildren)
+{
+   TThinkerIterator<AActor> it;
+   AActor * mo;
+
+   while ((mo = it.Next()))
+   {
+      if ( mo->master == self )
+      {
+		P_Thing_Raise(mo);
+      }
+   }
+}
+
+//===========================================================================
+//
+// A_RaiseSiblings
+//
+//===========================================================================
+DEFINE_ACTION_FUNCTION(AActor, A_RaiseSiblings)
+{
+   TThinkerIterator<AActor> it;
+   AActor * mo;
+
+   while ( (mo = it.Next()) )
+   {
+      if ( ( mo->master == self->master ) && ( mo != self ) )
+      {
+		P_Thing_Raise(mo);
+      }
+   }
+}
+
+//===========================================================================
+// 
 // [Dusk] A_FaceConsolePlayer
 //
 //===========================================================================
@@ -3373,23 +3526,17 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_ScaleVelocity)
 	ACTION_PARAM_START(1);
 	ACTION_PARAM_FIXED(scale, 0);
 
-	INTBOOL was_moving = self->momx | self->momy | self->momz;
+	INTBOOL was_moving = self->velx | self->vely | self->velz;
 
-	self->momx = FixedMul(self->momx, scale);
-	self->momy = FixedMul(self->momy, scale);
-	self->momz = FixedMul(self->momz, scale);
+	self->velx = FixedMul(self->velx, scale);
+	self->vely = FixedMul(self->vely, scale);
+	self->velz = FixedMul(self->velz, scale);
 
 	// If the actor was previously moving but now is not, and is a player,
 	// update its player variables. (See A_Stop.)
-	if (was_moving &&
-		self->player != NULL &&
-		self->player->mo == self &&
-		// [BB] Zandronum handles prediction differently.
-		//!(self->player->cheats & CF_PREDICTING) &&
-		!(self->momx | self->momy | self->momz))
+	if (was_moving)
 	{
-		self->player->mo->PlayIdle();
-		self->player->momx = self->player->momy = 0;
+		CheckStopped(self);
 	}
 }
 
@@ -3407,6 +3554,8 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_ChangeVelocity)
 	ACTION_PARAM_FIXED(z, 2);
 	ACTION_PARAM_INT(flags, 3);
 
+	INTBOOL was_moving = self->velx | self->vely | self->velz;
+
 	fixed_t vx = x, vy = y, vz = z;
 	fixed_t sina = finesine[self->angle >> ANGLETOFINESHIFT];
 	fixed_t cosa = finecosine[self->angle >> ANGLETOFINESHIFT];
@@ -3418,14 +3567,38 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_ChangeVelocity)
 	}
 	if (flags & 2)	// discard old velocity - replace old velocity with new velocity
 	{
-		self->momx = vx;
-		self->momy = vy;
-		self->momz = vz;
+		self->velx = vx;
+		self->vely = vy;
+		self->velz = vz;
 	}
 	else	// add new velocity to old velocity
 	{
-		self->momx += vx;
-		self->momy += vy;
-		self->momz += vz;
+		self->velx += vx;
+		self->vely += vy;
+		self->velz += vz;
+	}
+
+	if (was_moving)
+	{
+		CheckStopped(self);
+	}
+}
+
+//===========================================================================
+//
+// A_SetArg
+//
+//===========================================================================
+
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_SetArg)
+{
+	ACTION_PARAM_START(2);
+	ACTION_PARAM_INT(pos, 0);
+	ACTION_PARAM_INT(value, 1);	
+
+	// Set the value of the specified arg
+	if ((size_t)pos < countof(self->args))
+	{
+		self->args[pos] = value;
 	}
 }

@@ -85,12 +85,13 @@
 #include "cl_demo.h"
 #include "domination.h"
 
-#include "gl/gl_functions.h"
+#include "gl/common/glc_data.h"
 #include "gl/gl_lights.h"
 
 
 void P_SpawnSlopeMakers (FMapThing *firstmt, FMapThing *lastmt);
 void P_SetSlopes ();
+void BloodCrypt (void *data, int key, int len);
 void P_ClearUDMFKeys();
 
 extern AActor *P_SpawnMapThing (FMapThing *mthing, int position);
@@ -621,7 +622,7 @@ static void SetTexture (side_t *side, int position, const char *name8)
 		{
 			for(int j = 0; j < 2; j++)
 			{
-				if (lines[i].sidenum[j] == side - sides)
+				if (lines[i].sidenum[j] == (DWORD)(side - sides))
 				{
 					Printf("Unknown %s texture '%s' on %s side of linedef %d\n",
 						positionnames[position], name, sidenames[j], i);
@@ -1481,7 +1482,7 @@ void P_LoadSectors (MapData * map)
 		ss->ceilingplane.ic = -FRACUNIT;
 		SetTexture(ss, i, sector_t::floor, ms->floorpic);
 		SetTexture(ss, i, sector_t::ceiling, ms->ceilingpic);
-		ss->lightlevel = clamp (LittleShort(ms->lightlevel), (short)0, (short)255);
+		ss->lightlevel = (BYTE)clamp (LittleShort(ms->lightlevel), (short)0, (short)255);
 		if (map->HasBehavior)
 			ss->special = LittleShort(ms->special);
 		else	// [RH] Translate to new sector special
@@ -1921,7 +1922,7 @@ void P_FinishLoadingLineDef(line_t *ld, int alpha)
 	ld->backsector  = ld->sidenum[1]!=NO_SIDE ? sides[ld->sidenum[1]].sector : 0;
 	float dx = FIXED2FLOAT(ld->v2->x - ld->v1->x);
 	float dy = FIXED2FLOAT(ld->v2->y - ld->v1->y);
-	int linenum = ld-lines;
+	int linenum = int(ld-lines);
 
 	if (ld->frontsector == NULL)
 	{
@@ -2263,7 +2264,7 @@ static void P_LoopSidedefs ()
 		// as their left edge.
 		line_t *line = &lines[sides[i].linenum];
 		int lineside = (line->sidenum[0] != (DWORD)i);
-		int vert = (lineside ? line->v2 : line->v1) - vertexes;
+		int vert = int((lineside ? line->v2 : line->v1) - vertexes);
 		
 		sidetemp[i].b.lineside = lineside;
 		sidetemp[i].b.next = sidetemp[vert].b.first;
@@ -2293,18 +2294,18 @@ static void P_LoopSidedefs ()
 		{
 			if (sidetemp[i].b.lineside)
 			{
-				right = line->v1 - vertexes;
+				right = int(line->v1 - vertexes);
 			}
 			else
 			{
-				right = line->v2 - vertexes;
+				right = int(line->v2 - vertexes);
 			}
 
 			right = sidetemp[right].b.first;
 
 			if (right == NO_SIDE)
 			{ // There is no right side!
-				Printf ("Line %d's right edge is unconnected\n", linemap[line-lines]);
+				Printf ("Line %d's right edge is unconnected\n", linemap[unsigned(line-lines)]);
 				continue;
 			}
 
@@ -2539,6 +2540,8 @@ void P_LoadSideDefs2 (MapData * map)
 
 		sd->SetTextureXOffset(LittleShort(msd->textureoffset)<<FRACBITS);
 		sd->SetTextureYOffset(LittleShort(msd->rowoffset)<<FRACBITS);
+		sd->SetTextureXScale(FRACUNIT);
+		sd->SetTextureYScale(FRACUNIT);
 		sd->linenum = NO_INDEX;
 		sd->Flags = 0;
 		sd->Index = i;

@@ -48,7 +48,6 @@
 #include "templates.h"
 #include "v_palette.h"
 #include "doomerrors.h"
-#include "autosegs.h"
 #include "i_system.h"
 #include "thingdef_exp.h"
 #include "w_wad.h"
@@ -311,7 +310,7 @@ static void ParseVariable (FScanner &sc, PSymbolTable * symt, PClass *cls)
 	}
 	sc.MustGetToken(';');
 
-	FVariableInfo *vi = FindVariable(symname, cls);
+	const FVariableInfo *vi = FindVariable(symname, cls);
 	if (vi == NULL)
 	{
 		sc.ScriptError("Unknown native variable '%s'", symname.GetChars());
@@ -539,7 +538,7 @@ static bool ParsePropertyParams(FScanner &sc, FPropertyInfo *prop, AActor *defau
 
 			case 'F':
 				sc.MustGetFloat();
-				conv.f = sc.Float;
+				conv.f = float(sc.Float);
 				break;
 
 			case 'Z':	// an optional string. Does not allow any numerical value.
@@ -746,7 +745,7 @@ static void ParseActionDef (FScanner &sc, PClass *cls)
 	};
 
 	bool error = false;
-	AFuncDesc *afd;
+	const AFuncDesc *afd;
 	FName funcname;
 	FString args;
 	TArray<FxExpression *> DefaultParams;

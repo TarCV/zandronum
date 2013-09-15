@@ -488,7 +488,7 @@ void G_InitNew (const char *mapname, bool bTitleLevel)
 	if (paused)
 	{
 		paused = 0;
-		S_ResumeSound ();
+		S_ResumeSound (false);
 	}
 
 	// [BC] Reset the end level delay.
@@ -683,6 +683,8 @@ static bool		g_nomonsters;
 void G_ChangeLevel(const char *levelname, int position, bool keepFacing, int nextSkill, 
 				   bool nointermission, bool resetinv, bool nomonsters)
 {
+	level_info_t *nextinfo = NULL;
+
 	if (unloading)
 	{
 		Printf (TEXTCOLOR_RED "Unloading scripts cannot exit the level again.\n");
@@ -693,7 +695,7 @@ void G_ChangeLevel(const char *levelname, int position, bool keepFacing, int nex
 
 	if (strncmp(levelname, "enDSeQ", 6))
 	{
-		level_info_t *nextinfo = FindLevelInfo (nextlevel)->CheckLevelRedirect ();
+		nextinfo = FindLevelInfo (nextlevel)->CheckLevelRedirect ();
 		if (nextinfo)
 		{
 			nextlevel = nextinfo->mapname;
@@ -707,12 +709,20 @@ void G_ChangeLevel(const char *levelname, int position, bool keepFacing, int nex
 	if (nointermission) level.flags |= LEVEL_NOINTERMISSION;
 
 	cluster_info_t *thiscluster = FindClusterInfo (level.cluster);
-	cluster_info_t *nextcluster = FindClusterInfo (FindLevelInfo (nextlevel)->cluster);
+	cluster_info_t *nextcluster = nextinfo? FindClusterInfo (nextinfo->cluster) : NULL;
 
 	startpos = position;
 	startkeepfacing = keepFacing;
 	gameaction = ga_completed;
 	resetinventory = resetinv;
+		
+	if (nextinfo != NULL) 
+	{
+		if (thiscluster != nextcluster || (thiscluster && !(thiscluster->flags & CLUSTER_HUB)))
+		{
+			resetinventory |= !!(nextinfo->flags2 & LEVEL2_RESETINVENTORY);
+		}
+	}
 
 	// [RH] Give scripts a chance to do something
 	unloading = true;
@@ -1848,9 +1858,9 @@ void G_FinishTravel ()
 			pawn->x = pawndup->x;
 			pawn->y = pawndup->y;
 			pawn->z = pawndup->z;
-			pawn->momx = pawndup->momx;
-			pawn->momy = pawndup->momy;
-			pawn->momz = pawndup->momz;
+			pawn->velx = pawndup->velx;
+			pawn->vely = pawndup->vely;
+			pawn->velz = pawndup->velz;
 			pawn->Sector = pawndup->Sector;
 			pawn->floorz = pawndup->floorz;
 			pawn->ceilingz = pawndup->ceilingz;

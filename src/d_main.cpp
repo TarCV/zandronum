@@ -134,6 +134,7 @@
 #include "v_palette.h"
 #include "m_cheat.h"
 #include "compatibility.h"
+#include "m_joy.h"
 #include "r_3dfloors.h"
 
 // [ZZ] PWO header file
@@ -175,7 +176,6 @@ static const char *BaseFileSearch (const char *file, const char *ext, bool lookf
 // EXTERNAL DATA DECLARATIONS ----------------------------------------------
 
 EXTERN_CVAR (Float, turbo)
-EXTERN_CVAR (Int, crosshair)
 EXTERN_CVAR (Bool, freelook)
 EXTERN_CVAR (Float, m_pitch)
 EXTERN_CVAR (Float, m_yaw)
@@ -264,6 +264,10 @@ void D_ProcessEvents (void)
 	for (; eventtail != eventhead ; eventtail = (eventtail+1)&(MAXEVENTS-1))
 	{
 		ev = &events[eventtail];
+		if (ev->type == EV_None)
+			continue;
+		if (ev->type == EV_DeviceChange)
+			UpdateJoystickMenu(I_UpdateDeviceList());
 		if (C_Responder (ev))
 			continue;				// console ate the event
 		if (M_Responder (ev))
@@ -284,6 +288,11 @@ void D_ProcessEvents (void)
 
 void D_PostEvent (const event_t *ev)
 {
+	// Do not post duplicate consecutive EV_DeviceChange events.
+	if (ev->type == EV_DeviceChange && events[eventhead].type == EV_DeviceChange)
+	{
+		return;
+	}
 	events[eventhead] = *ev;
 	if (ev->type == EV_Mouse && !testpolymost && !paused && menuactive == MENU_Off &&
 		ConsoleState != c_down && ConsoleState != c_falling)
@@ -307,6 +316,41 @@ void D_PostEvent (const event_t *ev)
 		}
 	}
 	eventhead = (eventhead+1)&(MAXEVENTS-1);
+}
+
+//==========================================================================
+//
+// D_RemoveNextCharEvent
+//
+// Removes the next EV_GUI_Char event in the input queue. Used by the menu,
+// since it (generally) consumes EV_GUI_KeyDown events and not EV_GUI_Char
+// events, and it needs to ensure that there is no left over input when it's
+// done. If there are multiple EV_GUI_KeyDowns before the EV_GUI_Char, then
+// there are dead chars involved, so those should be removed, too. We do
+// this by changing the message type to EV_None rather than by actually
+// removing the event from the queue.
+// 
+//==========================================================================
+
+void D_RemoveNextCharEvent()
+{
+	assert(events[eventtail].type == EV_GUI_Event && events[eventtail].subtype == EV_GUI_KeyDown);
+	for (int evnum = eventtail; evnum != eventhead; evnum = (evnum+1) & (MAXEVENTS-1))
+	{
+		event_t *ev = &events[evnum];
+		if (ev->type != EV_GUI_Event)
+			break;
+		if (ev->subtype == EV_GUI_KeyDown || ev->subtype == EV_GUI_Char)
+		{
+			ev->type = EV_None;
+			if (ev->subtype == EV_GUI_Char)
+				break;
+		}
+		else
+		{
+			break;
+		}
+	}
 }
 
 //==========================================================================
@@ -547,11 +591,11 @@ CUSTOM_CVAR (Int, compatflags, 0, CVAR_SERVERINFO)
 
 //==========================================================================
 //
-// [BB] CVAR compatflags2
+// [BB] CVAR zacompatflags
 //
 //==========================================================================
 
-CUSTOM_CVAR (Int, compatflags2, 0, CVAR_SERVERINFO)
+CUSTOM_CVAR (Int, zacompatflags, 0, CVAR_SERVERINFO)
 {
 	// [BC] If we're the server, tell clients that the dmflags changed.
 	if (( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( gamestate != GS_STARTUP ))
@@ -584,7 +628,7 @@ CUSTOM_CVAR(Int, compatmode, 0, CVAR_ARCHIVE|CVAR_NOINITCALL)
 		break;
 
 	case 3:
-		v = COMPATF_TRACE|COMPATF_SOUNDTARGET|COMPATF_BOOMSCROLL;
+		v = COMPATF_TRACE|COMPATF_SOUNDTARGET|COMPATF_BOOMSCROLL|COMPATF_MUSHROOM;
 		break;
 
 	case 4:
@@ -615,28 +659,30 @@ CVAR (Flag, compat_silentinstantfloors,compatflags, COMPATF_SILENT_INSTANT_FLOOR
 CVAR (Flag, compat_sectorsounds,compatflags, COMPATF_SECTORSOUNDS);
 CVAR (Flag, compat_missileclip,	compatflags, COMPATF_MISSILECLIP);
 CVAR (Flag, compat_crossdropoff,compatflags, COMPATF_CROSSDROPOFF);
+CVAR (Flag, compat_anybossdeath,compatflags, COMPATF_ANYBOSSDEATH);
+CVAR (Flag, compat_minotaur,	compatflags, COMPATF_MINOTAUR);
+CVAR (Flag, compat_mushroom,	compatflags, COMPATF_MUSHROOM);
 // [BB] Skulltag compat flags.
-CVAR (Flag, compat_limited_airmovement, compatflags, COMPATF_LIMITED_AIRMOVEMENT);
-CVAR (Flag, compat_plasmabump,	compatflags, COMPATF_PLASMA_BUMP_BUG);
-CVAR (Flag, compat_instantrespawn,	compatflags, COMPATF_INSTANTRESPAWN);
-CVAR (Flag, compat_disabletaunts,	compatflags, COMPATF_DISABLETAUNTS);
-CVAR (Flag, compat_originalsoundcurve,	compatflags, COMPATF_ORIGINALSOUNDCURVE);
-CVAR (Flag, compat_oldintermission,	compatflags, COMPATF_OLDINTERMISSION);
-CVAR (Flag, compat_disablestealthmonsters,	compatflags, COMPATF_DISABLESTEALTHMONSTERS);
-CVAR (Flag, compat_oldradiusdmg,	compatflags, COMPATF_OLDRADIUSDMG);
-//CVAR (Flag, compat_disablecooperativebackpacks,	compatflags, COMPATF_DISABLECOOPERATIVEBACKPACKS);
-CVAR (Flag, compat_nocrosshair,		compatflags, COMPATF_NO_CROSSHAIR);
-CVAR (Flag, compat_oldweaponswitch,		compatflags, COMPATF_OLD_WEAPON_SWITCH);
-CVAR (Flag, compat_netscriptsareclientside,		compatflags2, COMPATF2_NETSCRIPTS_ARE_CLIENTSIDE);
-CVAR (Flag, compat_clientssendfullbuttoninfo,		compatflags2, COMPATF2_CLIENTS_SEND_FULL_BUTTON_INFO);
-CVAR (Flag, compat_noland,		compatflags2, COMPATF2_NO_LAND);
-CVAR (Flag, compat_oldrandom,		compatflags2, COMPATF2_OLD_RANDOM_GENERATOR);
-CVAR (Flag, compat_nogravity_spheres,		compatflags2, COMPATF2_NOGRAVITY_SPHERES);
-CVAR (Flag, compat_dont_stop_player_scripts_on_disconnect,		compatflags2, COMPATF2_DONT_STOP_PLAYER_SCRIPTS_ON_DISCONNECT);
-CVAR (Flag, compat_explosionthrust,		compatflags2, COMPATF2_OLD_EXPLOSION_THRUST);
-CVAR (Flag, compat_bridgedrops,		compatflags2, COMPATF2_OLD_BRIDGE_DROPS);
-CVAR (Flag, compat_123b33jumpphysics,		compatflags2, COMPATF2_ZDOOM_123B33_JUMP_PHYSICS);
-CVAR (Flag, compat_fullweaponlower,		compatflags2, COMPATF2_FULL_WEAPON_LOWER);
+CVAR (Flag, compat_limited_airmovement, zacompatflags, ZACOMPATF_LIMITED_AIRMOVEMENT);
+CVAR (Flag, compat_plasmabump,	zacompatflags, ZACOMPATF_PLASMA_BUMP_BUG);
+CVAR (Flag, compat_instantrespawn,	zacompatflags, ZACOMPATF_INSTANTRESPAWN);
+CVAR (Flag, compat_disabletaunts,	zacompatflags, ZACOMPATF_DISABLETAUNTS);
+CVAR (Flag, compat_originalsoundcurve,	zacompatflags, ZACOMPATF_ORIGINALSOUNDCURVE);
+CVAR (Flag, compat_oldintermission,	zacompatflags, ZACOMPATF_OLDINTERMISSION);
+CVAR (Flag, compat_disablestealthmonsters,	zacompatflags, ZACOMPATF_DISABLESTEALTHMONSTERS);
+CVAR (Flag, compat_oldradiusdmg,	zacompatflags, ZACOMPATF_OLDRADIUSDMG);
+CVAR (Flag, compat_nocrosshair,		zacompatflags, ZACOMPATF_NO_CROSSHAIR);
+CVAR (Flag, compat_oldweaponswitch,		zacompatflags, ZACOMPATF_OLD_WEAPON_SWITCH);
+CVAR (Flag, compat_netscriptsareclientside,		zacompatflags, ZACOMPATF_NETSCRIPTS_ARE_CLIENTSIDE);
+CVAR (Flag, compat_clientssendfullbuttoninfo,		zacompatflags, ZACOMPATF_CLIENTS_SEND_FULL_BUTTON_INFO);
+CVAR (Flag, compat_noland,		zacompatflags, ZACOMPATF_NO_LAND);
+CVAR (Flag, compat_oldrandom,		zacompatflags, ZACOMPATF_OLD_RANDOM_GENERATOR);
+CVAR (Flag, compat_nogravity_spheres,		zacompatflags, ZACOMPATF_NOGRAVITY_SPHERES);
+CVAR (Flag, compat_dont_stop_player_scripts_on_disconnect,		zacompatflags, ZACOMPATF_DONT_STOP_PLAYER_SCRIPTS_ON_DISCONNECT);
+CVAR (Flag, compat_explosionthrust,		zacompatflags, ZACOMPATF_OLD_EXPLOSION_THRUST);
+CVAR (Flag, compat_bridgedrops,		zacompatflags, ZACOMPATF_OLD_BRIDGE_DROPS);
+CVAR (Flag, compat_123b33jumpphysics,		zacompatflags, ZACOMPATF_ZDOOM_123B33_JUMP_PHYSICS);
+CVAR (Flag, compat_fullweaponlower,		zacompatflags, ZACOMPATF_FULL_WEAPON_LOWER);
 
 //==========================================================================
 //
@@ -690,7 +736,7 @@ void D_Display ()
 			// Refresh the console.
 			C_NewModeAdjust ();
 			// Reload crosshair if transitioned to a different size
-			crosshair.Callback ();
+			ST_LoadCrosshair (true);
 			AM_NewResolution ();
 		}
 	}
@@ -1055,7 +1101,10 @@ void D_ErrorCleanup ()
 	playeringame[0] = 1;
 	players[0].playerstate = PST_LIVE;
 	gameaction = ga_fullconsole;
-	menuactive = MENU_Off;
+	if (gamestate == GS_DEMOSCREEN)
+	{
+		menuactive = MENU_Off;
+	}
 	insave = false;
 	fakeActive = 0;
 	fake3D = 0;
@@ -1495,14 +1544,14 @@ CCMD (endgame)
 //
 //==========================================================================
 
-void D_AddFile (const char *file, bool bLoadedAutomatically)
+void D_AddFile (const char *file, bool check, bool bLoadedAutomatically)
 {
 	if (file == NULL)
 	{
 		return;
 	}
 
-	if (!FileExists (file))
+	if (check && !FileExists (file))
 	{
 		const char *f = BaseFileSearch (file, ".wad");
 		if (f == NULL)
@@ -1534,7 +1583,7 @@ void D_AddWildFile (const char *value)
 
 	if (wadfile != NULL)
 	{
-		D_AddFile (wadfile, false);	// [BC]
+		D_AddFile (wadfile, true, false);	// [BC]
 	}
 	else
 	{ // Try pattern matching
@@ -1564,12 +1613,12 @@ void D_AddWildFile (const char *value)
 				{
 					if (sep == NULL)
 					{
-						D_AddFile (I_FindName (&findstate), false);	// [BC]
+						D_AddFile (I_FindName (&findstate), true, false);	// [BC]
 					}
 					else
 					{
 						strcpy (sep+1, I_FindName (&findstate));
-						D_AddFile (path, false);	// [BC]
+						D_AddFile (path, true, false);	// [BC]
 					}
 				}
 			} while (I_FindNext (handle, &findstate) == 0);
@@ -1629,7 +1678,7 @@ void D_AddDirectoryHelper( const char* FileMask, char skindir[PATH_MAX], size_t 
 			if (!(I_FindAttr (&findstate) & FA_DIREC))
 			{
 				strcpy (skindir + stuffstart, I_FindName (&findstate));
-				D_AddFile (skindir, true);	// [BC]
+				D_AddFile (skindir, true, true);	// [BC]
 			}
 		} while (I_FindNext (handle, &findstate) == 0);
 		I_FindClose (handle);
@@ -1998,7 +2047,7 @@ void D_DoomMain (void)
 		// [BB] Loading zvox with Skulltag introduces a bag of problems and does't do any good.
 		//wad = BaseFileSearch ("zvox.wad", NULL);
 		//if (wad)
-		//	D_AddFile (wad, false);	// [BC]
+		//	D_AddFile (wad, true, false);	// [BC]
 
 		// [RH] Add any .wad files in the skins directory
 		// [BB] Also add pk3 files and add the files from
@@ -2074,8 +2123,11 @@ void D_DoomMain (void)
 	files2->Destroy();
 	files3->Destroy();
 
+	const char *loaddir = Args->CheckValue("-dir");
+	// FIXME: consider the search path list for directory, too.
+
 	Printf ("W_Init: Init WADfiles.\n");
-	Wads.InitMultipleFiles (&wadfiles);
+	Wads.InitMultipleFiles (&wadfiles, loaddir);
 
 	// Initialize the chat module.
 	CHAT_Construct( );
@@ -2156,7 +2208,6 @@ void D_DoomMain (void)
 	if (Args->CheckParm ("-nomonsters"))	flags |= DF_NO_MONSTERS;
 	if (Args->CheckParm ("-respawn"))		flags |= DF_MONSTERS_RESPAWN;
 	if (Args->CheckParm ("-fast"))			flags |= DF_FAST_MONSTERS;
-	if (Args->CheckParm("-ulp"))	sv_unlimited_pickup = true;
 
 	devparm = !!Args->CheckParm ("-devparm");
 
@@ -2367,9 +2418,6 @@ void D_DoomMain (void)
 
 	Printf ("Texman.Init: Init texture manager.\n");
 	TexMan.Init();
-
-	// Now that all textues have been loaded the crosshair can be initialized.
-	crosshair.Callback ();
 
 	// [CW] Parse any TEAMINFO lumps.
 	Printf ("ParseTeamInfo: Load team definitions.\n");

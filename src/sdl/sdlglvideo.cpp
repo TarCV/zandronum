@@ -16,14 +16,14 @@
 #include "c_console.h"
 
 #include "sdlglvideo.h"
-#include "gl/gl_pch.h"
+#include "gl/gl_include.h"
 #include "r_defs.h"
 #include "gl/gl_functions.h"
 #include "gl/gl_struct.h"
 #include "gl/gl_intern.h"
-#include "gl/gl_basic.h"
-#include "gl/gl_texture.h"
-#include "gl/gl_shader.h"
+#include "gl/common/glc_templates.h"
+#include "gl/old_renderer/gl1_texture.h"
+#include "gl/old_renderer/gl1_shader.h"
 #include "gl/gl_framebuffer.h"
 
 // MACROS ------------------------------------------------------------------
@@ -112,6 +112,8 @@ static MiniModeInfo WinModes[] =
 
 // CODE --------------------------------------------------------------------
 
+using namespace GLRendererOld;
+
 SDLGLVideo::SDLGLVideo (int parm)
 {
 	IteratorBits = 0;
@@ -121,6 +123,10 @@ SDLGLVideo::SDLGLVideo (int parm)
              SDL_GetError( ) );
     }
 	GetContext(gl);
+#ifndef	_WIN32
+	// mouse cursor is visible by default on linux systems, we disable it by default
+	SDL_ShowCursor (0);
+#endif
 }
 
 SDLGLVideo::~SDLGLVideo ()

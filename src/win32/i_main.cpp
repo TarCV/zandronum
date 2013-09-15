@@ -3,7 +3,7 @@
 ** System-specific startup code. Eventually calls D_DoomMain.
 **
 **---------------------------------------------------------------------------
-** Copyright 1998-2007 Randy Heit
+** Copyright 1998-2009 Randy Heit
 ** All rights reserved.
 **
 ** Redistribution and use in source and binary forms, with or without
@@ -41,6 +41,10 @@
 #include <objbase.h>
 #include <commctrl.h>
 #include <richedit.h>
+
+#ifdef _MSC_VER
+#pragma warning(disable:4244)
+#endif
 
 //#include <wtsapi32.h>
 #define NOTIFY_FOR_THIS_SESSION 0

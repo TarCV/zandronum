@@ -18,13 +18,14 @@ const int SXF_TRANSFERTRANSLATION=1;
 const int SXF_ABSOLUTEPOSITION=2;
 const int SXF_ABSOLUTEANGLE=4;
 const int SXF_ABSOLUTEMOMENTUM=8;
+const int SXF_ABSOLUTEVELOCITY=8;
 const int SXF_SETMASTER=16;
 const int SXF_NOCHECKPOSITION = 32;
 const int SXF_TELEFRAG=64;
-// [BB] Added SXF_CLIENTSIDE
-const int SXF_CLIENTSIDE=128;
+const int SXF_CLIENTSIDE=128;	// only used by Skulltag
 const int SXF_TRANSFERAMBUSHFLAG=256;
 const int SXF_TRANSFERPITCH=512;
+const int SXF_TRANSFERPOINTERS=1024;
 
 // Flags for A_Chase
 const int CHF_FASTCHASE = 1;
@@ -40,16 +41,16 @@ const int LOF_DONTCHASEGOAL = 4;
 const int LOF_NOSEESOUND = 8;
 const int LOF_FULLVOLSEESOUND = 16;
 
+// Flags for A_ChangeVelocity
+const int CVF_RELATIVE = 1;
+const int CVF_REPLACE = 2;
+
 // Flags for A_WeaponReady
 const int WRF_NOBOB = 1;
 const int WRF_NOFIRE = 12;
 const int WRF_NOSWITCH = 2;
 const int WRF_NOPRIMARY = 4;
 const int WRF_NOSECONDARY = 8;
-
-// Flags for A_ChangeVelocity
-const int CVF_RELATIVE = 1;
-const int CVF_REPLACE = 2;
 
 // Morph constants
 const int MRF_ADDSTAMINA = 1;
@@ -64,6 +65,9 @@ const int MRF_NEWTIDBEHAVIOUR = 256;
 const int MRF_UNDOBYDEATH = 512;
 const int MRF_UNDOBYDEATHFORCED = 1024;
 const int MRF_UNDOBYDEATHSAVES = 2048;
+
+const int RGF_SILENT = 1;
+const int RGF_NOPIERCING = 2;
 
 // constants for A_PlaySound
 enum

@@ -645,7 +645,7 @@ static int PatchThing (int thingy)
 		}
 		else if (linelen == 11 && stricmp (Line1, "Pain chance") == 0)
 		{
-			info->PainChance = val;
+			info->PainChance = (SWORD)val;
 		}
 		else if (linelen == 12 && stricmp (Line1, "Translucency") == 0)
 		{
@@ -806,7 +806,7 @@ static int PatchThing (int thingy)
 						// Force the top 4 bits to 0 so that the user is forced
 						// to use the mnemonics to change them. And MF_SLIDE doesn't
 						// exist anymore, so 0 that too.
-						value[0] |= atoi(strval) & 0x0fffdfff;
+						value[0] |= strtoul(strval, NULL, 10) & 0x0fffdfff;
 						vchanged[0] = true;
 					}
 					else
@@ -885,7 +885,7 @@ static int PatchThing (int thingy)
 			}
 			else if (stricmp (Line1, "ID #") == 0)
 			{
-				*ednum = val;
+				*ednum = (SWORD)val;
 			}
 		}
 		else Printf (unknown_str, Line1, "Thing", thingy);
@@ -1731,6 +1731,11 @@ static int PatchCodePtrs (int dummy)
 					}
 				}
 				SetPointer(state, sym);
+				// Hack to trigger compatible mode for A_Mushroom when called from Dehacked mods
+				if (symname.CompareNoCase("A_Mushroom"))
+				{
+					state->Misc1 = 1;
+				}
 			}
 		}
 	}
@@ -2269,14 +2274,21 @@ static bool LoadDehSupp ()
 	{
 		// Make sure we only get the DEHSUPP lump from zdoom.pk3
 		// User modifications are not supported!
-		int lump = Wads.CheckNumForFullName ("dehsupp.txt", 0);
-		bool gotnames = false;
-		int i;
+		int lump = Wads.CheckNumForName("DEHSUPP");
 
 		if (lump == -1)
 		{
 			return false;
 		}
+
+		if (Wads.GetLumpFile(lump) > 0)
+		{
+			Printf("Warning: DEHSUPP no longer supported. DEHACKED patch disabled.\n");
+			return false;
+		}
+		bool gotnames = false;
+		int i;
+
 
 		if (++DehUseCount > 1)
 		{
@@ -2370,6 +2382,8 @@ static bool LoadDehSupp ()
 				{
 					sc.MustGetString();
 					DEHSprName s;
+					// initialize with zeroes
+					memset(&s, 0, sizeof(s));
 					if (strlen(sc.String) ==4)
 					{
 						s.c[0] = sc.String[0];

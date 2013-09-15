@@ -261,7 +261,7 @@ bool P_GiveBody (AActor *actor, int num)
 	}
 	else
 	{
-		max = actor->GetDefault()->health;
+		max = actor->SpawnHealth();
 		if (num < 0)
 		{
 			num = max * -num / 100;
@@ -572,10 +572,10 @@ bool AInventory::HandlePickup (AInventory *item)
 {
 	if (item->GetClass() == GetClass())
 	{
-		if (Amount < MaxAmount)
+		if (Amount < MaxAmount || sv_unlimited_pickup)
 		{
 			Amount += item->Amount;
-			if (Amount > MaxAmount)
+			if (Amount > MaxAmount && !sv_unlimited_pickup)
 			{
 				Amount = MaxAmount;
 			}
@@ -1626,7 +1626,7 @@ IMPLEMENT_CLASS (AHealth)
 
 //===========================================================================
 //
-// AHealth :: TryPickup
+// AHealth :: PickupMessage
 //
 //===========================================================================
 const char *AHealth::PickupMessage ()

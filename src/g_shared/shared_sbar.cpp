@@ -90,6 +90,7 @@ int ST_X, ST_Y;
 int SB_state = 3;
 
 FTexture *CrosshairImage;
+static int CrosshairNum;
 
 // [RH] Base blending values (for e.g. underwater)
 int BaseBlendR, BaseBlendG, BaseBlendB;
@@ -105,48 +106,13 @@ CUSTOM_CVAR (Bool, st_scale, true, CVAR_ARCHIVE)
 	}
 }
 
-CUSTOM_CVAR (Int, crosshair, 0, CVAR_ARCHIVE|CVAR_GLOBALCONFIG|CVAR_NOINITCALL)
-{
-	int num = self;
-	char name[16], size;
-	int lump;
-
-	// [BC] Server has no use for a crosshair.
-	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
-		return;
-
-	if (CrosshairImage != NULL)
-	{
-		CrosshairImage->Unload ();
-	}
-	if (num == 0)
-	{
-		CrosshairImage = NULL;
-		return;
-	}
-	if (num < 0)
-	{
-		num = -num;
-	}
-	size = (SCREENWIDTH < 640) ? 'S' : 'B';
-	mysnprintf (name, countof(name), "XHAIR%c%d", size, num);
-	if ((lump = Wads.CheckNumForName (name, ns_graphics)) == -1)
-	{
-		mysnprintf (name, countof(name), "XHAIR%c1", size);
-		if ((lump = Wads.CheckNumForName (name, ns_graphics)) == -1)
-		{
-			strcpy (name, "XHAIRS1");
-		}
-	}
-	CrosshairImage = TexMan[TexMan.CheckForTexture(name, FTexture::TEX_MiscPatch)];
-}
-
+CVAR (Int, crosshair, 0, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+CVAR (Bool, crosshairforce, false, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 CVAR (Color, crosshaircolor, 0xff0000, CVAR_ARCHIVE|CVAR_GLOBALCONFIG);
 CVAR (Bool, crosshairhealth, true, CVAR_ARCHIVE|CVAR_GLOBALCONFIG);
 CVAR (Bool, crosshairscale, false, CVAR_ARCHIVE|CVAR_GLOBALCONFIG);
 CVAR (Bool, crosshairgrow, false, CVAR_ARCHIVE|CVAR_GLOBALCONFIG);
-CVAR( Bool, cl_identifytarget, true, CVAR_ARCHIVE );
-EXTERN_CVAR( Bool, cl_stfullscreenhud );
+
 CVAR (Bool, idmypos, false, 0);
 
 // [RH] Amount of red flash for up to 114 damage points. Calculated by hand
@@ -163,6 +129,63 @@ BYTE DBaseStatusBar::DamageToAlpha[114] =
 	230, 231, 232, 233, 234, 235, 235, 236, 237
 };
 
+void ST_LoadCrosshair(bool alwaysload)
+{
+	int num = 0;
+	char name[16], size;
+	int lump;
+
+	// [BC] Server has no use for a crosshair.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
+
+	if (!crosshairforce &&
+		players[consoleplayer].camera != NULL &&
+		players[consoleplayer].camera->player != NULL &&
+		players[consoleplayer].camera->player->ReadyWeapon != NULL)
+	{
+		num = players[consoleplayer].camera->player->ReadyWeapon->Crosshair;
+	}
+	if (num == 0)
+	{
+		num = crosshair;
+	}
+	if (!alwaysload && CrosshairNum == num && CrosshairImage != NULL)
+	{ // No change.
+		return;
+	}
+
+	if (CrosshairImage != NULL)
+	{
+		CrosshairImage->Unload ();
+	}
+	if (num == 0)
+	{
+		CrosshairNum = 0;
+		CrosshairImage = NULL;
+		return;
+	}
+	if (num < 0)
+	{
+		num = -num;
+	}
+	size = (SCREENWIDTH < 640) ? 'S' : 'B';
+	mysnprintf (name, countof(name), "XHAIR%c%d", size, num);
+	if ((lump = Wads.CheckNumForName (name, ns_graphics)) == -1)
+	{
+		mysnprintf (name, countof(name), "XHAIR%c1", size);
+		if ((lump = Wads.CheckNumForName (name, ns_graphics)) == -1)
+		{
+			strcpy (name, "XHAIRS1");
+		}
+		num = 1;
+	}
+	CrosshairNum = num;
+	CrosshairImage = TexMan[TexMan.CheckForTexture(name, FTexture::TEX_MiscPatch)];
+}
+
+CVAR( Bool, cl_identifytarget, true, CVAR_ARCHIVE );
+EXTERN_CVAR( Bool, cl_stfullscreenhud );
 //---------------------------------------------------------------------------
 //
 // Constructor
@@ -377,7 +400,10 @@ DHUDMessage *DBaseStatusBar::DetachMessage (DHUDMessage *msg)
 		*prev = probe->Next;
 		probe->Next = NULL;
 		// Redraw the status bar in case it was covered
-		SB_state = screen->GetPageCount ();
+		if (screen != NULL)
+		{
+			SB_state = screen->GetPageCount();
+		}
 	}
 	return probe;
 }
@@ -397,7 +423,10 @@ DHUDMessage *DBaseStatusBar::DetachMessage (DWORD id)
 		*prev = probe->Next;
 		probe->Next = NULL;
 		// Redraw the status bar in case it was covered
-		SB_state = screen->GetPageCount ();
+		if (screen != NULL)
+		{
+			SB_state = screen->GetPageCount();
+		}
 	}
 	return probe;
 }
@@ -1036,6 +1065,8 @@ void DBaseStatusBar::DrawCrosshair ()
 	if (players[consoleplayer].cheats & CF_CHASECAM)
 		return;
 
+	ST_LoadCrosshair();
+
 	// Don't draw the crosshair if there is none
 	if (CrosshairImage == NULL || gamestate == GS_TITLELEVEL)
 	{
@@ -1043,7 +1074,7 @@ void DBaseStatusBar::DrawCrosshair ()
 	}
 
 	// [BB] Don't draw the crosshair if the compatflags forbid it.
-	if ( compatflags & COMPATF_NO_CROSSHAIR )
+	if ( zacompatflags & ZACOMPATF_NO_CROSSHAIR )
 		return;
 
 	if (crosshairscale)
@@ -1611,7 +1642,7 @@ void DBaseStatusBar::BlendView (float blend[4])
 			cnt = 228;
 
 		APlayerPawn *mo = players[consoleplayer].mo;
-		AddBlend (mo->RedDamageFade / 255, mo->GreenDamageFade / 255, mo->BlueDamageFade / 255, cnt / 255.f, blend);
+		AddBlend (mo->DamageFade.r / 255.f, mo->DamageFade.g / 255.f, mo->DamageFade.b / 255.f, cnt / 255.f, blend);
 	}
 
 	// Unlike Doom, I did not have any utility source to look at to find the

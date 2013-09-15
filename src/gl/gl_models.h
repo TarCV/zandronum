@@ -2,7 +2,7 @@
 #define __GL_MODELS_H_
 
 #include "r_data.h"
-#include "gl_geometric.h"
+#include "gl/common/glc_geometric.h"
 
 #define MAX_LODS			4
 
@@ -276,9 +276,13 @@ class GLSprite;
 
 void gl_InitModels();
 FSpriteModelFrame * gl_FindModelFrame(const PClass * ti, int sprite, int frame);
-void gl_RenderModel(GLSprite * spr, int cm);
-// [BB] HUD weapon model rendering functions.
-void gl_RenderHUDModel(pspdef_t *psp, fixed_t ofsx, fixed_t ofsy, int cm);
+
+namespace GLRendererOld
+{
+	void gl_RenderModel(GLSprite * spr, int cm);
+	// [BB] HUD weapon model rendering functions.
+	void gl_RenderHUDModel(pspdef_t *psp, fixed_t ofsx, fixed_t ofsy, int cm);
+}
 bool gl_IsHUDModelForPlayerAvailable (player_t * player);
 
 #endif

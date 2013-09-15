@@ -50,6 +50,7 @@
 #include "p_acs.h"
 #include "doomstat.h"
 #include "d_player.h"
+#include "autosegs.h"
 
 int FindEndSequence (int type, const char *picname);
 
@@ -1014,7 +1015,7 @@ DEFINE_MAP_OPTION(sky1, true)
 		{
 			parse.sc.Float /= 256;
 		}
-		info->skyspeed1 = parse.sc.Float * (35.f / 1000.f);
+		info->skyspeed1 = float(parse.sc.Float * (35. / 1000.));
 	}
 }
 
@@ -1028,7 +1029,7 @@ DEFINE_MAP_OPTION(sky2, true)
 		{
 			parse.sc.Float /= 256;
 		}
-		info->skyspeed2 = parse.sc.Float * (35.f / 1000.f);
+		info->skyspeed2 = float(parse.sc.Float * (35. / 1000.));
 	}
 }
 
@@ -1137,14 +1138,14 @@ DEFINE_MAP_OPTION(gravity, true)
 {
 	parse.ParseAssign();
 	parse.sc.MustGetFloat();
-	info->gravity = parse.sc.Float;
+	info->gravity = float(parse.sc.Float);
 }
 
 DEFINE_MAP_OPTION(aircontrol, true)
 {
 	parse.ParseAssign();
 	parse.sc.MustGetFloat();
-	info->aircontrol = parse.sc.Float;
+	info->aircontrol = float(parse.sc.Float);
 }
 
 DEFINE_MAP_OPTION(airsupply, true)
@@ -1253,7 +1254,7 @@ DEFINE_MAP_OPTION(teamdamage, true)
 {
 	parse.ParseAssign();
 	parse.sc.MustGetFloat();
-	info->teamdamage = parse.sc.Float;
+	info->teamdamage = float(parse.sc.Float);
 }
 
 DEFINE_MAP_OPTION(mapbackground, true)
@@ -1350,6 +1351,9 @@ MapFlagHandlers[] =
 	{ "teamplayoff",					MITYPE_SCFLAGS2,	LEVEL2_FORCETEAMPLAYOFF, ~LEVEL2_FORCETEAMPLAYON },
 	{ "checkswitchrange",				MITYPE_SETFLAG2,	LEVEL2_CHECKSWITCHRANGE, 0 },
 	{ "nocheckswitchrange",				MITYPE_CLRFLAG2,	LEVEL2_CHECKSWITCHRANGE, 0 },
+	{ "grinding_polyobj",				MITYPE_SETFLAG2,	LEVEL2_POLYGRIND, 0 },
+	{ "no_grinding_polyobj",			MITYPE_CLRFLAG2,	LEVEL2_POLYGRIND, 0 },
+	{ "resetinventory",					MITYPE_SETFLAG2,	LEVEL2_RESETINVENTORY, 0 },
 	{ "unfreezesingleplayerconversations",MITYPE_SETFLAG2,	LEVEL2_CONV_SINGLE_UNFREEZE, 0 },
 	{ "nobotnodes",						MITYPE_SETFLAG2,	LEVEL2_NOBOTNODES, 0 },// [BC] Allow the prevention of spawning bot nodes (helpful for very large maps).
 	{ "islobby",						MITYPE_SETFLAG2,	LEVEL2_ISLOBBY, 0 },	// [BB]
@@ -1371,6 +1375,9 @@ MapFlagHandlers[] =
 	{ "compat_sectorsounds",			MITYPE_COMPATFLAG, COMPATF_SECTORSOUNDS},
 	{ "compat_missileclip",				MITYPE_COMPATFLAG, COMPATF_MISSILECLIP},
 	{ "compat_crossdropoff",			MITYPE_COMPATFLAG, COMPATF_CROSSDROPOFF},
+	{ "compat_anybossdeath",			MITYPE_COMPATFLAG, COMPATF_ANYBOSSDEATH},
+	{ "compat_minotaur",				MITYPE_COMPATFLAG, COMPATF_MINOTAUR},
+	{ "compat_mushroom",				MITYPE_COMPATFLAG, COMPATF_MUSHROOM},
 	{ "cd_start_track",					MITYPE_EATNEXT,	0, 0 },
 	{ "cd_end1_track",					MITYPE_EATNEXT,	0, 0 },
 	{ "cd_end2_track",					MITYPE_EATNEXT,	0, 0 },
@@ -1466,14 +1473,14 @@ void FMapInfoParser::ParseMapDefinition(level_info_t &info)
 		}
 		else
 		{
-			TAutoSegIterator<FMapOptInfo*, &YRegHead, &YRegTail> probe;
+			FAutoSegIterator probe(YRegHead, YRegTail);
 			bool success = false;
 
-			while (++probe != NULL)
+			while (*++probe != NULL)
 			{
-				if (sc.Compare(probe->name))
+				if (sc.Compare(((FMapOptInfo *)(*probe))->name))
 				{
-					probe->handler(*this, &info);
+					((FMapOptInfo *)(*probe))->handler(*this, &info);
 					success = true;
 					break;
 				}
@@ -1920,6 +1927,7 @@ void FMapInfoParser::ParseMapInfo (int lump, level_info_t &gamedefaults, level_i
 		else if (sc.Compare("clearskills"))
 		{
 			AllSkills.Clear();
+			DefaultSkill = -1;
 		}
 		else if (sc.Compare("gameinfo"))
 		{
@@ -1977,7 +1985,7 @@ void G_ParseMapInfo (const char *basemapinfo)
 	{
 		I_FatalError ("You cannot use clearepisodes in a MAPINFO if you do not define any new episodes after it.");
 	}
-	if (AllSkills.Size()==0)
+	if (AllSkills.Size() == 0)
 	{
 		I_FatalError ("You cannot use clearskills in a MAPINFO if you do not define any new skills after it.");
 	}

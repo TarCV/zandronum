@@ -75,6 +75,16 @@ if( WIN32 )
 	else( NOT D3D_INCLUDE_DIR )
 		include_directories( ${D3D_INCLUDE_DIR} )
 	endif( NOT D3D_INCLUDE_DIR )
+	
+	find_path( XINPUT_INCLUDE_DIR xinput.h
+		PATHS ENV DXSDK_DIR
+		PATH_SUFFIXES Include )
+	if( NOT XINPUT_INCLUDE_DIR )
+		message( SEND_ERROR "Could not find xinput.h. XInput will be disabled." )
+		add_definitions( -DNO_XINPUT )
+	else( NOT XINPUT_INCLUDE_DIR )
+		include_directories( ${XINPUT_INCLUDE_DIR} )
+	endif( NOT XINPUT_INCLUDE_DIR )
 
 	find_library( DX_ddraw_LIBRARY ddraw
 		PATHS ENV DXSDK_DIR
@@ -113,7 +123,8 @@ if( WIN32 )
 		comctl32
 		comdlg32
 		ws2_32
-		setupapi )
+		setupapi
+		oleaut32 )
 else( WIN32 )
 	if( APPLE )
 		set( FMOD_SEARCH_PATHS "/Developer/FMOD Programmers API Mac/api" )
@@ -399,7 +410,14 @@ if( CMAKE_COMPILER_IS_GNUCXX )
 	set( CMAKE_CXX_FLAGS_MINSIZEREL "${CMAKE_CXX_FLAGS_MINSIZEREL} ${REL_CXX_FLAGS}" )
 	set( CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} ${REL_CXX_FLAGS}" )
 
-	set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wno-unused -fno-strict-aliasing" )
+	set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wno-unused" )
+
+	# Remove extra warnings when using the official DirectX headers.
+	# Also, TDM-GCC 4.4.0 no longer accepts glibc-style printf formats as valid,
+	# which is a royal pain. The previous version I had been using was fine with them.
+	if( WIN32 )
+		set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas -Wno-comment -Wno-format" )
+	endif( WIN32 )
 
 	if( NOT NO_STRIP )
 		set (CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} -s" )
@@ -471,7 +489,7 @@ add_custom_target( revision_check ALL
 
 # Libraries ZDoom needs
 
-set( ZDOOM_LIBS ${ZDOOM_LIBS} "${ZLIB_LIBRARIES}" "${JPEG_LIBRARIES}" )
+set( ZDOOM_LIBS ${ZDOOM_LIBS} "${ZLIB_LIBRARIES}" "${JPEG_LIBRARIES}" "${BZIP2_LIBRARIES}" )
 # [BB] Without sound, we don't need FMOD.
 if ( NOT NO_SOUND )
 	set( ZDOOM_LIBS ${ZDOOM_LIBS} "${FMOD_LIBRARY}" )
@@ -499,6 +517,11 @@ if( WIN32 )
 		win32/i_cd.cpp
 		win32/i_crash.cpp
 		win32/i_input.cpp
+		win32/i_keyboard.cpp
+		win32/i_mouse.cpp
+		win32/i_dijoy.cpp
+		win32/i_rawps2.cpp
+		win32/i_xinput.cpp
 		win32/i_main.cpp
 		win32/i_movie.cpp
 		win32/i_system.cpp
@@ -593,45 +616,58 @@ endif( CMAKE_SYSTEM_PROCESSOR MATCHES powerpc )
 # [BB] Only complile the gl sources, if we want GL support.
 if( NOT NO_GL )
 	set( GL_SOURCES
-		gl/a_dynlight.cpp
-		gl/gfxfuncs.cpp
-		gl/gl_bsp.cpp
-		gl/gl_clipper.cpp
-		gl/gl_clock.cpp
-		gl/gl_cycler.cpp
-		gl/gl_data.cpp
-		gl/gl_decal.cpp
-		gl/gl_drawinfo.cpp
-		gl/gl_dynlight.cpp
-		gl/gl_fakeflat.cpp
-		gl/gl_flats.cpp
+		gl/common/a_dynlight.cpp
+		gl/common/glc_bsp.cpp
+		gl/common/glc_clipper.cpp
+		gl/common/glc_clock.cpp
+		gl/common/glc_cycler.cpp
+		gl/common/glc_data.cpp
+		gl/common/glc_dynlight.cpp
+		gl/common/glc_fakeflat.cpp
+		gl/common/glc_geometric.cpp
+		gl/common/glc_glow.cpp
+		gl/common/glc_hirestex.cpp
+		gl/common/glc_hqresize.cpp
+		gl/common/glc_light.cpp
+		gl/common/glc_nodes.cpp
+		gl/common/glc_renderer.cpp
+		gl/common/glc_renderhacks.cpp
+		gl/common/glc_sections.cpp
+		gl/common/glc_texture.cpp
+		gl/common/glc_translate.cpp
+		gl/common/glc_wipe.cpp
+		gl/old_renderer/gl1_decal.cpp
+		gl/old_renderer/gl1_drawinfo.cpp
+		gl/old_renderer/gl1_flats.cpp
+		gl/old_renderer/gl1_hwtexture.cpp
+		gl/old_renderer/gl1_portal.cpp
+		gl/old_renderer/gl1_renderer.cpp
+		gl/old_renderer/gl1_scene.cpp
+		gl/old_renderer/gl1_shader.cpp
+		gl/old_renderer/gl1_sky.cpp
+		gl/old_renderer/gl1_skydome.cpp
+		gl/old_renderer/gl1_sprite.cpp
+		gl/old_renderer/gl1_texture.cpp
+		gl/old_renderer/gl1_vertex.cpp
+		gl/old_renderer/gl1_walls.cpp
+		gl/old_renderer/gl1_walls_draw.cpp
+		gl/old_renderer/gl1_weapon.cpp
+		gl/new_renderer/gl2_geom.cpp
+		gl/new_renderer/gl2_renderer.cpp
+		gl/new_renderer/gl2_vertex.cpp
+		gl/new_renderer/gl2_skydraw.cpp	
+		gl/new_renderer/textures/gl2_bitmap.cpp
+		gl/new_renderer/textures/gl2_texture.cpp
+		gl/new_renderer/textures/gl2_material.cpp
+		gl/new_renderer/textures/gl2_hwtexture.cpp
+#		gl/new_renderer/textures/gl2_hirestex.cpp
+		gl/new_renderer/textures/gl2_shader.cpp
 		gl/gl_framebuffer.cpp
-		gl/gl_geometric.cpp
-		gl/gl_glow.cpp
-		gl/gl_hirestex.cpp
-		gl/gl_hqresize.cpp
 		gl/gl_light.cpp
 		gl/gl_menu.cpp
-		gl/gl_missingtexture.cpp
 		gl/gl_models.cpp
 		gl/gl_models_md2.cpp
 		gl/gl_models_md3.cpp
-		gl/gl_nodes.cpp
-		gl/gl_portal.cpp
-		gl/gl_scene.cpp
-		gl/gl_shader.cpp
-		gl/gl_sky.cpp
-		gl/gl_skydome.cpp
-		gl/gl_sprite.cpp
-		gl/gl_swshaders.cpp
-		gl/gl_texture.cpp
-		gl/gltexture.cpp
-		gl/gl_translate.cpp
-		gl/gl_vertex.cpp
-		gl/gl_walls.cpp
-		gl/gl_walls_draw.cpp
-		gl/gl_weapon.cpp
-		gl/gl_wipe.cpp
 		gl/r_render/r_opengl.cpp
 	)
 else( NOT NO_GL )
@@ -723,6 +759,7 @@ add_executable( zdoom WIN32
 	m_argv.cpp
 	m_bbox.cpp
 	m_cheat.cpp
+	m_joy.cpp
 	m_menu.cpp
 	m_misc.cpp
 	m_oldrandom.cpp #ST
@@ -895,19 +932,29 @@ add_executable( zdoom WIN32
 	oplsynth/music_opldumper_mididevice.cpp
 	oplsynth/music_opl_mididevice.cpp
 	oplsynth/opl_mus_player.cpp
+	resourcefiles/ancientzip.cpp
+	resourcefiles/file_7z.cpp
+	resourcefiles/file_grp.cpp
+	resourcefiles/file_lump.cpp
+	resourcefiles/file_rff.cpp
+	resourcefiles/file_wad.cpp
+	resourcefiles/file_zip.cpp
+	resourcefiles/file_pak.cpp
+	resourcefiles/file_directory.cpp
+	resourcefiles/resourcefile.cpp
 	sfmt/SFMT.cpp
 	sound/fmodsound.cpp
 	sound/i_music.cpp
 	sound/i_sound.cpp
 	sound/music_cd.cpp
 	sound/music_dumb.cpp
+	sound/music_gme.cpp
 	sound/music_midistream.cpp
 	sound/music_midi_base.cpp
 	sound/music_midi_midiout.cpp
 	sound/music_midi_timidity.cpp
 	sound/music_mus_midiout.cpp
 	sound/music_mus_opl.cpp
-	sound/music_spc.cpp
 	sound/music_stream.cpp
 	sound/music_timidity_mididevice.cpp
 	sound/music_win_mididevice.cpp
@@ -924,6 +971,7 @@ add_executable( zdoom WIN32
 	textures/pcxtexture.cpp
 	textures/pngtexture.cpp
 	textures/rawpagetexture.cpp
+	textures/emptytexture.cpp
 	textures/texture.cpp
 	textures/texturemanager.cpp
 	textures/tgatexture.cpp
@@ -966,13 +1014,13 @@ add_executable( zdoom WIN32
 set_source_files_properties( xlat/parse_xlat.cpp PROPERTIES OBJECT_DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/xlat_parser.c" )
 set_source_files_properties( sc_man.cpp PROPERTIES OBJECT_DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/sc_man_scanner.h" )
 
-# [BB] Without sound, we don't need snes_spc.
+# [BB] Without sound, we don't need gme.
 if( NOT NO_SOUND )
-	set( ZDOOM_LIBS ${ZDOOM_LIBS} snes_spc )
+	set( ZDOOM_LIBS ${ZDOOM_LIBS} gme )
 endif( NOT NO_SOUND )
 
 # [BB] Added GeoIP
-target_link_libraries( zdoom ${ZDOOM_LIBS} gdtoa dumb bzip2 lzma GeoIP )
+target_link_libraries( zdoom ${ZDOOM_LIBS} bzip2 gdtoa dumb lzma GeoIP )
 include_directories( .
 	g_doom
 	g_heretic
@@ -988,7 +1036,7 @@ include_directories( .
 	thingdef
 	timidity
 	xlat
-	../snes_spc/snes_spc
+	../game-music-emu/gme
 	../gdtoa
 	../dumb/include
 	../upnpnat/ #ST

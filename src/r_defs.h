@@ -24,6 +24,7 @@
 #define __R_DEFS_H__
 
 #include "doomdef.h"
+#include "templates.h"
 
 // Some more or less basic data types
 // we depend on.
@@ -74,6 +75,8 @@ extern size_t MaxDrawSegs;
 struct vertex_t
 {
 	fixed_t x, y;
+
+	float fx, fy;		// Floating point coordinates of this vertex (excluding polyoblect translation!)
 	angle_t viewangle;	// precalculated angle for clipping
 	int angletime;		// recalculation time for view angle
 
@@ -318,6 +321,8 @@ inline FArchive &operator<< (FArchive &arc, secplane_t &plane)
 
 #include "p_3dfloors.h"
 struct subsector_t;
+struct sector_t;
+struct side_t;
 extern bool gl_plane_reflection_i;
 
 // Ceiling/floor flags
@@ -421,7 +426,7 @@ struct extsector_t
 		TArray<lightlist_t>				lightlist;		// 3D light list
 		TArray<sector_t*>				attached;		// 3D floors attached to this sector
 	} XFloor;
-	
+
 	void Serialize(FArchive &arc);
 };
 
@@ -491,11 +496,13 @@ struct sector_t
 	void SetXOffset(int pos, fixed_t o)
 	{
 		planes[pos].xform.xoffs = o;
+		invalidflags |= INVALIDATE_PLANES;
 	}
 
 	void AddXOffset(int pos, fixed_t o)
 	{
 		planes[pos].xform.xoffs += o;
+		invalidflags |= INVALIDATE_PLANES;
 	}
 
 	fixed_t GetXOffset(int pos) const
@@ -506,11 +513,13 @@ struct sector_t
 	void SetYOffset(int pos, fixed_t o)
 	{
 		planes[pos].xform.yoffs = o;
+		invalidflags |= INVALIDATE_PLANES;
 	}
 
 	void AddYOffset(int pos, fixed_t o)
 	{
 		planes[pos].xform.yoffs += o;
+		invalidflags |= INVALIDATE_PLANES;
 	}
 
 	fixed_t GetYOffset(int pos, bool addbase = true) const
@@ -528,6 +537,7 @@ struct sector_t
 	void SetXScale(int pos, fixed_t o)
 	{
 		planes[pos].xform.xscale = o;
+		invalidflags |= INVALIDATE_PLANES;
 	}
 
 	fixed_t GetXScale(int pos) const
@@ -538,6 +548,7 @@ struct sector_t
 	void SetYScale(int pos, fixed_t o)
 	{
 		planes[pos].xform.yscale = o;
+		invalidflags |= INVALIDATE_PLANES;
 	}
 
 	fixed_t GetYScale(int pos) const
@@ -548,6 +559,7 @@ struct sector_t
 	void SetAngle(int pos, angle_t o)
 	{
 		planes[pos].xform.angle = o;
+		invalidflags |= INVALIDATE_PLANES;
 	}
 
 	angle_t GetAngle(int pos, bool addbase = true) const
@@ -561,11 +573,12 @@ struct sector_t
 			return planes[pos].xform.angle + planes[pos].xform.base_angle;
 		}
 	}
-
+	
 	void SetBase(int pos, fixed_t y, angle_t o)
 	{
 		planes[pos].xform.base_yoffs = y;
 		planes[pos].xform.base_angle = o;
+		invalidflags |= INVALIDATE_PLANES;
 	}
 
 	int GetFlags(int pos) const 
@@ -587,6 +600,7 @@ struct sector_t
 	void SetPlaneLight(int pos, int level)
 	{
 		planes[pos].Light = level;
+		invalidflags |= INVALIDATE_ME;
 	}
 
 	FTextureID GetTexture(int pos) const
@@ -599,6 +613,7 @@ struct sector_t
 		FTextureID old = planes[pos].Texture;
 		planes[pos].Texture = tex;
 		if (floorclip && pos == floor && tex != old) AdjustFloorClip();
+		invalidflags |= INVALIDATE_ALL;
 	}
 
 	fixed_t GetPlaneTexZ(int pos) const
@@ -609,13 +624,39 @@ struct sector_t
 	void SetPlaneTexZ(int pos, fixed_t val)
 	{
 		planes[pos].TexZ = val;
+		invalidflags |= INVALIDATE_ALL;
 	}
 
 	void ChangePlaneTexZ(int pos, fixed_t val)
 	{
 		planes[pos].TexZ += val;
+		invalidflags |= INVALIDATE_ALL;
 	}
 
+	sector_t *GetHeightSec() const 
+	{
+		return (heightsec &&
+			!(heightsec->MoreFlags & SECF_IGNOREHEIGHTSEC) &&
+			!(this->e && this->e->XFloor.ffloors.Size())
+			)? heightsec : NULL;
+	}
+
+	void ChangeLightLevel(int newval)
+	{
+		lightlevel = (BYTE)clamp(lightlevel + newval, 0, 255);
+		invalidflags |= INVALIDATE_ALL;
+	}
+
+	void SetLightLevel(int newval)
+	{
+		lightlevel = (BYTE)clamp(newval, 0, 255);
+		invalidflags |= INVALIDATE_ALL;
+	}
+
+	int GetLightLevel() const
+	{
+		return lightlevel;
+	}
 
 	// Member variables
 	fixed_t		CenterFloor () const { return floorplane.ZatPoint (soundorg[0], soundorg[1]); }
@@ -708,8 +749,11 @@ struct sector_t
 
 	// [GZDoom]
 	extsector_t	*				e;		// This stores data that requires construction/destruction. Such data must not be copied by R_FakeFlat.
+
+	// GL only stuff starts here
 	float						ceiling_reflect, floor_reflect;
 
+	BYTE						invalidflags;		// For renderer validation
 	bool						transdoor;			// For transparent door hacks
 	fixed_t						transdoorheight;	// for transparent door hacks
 	int							subsectorcount;		// list of subsectors
@@ -717,7 +761,13 @@ struct sector_t
 
 	float GetFloorReflect() { return gl_plane_reflection_i? floor_reflect : 0; }
 	float GetCeilingReflect() { return gl_plane_reflection_i? ceiling_reflect : 0; }
-	void SetDirty();
+
+	enum
+	{
+		INVALIDATE_ME = 1,
+		INVALIDATE_PLANES = 3,
+		INVALIDATE_ALL = 7
+	};
 
 	// [BC] Is this sector a floor or ceiling?
 	int		floorOrCeiling;
@@ -784,10 +834,12 @@ class DBaseDecal;
 
 enum
 {
-	WALLF_ABSLIGHTING	= 1,	// Light is absolute instead of relative
-	WALLF_NOAUTODECALS	= 2,	// Do not attach impact decals to this wall
+	WALLF_ABSLIGHTING	 = 1,	// Light is absolute instead of relative
+	WALLF_NOAUTODECALS	 = 2,	// Do not attach impact decals to this wall
 	WALLF_NOFAKECONTRAST = 4,	// Don't do fake contrast for this wall in side_t::GetLightLevel
 	WALLF_SMOOTHLIGHTING = 8,   // Similar to autocontrast but applies to all angles.
+	WALLF_CLIP_MIDTEX	 = 16,	// Like the line counterpart, but only for this side.
+	WALLF_WRAP_MIDTEX	 = 32,	// Like the line counterpart, but only for this side.
 };
 
 struct side_t
@@ -802,6 +854,8 @@ struct side_t
 	{
 		fixed_t xoffset;
 		fixed_t yoffset;
+		fixed_t xscale;
+		fixed_t yscale;
 		FTextureID texture;
 		TObjPtr<DInterpolation> interpolation;
 		//int Light;
@@ -829,6 +883,7 @@ struct side_t
 	void SetLight(SWORD l)
 	{
 		Light = l;
+		invalidflags = 1;
 	}
 
 	FTextureID GetTexture(int which) const
@@ -838,17 +893,20 @@ struct side_t
 	void SetTexture(int which, FTextureID tex)
 	{
 		textures[which].texture = tex;
+		invalidflags |= (1<<which);
 	}
 
 	void SetTextureXOffset(int which, fixed_t offset)
 	{
 		textures[which].xoffset = offset;
+		invalidflags |= (1<<which);
 	}
 	void SetTextureXOffset(fixed_t offset)
 	{
 		textures[top].xoffset =
 		textures[mid].xoffset =
 		textures[bottom].xoffset = offset;
+		invalidflags |= 7;
 	}
 	fixed_t GetTextureXOffset(int which) const
 	{
@@ -857,17 +915,20 @@ struct side_t
 	void AddTextureXOffset(int which, fixed_t delta)
 	{
 		textures[which].xoffset += delta;
+		invalidflags |= (1<<which);
 	}
 
 	void SetTextureYOffset(int which, fixed_t offset)
 	{
 		textures[which].yoffset = offset;
+		invalidflags |= (1<<which);
 	}
 	void SetTextureYOffset(fixed_t offset)
 	{
 		textures[top].yoffset =
 		textures[mid].yoffset =
 		textures[bottom].yoffset = offset;
+		invalidflags |= 7;
 	}
 	fixed_t GetTextureYOffset(int which) const
 	{
@@ -876,12 +937,55 @@ struct side_t
 	void AddTextureYOffset(int which, fixed_t delta)
 	{
 		textures[which].yoffset += delta;
+		invalidflags |= (1<<which);
+	}
+
+	void SetTextureXScale(int which, fixed_t scale)
+	{
+		textures[which].xscale = scale <= 0? FRACUNIT : scale;
+		invalidflags |= (1<<which);
+	}
+	void SetTextureXScale(fixed_t scale)
+	{
+		textures[top].xscale = textures[mid].xscale = textures[bottom].xscale = scale <= 0? FRACUNIT : scale;
+		invalidflags |= 7;
+	}
+	fixed_t GetTextureXScale(int which) const
+	{
+		return textures[which].xscale;
+	}
+	void MultiplyTextureXScale(int which, fixed_t delta)
+	{
+		textures[which].xscale = FixedMul(textures[which].xscale, delta);
+		invalidflags |= (1<<which);
+	}
+
+
+	void SetTextureYScale(int which, fixed_t scale)
+	{
+		textures[which].yscale = scale <= 0? FRACUNIT : scale;
+		invalidflags |= (1<<which);
+	}
+	void SetTextureYScale(fixed_t scale)
+	{
+		textures[top].yscale = textures[mid].yscale = textures[bottom].yscale = scale <= 0? FRACUNIT : scale;
+		invalidflags |= 7;
+	}
+	fixed_t GetTextureYScale(int which) const
+	{
+		return textures[which].yscale;
+	}
+	void MultiplyTextureYScale(int which, fixed_t delta)
+	{
+		textures[which].yscale = FixedMul(textures[which].yscale, delta);
+		invalidflags |= (1<<which);
 	}
 
 	DInterpolation *SetInterpolation(int position);
 	void StopInterpolation(int position);
 	//For GL
 	FLightNode * lighthead[2];				// all blended lights that may affect this wall
+	BYTE invalidflags;
 
 };
 
@@ -1172,7 +1276,11 @@ struct spriteframe_t
 //
 struct spritedef_t
 {
-	char name[5];
+	union
+	{
+		char name[5];
+		DWORD dwName;
+	};
 	BYTE numframes;
 	WORD spriteframes;
 };

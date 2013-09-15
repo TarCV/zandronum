@@ -36,7 +36,7 @@
 
 #include "doomtype.h"
 #include "doomdef.h"
-#include "autosegs.h"
+//#include "autosegs.h"
 #include "sc_man.h"
 //[BL] New Includes
 #include "sectinfo.h"
@@ -53,7 +53,7 @@ class FScanner;
 #define GCC_YSEG
 #else
 #define MSVC_YSEG
-#define GCC_YSEG __attribute__((section(YREG_SECTION)))
+#define GCC_YSEG __attribute__((section(SECTION_YREG)))
 #endif
 
 
@@ -199,10 +199,12 @@ enum ELevelFlags
 	LEVEL2_HEXENHACK			= 0x00800000,	// Level was defined in a Hexen style MAPINFO
 
 	LEVEL2_SMOOTHLIGHTING		= 0x01000000,	// Level uses the smooth lighting feature.
-	LEVEL2_NOBOTNODES			= 0x02000000,	// [BC] Level does not use bot nodes.
+	LEVEL2_POLYGRIND			= 0x02000000,	// Polyobjects grind corpses to gibs.
+	LEVEL2_RESETINVENTORY		= 0x04000000,	// Resets player inventory when starting this level (unless in a hub)
+	LEVEL2_NOBOTNODES			= 0x08000000,	// [BC] Level does not use bot nodes.
 	// [BB] Ceartain game modes are supposed to behave differently on
 	// the map. For example in duel mode the countdown and the map reset are skipped.
-	LEVEL2_ISLOBBY				= 0x04000000,
+	LEVEL2_ISLOBBY				= 0x10000000,
 };
 
 
@@ -364,7 +366,18 @@ struct FLevelLocals
 	int			levelnum;
 	int			lumpnum;
 	FString		LevelName;
-	char		mapname[256];			// the server name (base1, etc)
+	union
+	{
+		char		mapname[256];		// the server name (base1, etc)
+		// The endsequence is embedded in the name so that it can be
+		// carried around as a name. The first 6 character ought to
+		// match the string "enDSeQ".
+		struct
+		{
+			char	pad[6];
+			WORD	EndSequence;
+		};
+	};
 	char		nextmap[9];				// go here when fraglimit is hit
 	char		secretmap[9];			// map to go to when used secret exit
 
@@ -541,11 +554,16 @@ enum ESkillProperty
 	SKILLP_AutoUseHealth,
 	SKILLP_SpawnFilter,
 	SKILLP_EasyBossBrain,
-	SKILLP_ACSReturn
+	SKILLP_ACSReturn,
+	SKILLP_MonsterHealth,
+	SKILLP_FriendlyHealth,
+	SKILLP_NoPain
 };
 int G_SkillProperty(ESkillProperty prop);
 
 typedef TMap<FName, FString> SkillMenuNames;
+
+typedef TMap<FName, FName> SkillActorReplacement;
 
 struct FSkillInfo
 {
@@ -568,6 +586,11 @@ struct FSkillInfo
 	FString MustConfirmText;
 	char Shortcut;
 	FString TextColor;
+	SkillActorReplacement Replace;
+	SkillActorReplacement Replaced;
+	fixed_t MonsterHealth;
+	fixed_t FriendlyHealth;
+	bool NoPain;
 
 	FSkillInfo() {}
 	FSkillInfo(const FSkillInfo &other)
@@ -576,9 +599,15 @@ struct FSkillInfo
 	}
 	FSkillInfo &operator=(const FSkillInfo &other);
 	int GetTextColor() const;
+
+	void SetReplacement(FName a, FName b);
+	FName GetReplacement(FName a);
+	void SetReplacedBy(FName b, FName a);
+	FName GetReplacedBy(FName b);
 };
 
 extern TArray<FSkillInfo> AllSkills;
+extern int DefaultSkill;
 
 
 
