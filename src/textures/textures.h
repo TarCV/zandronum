@@ -3,6 +3,33 @@
 
 #include "doomtype.h"
 
+class FGLTextureBase
+{
+public:
+	virtual ~FGLTextureBase() {}
+};
+
+struct FloatRect
+{
+	float left,top;
+	float width,height;
+
+
+	void Offset(float xofs,float yofs)
+	{
+		left+=xofs;
+		top+=yofs;
+	}
+	void Scale(float xfac,float yfac)
+	{
+		left*=xfac;
+		width*=xfac;
+		top*=yfac;
+		height*=yfac;
+	}
+};
+
+
 class FBitmap;
 struct FRemapTable;
 struct FCopyInfo;
@@ -83,7 +110,6 @@ enum FTextureFormat
 };
 
 class FNativeTexture;
-class FGLTexture;
 
 // Base texture class
 class FTexture
@@ -102,7 +128,11 @@ public:
 
 	int SourceLump;
 
-	char Name[9];
+	union
+	{
+		char Name[9];
+		DWORD dwName;		// Used with sprites
+	};
 	BYTE UseType;	// This texture's primary purpose
 
 	BYTE bNoDecals:1;		// Decals should not stick to texture
@@ -148,8 +178,8 @@ public:
 	// Returns the whole texture, stored in column-major order
 	virtual const BYTE *GetPixels () = 0;
 	
-	virtual int CopyTrueColorPixels(FBitmap *bmp, int x, int y, int rotate=0, FCopyInfo *inf = NULL);
-	int CopyTrueColorTranslated(FBitmap *bmp, int x, int y, int rotate, FRemapTable *remap, FCopyInfo *inf = NULL);
+	virtual int CopyTrueColorPixels(FBitmap *bmp, int x, int y, int w=-1, int h=-1, int rotate=0, FCopyInfo *inf = NULL);
+	int CopyTrueColorTranslated(FBitmap *bmp, int x, int y,int w, int h, int rotate, FRemapTable *remap, FCopyInfo *inf = NULL);
 	virtual bool UseBasePalette();
 	virtual int GetSourceLump() { return SourceLump; }
 	virtual FTexture *GetRedirect(bool wantwarped);
@@ -226,6 +256,8 @@ protected:
 		bNoDecals = other->bNoDecals;
 		Rotations = other->Rotations;
 		gl_info = other->gl_info;
+		gl_info.Brightmap = NULL;
+		gl_info.areas = NULL;
 	}
 
 	static void FlipSquareBlock (BYTE *block, int x, int y);
@@ -239,17 +271,20 @@ public:
 
 	struct MiscGLInfo
 	{
-		FGLTexture *GLTexture;
+		FGLTextureBase *RenderTexture;
 		FTexture *Brightmap;
 		PalEntry GlowColor;
 		PalEntry FloorSkyColor;
 		PalEntry CeilingSkyColor;
 		int GlowHeight;
+		FloatRect *areas;
+		int areacount;
+		int mIsTransparent:2;
 		bool bGlowing:1;						// Texture glows
 		bool bFullbright:1;						// always draw fullbright
 		bool bSkybox:1;							// This is a skybox
 		bool bSkyColorDone:1;					// Fill color for sky
-		char bBrightmapChecked:2;				// 0: not initialized yet, -1 not checked, 1 checked
+		char bBrightmapChecked:1;				// Set to 1 if brightmap has been checked
 		bool bBrightmap:1;						// This is a brightmap
 		bool bBrightmapDisablesFullbright:1;	// This disables fullbright display
 
@@ -261,8 +296,14 @@ public:
 	virtual void PrecacheGL();
 	virtual void UncacheGL();
 	void GetGlowColor(float *data);
+	PalEntry GetSkyCapColor(bool bottom);
 	bool isGlowing() { return gl_info.bGlowing; }
 	bool isFullbright() { return gl_info.bFullbright; }
+	void CreateDefaultBrightmap();
+	bool FindHoles(const unsigned char * buffer, int w, int h);
+	static bool SmoothEdges(unsigned char * buffer,int w, int h);
+	void CheckTrans(unsigned char * buffer, int size, int trans);
+	bool ProcessData(unsigned char * buffer, int w, int h, bool ispatch);
 };
 
 // Texture manager
@@ -304,6 +345,12 @@ public:
 		return Textures[Translation[texnum.texnum]].Texture;
 	}
 
+	FTexture *ByIndexTranslated(int i)
+	{
+		if (unsigned(i) >= Textures.Size()) return NULL;
+		return Textures[Translation[i]].Texture;
+	}
+
 	void SetTranslation (FTextureID fromtexnum, FTextureID totexnum)
 	{
 		if ((size_t)fromtexnum.texnum < Translation.Size())
@@ -330,7 +377,7 @@ public:
 
 	void AddTexturesLump (const void *lumpdata, int lumpsize, int deflumpnum, int patcheslump, int firstdup=0, bool texture1=false);
 	void AddTexturesLumps (int lump1, int lump2, int patcheslump);
-	void AddGroup(int wadnum, const char * startlump, const char * endlump, int ns, int usetype);
+	void AddGroup(int wadnum, int ns, int usetype);
 	void AddPatches (int lumpnum);
 	void AddTiles (void *tileFile);
 	void AddHiresTextures (int wadnum);

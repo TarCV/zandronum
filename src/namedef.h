@@ -24,6 +24,10 @@ xx(Spray)
 xx(Ghost)
 xx(Reflective)
 
+// Invisibility types
+xx(Cumulative)
+xx(Fuzzy)
+
 // Healingradius types
 xx(Mana)
 xx(Armor)
@@ -235,6 +239,7 @@ xx(PoisonCloud)	// makes monsters howl.
 // Special death name for getting killed excessively. Could be used as
 // a damage type if you wanted to force an extreme death.
 xx(Extreme)
+xx(MDK)
 
 // [BB] Skulltag Damage types
 xx(Grenade)
@@ -302,6 +307,7 @@ xx(Heightceiling)
 xx(Lightlevel)
 xx(Texturefloor)
 xx(Textureceiling)
+xx(Nodecals)
 
 xx(Skill1)
 xx(Skill2)
@@ -416,6 +422,12 @@ xx(offsetx_mid)
 xx(offsety_mid)
 xx(offsetx_bottom)
 xx(offsety_bottom)
+xx(scalex_top)
+xx(scaley_top)
+xx(scalex_mid)
+xx(scaley_mid)
+xx(scalex_bottom)
+xx(scaley_bottom)
 xx(light)
 xx(lightabsolute)
 xx(nofakecontrast)

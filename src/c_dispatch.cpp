@@ -52,6 +52,7 @@
 #include "m_crc32.h"
 #include "v_text.h"
 #include "d_net.h"
+#include "d_main.h"
 // [BC] new #includes.
 #include "p_local.h"
 #include "g_level.h"
@@ -426,7 +427,7 @@ FButtonStatus *FindButton (unsigned int key)
 	return bit ? bit->Button : NULL;
 }
 
-void FButtonStatus::PressKey (int keynum)
+bool FButtonStatus::PressKey (int keynum)
 {
 	int i, open;
 
@@ -450,22 +451,26 @@ void FButtonStatus::PressKey (int keynum)
 			}
 			else if (Keys[i] == keynum)
 			{ // Key is already down; do nothing
-				return;
+				return false;
 			}
 		}
 		if (open < 0)
 		{ // No free key slots, so do nothing
 			Printf ("More than %u keys pressed for a single action!\n", MAX_KEYS);
-			return;
+			return false;
 		}
 		Keys[open] = keynum;
 	}
+	BYTE wasdown = bDown;
 	bDown = bWentDown = true;
+	// Returns true if this key caused the button to go down.
+	return !wasdown;
 }
 
-void FButtonStatus::ReleaseKey (int keynum)
+bool FButtonStatus::ReleaseKey (int keynum)
 {
 	int i, numdown, match;
+	BYTE wasdown = bDown;
 
 	keynum &= KEY_DBLCLICKED-1;
 
@@ -493,7 +498,7 @@ void FButtonStatus::ReleaseKey (int keynum)
 		}
 		if (match < 0)
 		{ // Key was not down; do nothing
-			return;
+			return false;
 		}
 		Keys[match] = 0;
 		bWentUp = true;
@@ -502,6 +507,8 @@ void FButtonStatus::ReleaseKey (int keynum)
 			bDown = false;
 		}
 	}
+	// Returns true if releasing this key caused the button to go up.
+	return wasdown && !bDown;
 }
 
 void ResetButtonTriggers ()
@@ -549,7 +556,7 @@ void C_DoCommand (const char *cmd, int keynum)
 			;
 	}
 
-	const int len = end - beg;
+	const size_t len = end - beg;
 
 	if (ParsingKeyConf)
 	{
@@ -634,7 +641,7 @@ void C_DoCommand (const char *cmd, int keynum)
 	}
 	else
 	{ // Check for any console vars that match the command
-		FBaseCVar *var = FindCVarSub (beg, len);
+		FBaseCVar *var = FindCVarSub (beg, int(len));
 
 		if (var != NULL)
 		{
@@ -668,7 +675,7 @@ void C_DoCommand (const char *cmd, int keynum)
 		else
 		{ // We don't know how to handle this command
 			char cmdname[64];
-			int minlen = MIN (len, 63);
+			size_t minlen = MIN<size_t> (len, 63);
 
 			memcpy (cmdname, beg, minlen);
 			cmdname[minlen] = 0;
@@ -837,7 +844,7 @@ static long ParseCommandLine (const char *args, int *argc, char **argv, bool no_
 
 			while (*args && *args > ' ' && *args != '\"')
 				args++;
-			if (*start == '$' && (var = FindCVarSub (start+1, args-start-1)))
+			if (*start == '$' && (var = FindCVarSub (start+1, int(args-start-1))))
 			{
 				val = var->GetGenericRep (CVAR_String);
 				start = val.String;
@@ -1407,7 +1414,6 @@ void FConsoleAlias::SafeDelete ()
 	}
 }
 
-extern void D_AddFile (const char *file, bool bLoadedAutomatically);	// [BC] Changed slightly.
 static BYTE PullinBad = 2;
 static const char *PullinFile;
 
@@ -1526,7 +1532,7 @@ CCMD (pullin)
 						FixPathSeperator (path);
 					}
 				}
-				D_AddFile (path, true);	// [BC]
+				D_AddFile (path, true, true);	// [BC]
 				if (path != argv[i])
 				{
 					delete[] path;

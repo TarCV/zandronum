@@ -350,10 +350,13 @@ struct UDMFParser
 		return parsedString;
 	}
 
-	void Flag(DWORD &value, int mask, const char *key)
+	template<typename T>
+	void Flag(T &value, int mask, const char *key)
 	{
-		if (CheckBool(key))	value |= mask;
-		else value &= ~mask;
+		if (CheckBool(key))
+			value |= mask;
+		else
+			value &= ~mask;
 	}
 
 
@@ -598,7 +601,7 @@ struct UDMFParser
 		memset(ld, 0, sizeof(*ld));
 		ld->Alpha = FRACUNIT;
 		ld->id = -1;
-		ld->sidenum[0] = ld->sidenum[1] = NO_SIDE;
+		ld->sidedef[0] = ld->sidedef[1] = NULL;
 		if (level.flags2 & LEVEL2_CLIPMIDTEX) ld->flags |= ML_CLIP_MIDTEX;
 		if (level.flags2 & LEVEL2_WRAPMIDTEX) ld->flags |= ML_WRAP_MIDTEX;
 		if (level.flags2 & LEVEL2_CHECKSWITCHRANGE) ld->flags |= ML_CHECKSWITCHRANGE;
@@ -634,11 +637,11 @@ struct UDMFParser
 				continue;
 
 			case NAME_Sidefront:
-				ld->sidenum[0] = CheckInt(key);
+				ld->sidedef[0] = (side_t*)(intptr_t)(1 + CheckInt(key));
 				continue;
 
 			case NAME_Sideback:
-				ld->sidenum[1] = CheckInt(key);
+				ld->sidedef[1] = (side_t*)(intptr_t)(1 + CheckInt(key));
 				continue;
 
 			case NAME_Arg0:
@@ -861,6 +864,8 @@ struct UDMFParser
 		strncpy(sdt->bottomtexture, "-", 8);
 		strncpy(sdt->toptexture, "-", 8);
 		strncpy(sdt->midtexture, "-", 8);
+		sd->SetTextureXScale(FRACUNIT);
+		sd->SetTextureYScale(FRACUNIT);
 
 		sc.MustGetToken('{');
 		while (!sc.CheckToken('}'))
@@ -922,23 +927,56 @@ struct UDMFParser
 				sd->SetTextureYOffset(side_t::bottom, CheckFixed(key));
 				continue;
 
+			case NAME_scalex_top:
+				sd->SetTextureXScale(side_t::top, CheckFixed(key));
+				continue;
+
+			case NAME_scaley_top:
+				sd->SetTextureYScale(side_t::top, CheckFixed(key));
+				continue;
+
+			case NAME_scalex_mid:
+				sd->SetTextureXScale(side_t::mid, CheckFixed(key));
+				continue;
+
+			case NAME_scaley_mid:
+				sd->SetTextureYScale(side_t::mid, CheckFixed(key));
+				continue;
+
+			case NAME_scalex_bottom:
+				sd->SetTextureXScale(side_t::bottom, CheckFixed(key));
+				continue;
+
+			case NAME_scaley_bottom:
+				sd->SetTextureYScale(side_t::bottom, CheckFixed(key));
+				continue;
+
 			case NAME_light:
 				sd->SetLight(CheckInt(key));
 				continue;
 
 			case NAME_lightabsolute:
-				if (CheckBool(key)) sd->Flags |= WALLF_ABSLIGHTING;
-				else sd->Flags &= ~WALLF_ABSLIGHTING;
+				Flag(sd->Flags, WALLF_ABSLIGHTING, key);
 				continue;
 
 			case NAME_nofakecontrast:
-				if (CheckBool(key)) sd->Flags |= WALLF_NOFAKECONTRAST;
-				else sd->Flags &= WALLF_NOFAKECONTRAST;
+				Flag(sd->Flags, WALLF_NOFAKECONTRAST, key);
 				continue;
 
 			case NAME_smoothlighting:
-				if (CheckBool(key)) sd->Flags |= WALLF_SMOOTHLIGHTING;
-				else sd->Flags &= ~WALLF_SMOOTHLIGHTING;
+				Flag(sd->Flags, WALLF_SMOOTHLIGHTING, key);
+				continue;
+
+			case NAME_Wrapmidtex:
+				Flag(sd->Flags, WALLF_WRAP_MIDTEX, key);
+				continue;
+
+			case NAME_Clipmidtex:
+				Flag(sd->Flags, WALLF_CLIP_MIDTEX, key);
+				continue;
+
+			case NAME_Nodecals:
+				Flag(sd->Flags, WALLF_NOAUTODECALS, key);
 				continue;
 
 			default:
@@ -977,7 +1015,6 @@ struct UDMFParser
 		sec->SetYScale(sector_t::floor, FRACUNIT);
 		sec->SetXScale(sector_t::ceiling, FRACUNIT);
 		sec->SetYScale(sector_t::ceiling, FRACUNIT);
-		sec->oldspecial = !!(sec->special&SECRET_MASK);
 		sec->thinglist = NULL;
 		sec->touching_thinglist = NULL;		// phares 3/14/98
 		sec->seqType = (level.flags & LEVEL_SNDSEQTOTALCTRL)? 0:-1;
@@ -1141,6 +1178,7 @@ struct UDMFParser
 			}
 		}
 
+		sec->secretsector = !!(sec->special&SECRET_MASK);
 		sec->floorplane.d = -sec->GetPlaneTexZ(sector_t::floor);
 		sec->floorplane.c = FRACUNIT;
 		sec->floorplane.ic = FRACUNIT;
@@ -1245,9 +1283,9 @@ struct UDMFParser
 				ParsedLines[i].v1 = &vertexes[v1i];
 				ParsedLines[i].v2 = &vertexes[v2i];
 
-				if (ParsedLines[i].sidenum[0] != NO_SIDE)
+				if (ParsedLines[i].sidedef[0] != NULL)
 					sidecount++;
-				if (ParsedLines[i].sidenum[1] != NO_SIDE)
+				if (ParsedLines[i].sidedef[1] != NULL)
 					sidecount++;
 				linemap.Push(i+skipped);
 				i++;
@@ -1266,13 +1304,13 @@ struct UDMFParser
 
 			for(int sd = 0; sd < 2; sd++)
 			{
-				if (lines[line].sidenum[sd] != NO_SIDE)
+				if (lines[line].sidedef[sd] != NULL)
 				{
-					int mapside = lines[line].sidenum[sd];
+					int mapside = int(intptr_t(lines[line].sidedef[sd]))-1;
 					sides[side] = ParsedSides[mapside];
-					sides[side].linenum = line;
+					sides[side].linedef = &lines[line];
 					sides[side].sector = &sectors[intptr_t(sides[side].sector)];
-					lines[line].sidenum[sd] = side;
+					lines[line].sidedef[sd] = &sides[side];
 
 					P_ProcessSideTextures(!isExtended, &sides[side], sides[side].sector, &ParsedSideTextures[mapside],
 						lines[line].special, lines[line].args[0], &tempalpha[sd]);

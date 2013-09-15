@@ -192,14 +192,6 @@ enum
 	MF2_SEEKERMISSILE	= 0x40000000,	// is a seeker (for reflection)
 	MF2_REFLECTIVE		= 0x80000000,	// reflects missiles
 
-	// The three types of bounciness are:
-	// HERETIC - Missile will only bounce off the floor once and then enter
-	//			 its death state. It does not bounce off walls at all.
-	// HEXEN -	 Missile bounces off of walls and floors indefinitely.
-	// DOOM -	 Like Hexen, but the bounce turns off if its vertical velocity
-	//			 is too low.
-
-
 // --- mobj.flags3 ---
 
 	MF3_FLOORHUGGER		= 0x00000001,	// Missile stays on floor
@@ -225,8 +217,8 @@ enum
 	MF3_NOBLOCKMONST	= 0x00100000,	// Can cross ML_BLOCKMONSTERS lines
 	MF3_CRASHED			= 0x00200000,	// Actor entered its crash state
 	MF3_FULLVOLDEATH	= 0x00400000,	// DeathSound is played full volume (for missiles)
-	MF3_CANBOUNCEWATER	= 0x00800000,	// Missile can bounce on water
-	MF3_NOWALLBOUNCESND = 0x01000000,	// Don't make noise when bouncing off a wall
+	/*					= 0x00800000,	*/
+	/*				    = 0x01000000,	*/
 	MF3_FOILINVUL		= 0x02000000,	// Actor can hurt MF2_INVULNERABLE things
 	MF3_NOTELEOTHER		= 0x04000000,	// Monster is unaffected by teleport other artifact
 	MF3_BLOODLESSIMPACT	= 0x08000000,	// Projectile does not leave blood
@@ -257,25 +249,25 @@ enum
 	MF4_LOOKALLAROUND	= 0x00010000,	// Monster has eyes in the back of its head
 	MF4_STANDSTILL		= 0x00020000,	// Monster should not chase targets unless attacked?
 	MF4_SPECTRAL		= 0x00040000,
-	MF4_SCROLLMOVE		= 0x00080000,	// momentum has been applied by a scroller
+	MF4_SCROLLMOVE		= 0x00080000,	// velocity has been applied by a scroller
 	MF4_NOSPLASHALERT	= 0x00100000,	// Splashes don't alert this monster
 	MF4_SYNCHRONIZED	= 0x00200000,	// For actors spawned at load-time only: Do not randomize tics
 	MF4_NOTARGETSWITCH	= 0x00400000,	// monster never switches target until current one is dead
 	MF4_VFRICTION		= 0x00800000,	// Internal flag used by A_PainAttack to push a monster down
-	MF4_DONTHURTSPECIES	= 0x01000000,	// Don't hurt one's own kind with explosions (hitscans, too?)
+	MF4_DONTHARMCLASS	= 0x01000000,	// Don't hurt one's own kind with explosions (hitscans, too?)
 	MF4_SHIELDREFLECT	= 0x02000000,
 	MF4_DEFLECT			= 0x04000000,	// different projectile reflection styles
 	MF4_ALLOWPARTICLES	= 0x08000000,	// this puff type can be replaced by particles
 	MF4_NOEXTREMEDEATH	= 0x10000000,	// this projectile or weapon never gibs its victim
 	MF4_EXTREMEDEATH	= 0x20000000,	// this projectile or weapon always gibs its victim
 	MF4_FRIGHTENED		= 0x40000000,	// Monster runs away from player
-	MF4_NOBOUNCESOUND	= 0x80000000,	// Strife's grenades don't make a bouncing sound. 
+	/*					= 0x80000000,	*/
 	
 	MF5_FASTER			= 0x00000001,	// moves faster when DF_FAST_MONSTERS or nightmare is on.
 	MF5_FASTMELEE		= 0x00000002,	// has a faster melee attack when DF_FAST_MONSTERS or nightmare is on.
 	MF5_NODROPOFF		= 0x00000004,	// cannot drop off under any circumstances.
-	MF5_BOUNCEONACTORS	= 0x00000008,	// bouncing missile doesn't explode when it hits an actor 
-	MF5_EXPLODEONWATER	= 0x00000010,	// bouncing missile explodes when hitting a water surface
+	/*					= 0x00000008,	*/
+	/*					= 0x00000010,	*/
 	MF5_AVOIDINGDROPOFF = 0x00000020,	// Used to move monsters away from dropoffs
 	MF5_NODAMAGE		= 0x00000040,	// Actor can be shot and reacts to being shot but takes no damage
 	MF5_CHASEGOAL		= 0x00000080,	// Walks to goal instead of target if a valid goal is set.
@@ -308,6 +300,12 @@ enum
 	MF6_NOBOSSRIP		= 0x00000001,	// For rippermissiles: Don't rip through bosses.
 	MF6_THRUSPECIES		= 0x00000002,	// Actors passes through other of the same species.
 	MF6_MTHRUSPECIES	= 0x00000004,	// Missile passes through actors of its shooter's species.
+	MF6_FORCEPAIN		= 0x00000008,	// forces target into painstate (unless it has the NOPAIN flag)
+	MF6_NOFEAR			= 0x00000010,	// Not scared of frightening players
+	MF6_BUMPSPECIAL		= 0x00000020,	// Actor executes its special when being collided (as the ST flag)
+	MF6_DONTHARMSPECIES = 0x00000040,	// Don't hurt one's own species with explosions (hitscans, too?)
+	MF6_STEPMISSILE		= 0x00000080,	// Missile can "walk" up steps
+	MF6_NOTELEFRAG		= 0x00000100,	// [HW] Actor can't be telefragged
 
 	// [BC] More object flags for Skulltag.
 
@@ -327,7 +325,7 @@ enum
 	//STFL_IMPALE			= 0x00000010,
 
 	// Execute this object's special when a players bumps into it.
-	STFL_BUMPSPECIAL	= 0x00000020,
+	//STFL_BUMPSPECIAL	= 0x00000020,
 
 	// *** THE FOLLOWING FLAGS ARE IDENTIFERS FOR BOTS ***
 	// ... eh, there's probably a better way to do this.
@@ -482,19 +480,46 @@ enum replace_t
 
 enum EBounceType
 {
-	BOUNCE_None=0,
-	BOUNCE_Doom=1,
-	BOUNCE_Heretic=2,
-	BOUNCE_Hexen=3,
+	BOUNCE_Walls = 1<<0,		// bounces off of walls
+	BOUNCE_Floors = 1<<1,		// bounces off of floors
+	BOUNCE_Ceilings = 1<<2,		// bounces off of ceilings
+	BOUNCE_Actors = 1<<3,		// bounces off of some actors
+	BOUNCE_AllActors = 1<<4,	// bounces off of all actors (requires BOUNCE_Actors to be set, too)
+	BOUNCE_AutoOff = 1<<5,		// when bouncing off a floor, if the new Z velocity is below 3.0, disable further bouncing
+	BOUNCE_HereticType = 1<<6,	// only works with floors and ceilings; you probably don't want to use it
 
-	BOUNCE_TypeMask = 3,
-	BOUNCE_UseSeeSound = 4,	// compatibility fallback. Thios will only be 
-							// set by the compatibility handlers for the old bounce flags.
+	BOUNCE_UseSeeSound = 1<<7,	// compatibility fallback. This will only be set by
+								// the compatibility handlers for the old bounce flags.
+	BOUNCE_NoWallSound = 1<<8,	// don't make noise when bouncing off a wall
+	BOUNCE_Quiet = 1<<9,		// Strife's grenades don't make a bouncing sound
+	BOUNCE_ExplodeOnWater = 1<<10,	// explodes when hitting a water surface
+	BOUNCE_CanBounceWater = 1<<11,	// can bounce on water
+
+	BOUNCE_TypeMask = BOUNCE_Walls | BOUNCE_Floors | BOUNCE_Ceilings | BOUNCE_Actors | BOUNCE_AutoOff | BOUNCE_HereticType,
+
+	// The three "standard" types of bounciness are:
+	// HERETIC - Missile will only bounce off the floor once and then enter
+	//			 its death state. It does not bounce off walls at all.
+	// HEXEN -	 Missile bounces off of walls and floors indefinitely.
+	// DOOM -	 Like Hexen, but the bounce turns off if its vertical velocity
+	//			 is too low.
+	BOUNCE_None = 0,
+	BOUNCE_Heretic = BOUNCE_Floors | BOUNCE_Ceilings | BOUNCE_HereticType,
+	BOUNCE_Doom = BOUNCE_Walls | BOUNCE_Floors | BOUNCE_Ceilings | BOUNCE_Actors | BOUNCE_AutoOff,
+	BOUNCE_Hexen = BOUNCE_Walls | BOUNCE_Floors | BOUNCE_Ceilings | BOUNCE_Actors,
 
 	// combined types
 	BOUNCE_DoomCompat = BOUNCE_Doom | BOUNCE_UseSeeSound,
 	BOUNCE_HereticCompat = BOUNCE_Heretic | BOUNCE_UseSeeSound,
-	BOUNCE_HexenCompat = BOUNCE_Hexen | BOUNCE_UseSeeSound,
+	BOUNCE_HexenCompat = BOUNCE_Hexen | BOUNCE_UseSeeSound
+
+	// The distinction between BOUNCE_Actors and BOUNCE_AllActors: A missile with
+	// BOUNCE_Actors set will bounce off of reflective and "non-sentient" actors.
+	// A missile that also has BOUNCE_AllActors set will bounce off of any actor.
+	// For compatibility reasons when BOUNCE_Actors was implied by the bounce type
+	// being "Doom" or "Hexen" and BOUNCE_AllActors was the separate
+	// MF5_BOUNCEONACTORS, you must set BOUNCE_Actors for BOUNCE_AllActors to have
+	// an effect.
 };
 
 // [RH] Like msecnode_t, but for the blockmap
@@ -736,6 +761,9 @@ public:
 	// Die. Now.
 	virtual bool Massacre ();
 
+	// Transforms the actor into a finely-ground paste
+	bool Grind(bool items);
+
 	// Is the other actor on my team?
 	bool IsTeammate (AActor *other);
 
@@ -750,6 +778,9 @@ public:
 	
 	// Enter the crash state
 	void Crash();
+
+	// Return starting health adjusted by skill level
+	int SpawnHealth();
 
 	// Check for monsters that count as kill but excludes all friendlies.
 	bool CountsAsKill() const
@@ -796,7 +827,7 @@ public:
 	FTextureID		ceilingpic;			// contacted sec ceilingpic
 	fixed_t			radius, height;		// for movement checking
 	fixed_t			projectilepassheight;	// height for clipping projectile movement against this actor
-	fixed_t			momx, momy, momz;	// momentums
+	fixed_t			velx, vely, velz;	// velocity
 	SDWORD			tics;				// state tic counter
 	FState			*state;
 	SDWORD			Damage;			// For missiles and monster railgun
@@ -858,18 +889,20 @@ public:
 	BYTE			boomwaterlevel;	// splash information for non-swimmable water sectors
 	BYTE			MinMissileChance;// [RH] If a random # is > than this, then missile attack.
 	SBYTE			LastLookPlayerNumber;// Player number last looked for (if TIDtoHate == 0)
+	WORD			BounceFlags;	// which bouncing type?
 	WORD			SpawnFlags;
 	fixed_t			meleerange;		// specifies how far a melee attack reaches.
 	fixed_t			meleethreshold;	// Distance below which a monster doesn't try to shoot missiles anynore
 									// but instead tries to come closer for a melee attack.
 									// This is not the same as meleerange
 	fixed_t			maxtargetrange;	// any target farther away cannot be attacked
-	int				bouncetype;		// which bouncing type?
 	fixed_t			bouncefactor;	// Strife's grenades use 50%, Hexen's Flechettes 70.
 	fixed_t			wallbouncefactor;	// The bounce factor for walls can be different.
 	int				bouncecount;	// Strife's grenades only bounce twice before exploding
 	fixed_t			gravity;		// [GRB] Gravity factor
 	int 			FastChaseStrafeCount;
+	fixed_t			pushfactor;
+	int				lastpush;
 	int				DesignatedTeam;	// Allow for friendly fire cacluations to be done on non-players.
 
 	AActor			*BlockingMobj;	// Actor that blocked the last move

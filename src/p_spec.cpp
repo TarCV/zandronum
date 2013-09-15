@@ -207,7 +207,7 @@ bool CheckIfExitIsGood (AActor *self, level_info_t *info)
 	     || (( survival ) && ( SURVIVAL_GetState( ) == SURVS_COUNTDOWN ))
 	   )
 	{
-		P_DamageMobj (self, self, self, 1000000, NAME_Exit);
+		P_DamageMobj (self, self, self, TELEFRAG_DAMAGE, NAME_Exit);
 		return false;
 	}
 	// Is this a singleplayer game and the next map is part of the same hub and we're dead?
@@ -334,7 +334,7 @@ bool P_ActivateLine (line_t *line, AActor *mo, int side, int activationType)
 	{
 		if (activationType == SPAC_Use || activationType == SPAC_Impact)
 		{
-			P_ChangeSwitchTexture (&sides[line->sidenum[0]], repeat, special);
+			P_ChangeSwitchTexture (line->sidedef[0], repeat, special);
 
 			// [BC] Tell the clients of the switch texture change.
 //			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
@@ -351,7 +351,7 @@ bool P_ActivateLine (line_t *line, AActor *mo, int side, int activationType)
 		line->args[0] &&										// only if there's a tag (which is stored in the first arg)
 		P_FindSectorFromTag (line->args[0], -1) == -1)			// only if no sector is tagged to this linedef
 	{
-		P_ChangeSwitchTexture (&sides[line->sidenum[0]], repeat, special);
+		P_ChangeSwitchTexture (line->sidedef[0], repeat, special);
 		line->special = 0;
 
 		// [BC] Tell the clients of the switch texture change.
@@ -876,17 +876,17 @@ CUSTOM_CVAR (Bool, forcewater, false, CVAR_ARCHIVE|CVAR_SERVERINFO)
 
 		for (i = 0; i < numsectors; i++)
 		{
-			if (sectors[i].heightsec &&
-				!(sectors[i].heightsec->MoreFlags & SECF_IGNOREHEIGHTSEC) &&
+			sector_t *hsec = sectors[i].GetHeightSec();
+			if (hsec &&
 				!(sectors[i].heightsec->MoreFlags & SECF_UNDERWATER))
 			{
 				if (self)
 				{
-					sectors[i].heightsec->MoreFlags |= SECF_FORCEDUNDERWATER;
+					hsec->MoreFlags |= SECF_FORCEDUNDERWATER;
 				}
 				else
 				{
-					sectors[i].heightsec->MoreFlags &= ~SECF_FORCEDUNDERWATER;
+					hsec->MoreFlags &= ~SECF_FORCEDUNDERWATER;
 				}
 			}
 		}
@@ -1018,14 +1018,14 @@ DWallLightTransfer::DWallLightTransfer (sector_t *srcSec, int target, BYTE flags
 
 	for (linenum = -1; (linenum = P_FindLineFromID (target, linenum)) >= 0; )
 	{
-		if (flags & WLF_SIDE1 && lines[linenum].sidenum[0]!=NO_SIDE)
+		if (flags & WLF_SIDE1 && lines[linenum].sidedef[0] != NULL)
 		{
-			sides[lines[linenum].sidenum[0]].Flags |= wallflags;
+			lines[linenum].sidedef[0]->Flags |= wallflags;
 		}
 
-		if (flags & WLF_SIDE2 && lines[linenum].sidenum[1]!=NO_SIDE)
+		if (flags & WLF_SIDE2 && lines[linenum].sidedef[1] != NULL)
 		{
-			sides[lines[linenum].sidenum[1]].Flags |= wallflags;
+			lines[linenum].sidedef[1]->Flags |= wallflags;
 		}
 	}
 	ChangeStatNum(STAT_LIGHTTRANSFER);
@@ -1050,14 +1050,14 @@ void DWallLightTransfer::DoTransfer (BYTE lightlevel, int target, BYTE flags)
 	{
 		line_t * line = &lines[linenum];
 
-		if (flags & WLF_SIDE1 && line->sidenum[0]!=NO_SIDE)
+		if (flags & WLF_SIDE1 && line->sidedef[0] != NULL)
 		{
-			sides[line->sidenum[0]].SetLight(lightlevel);
+			line->sidedef[0]->SetLight(lightlevel);
 		}
 
-		if (flags & WLF_SIDE2 && line->sidenum[1]!=NO_SIDE)
+		if (flags & WLF_SIDE2 && line->sidedef[1] != NULL)
 		{
-			sides[line->sidenum[1]].SetLight(lightlevel);
+			line->sidedef[1]->SetLight(lightlevel);
 		}
 	}
 }
@@ -1297,7 +1297,8 @@ void P_SpawnSpecials (void)
 	P_SpawnFriction();	// phares 3/12/98: New friction model using linedefs
 	P_SpawnPushers();	// phares 3/20/98: New pusher model using linedefs
 
-	for (i=0; i<numlines; i++)
+	for (i = 0; i < numlines; i++)
+	{
 		switch (lines[i].special)
 		{
 			int s;
@@ -1306,7 +1307,7 @@ void P_SpawnSpecials (void)
 		// killough 3/7/98:
 		// support for drawn heights coming from different sector
 		case Transfer_Heights:
-			sec = sides[lines[i].sidenum[0]].sector;
+			sec = lines[i].frontsector;
 			if (lines[i].args[1] & 2)
 			{
 				sec->MoreFlags |= SECF_FAKEFLOORONLY;
@@ -1335,25 +1336,26 @@ void P_SpawnSpecials (void)
 			{
 				sectors[s].heightsec = sec;
 				sec->e->FakeFloor.Sectors.Push(&sectors[s]);
+				sectors[s].AdjustFloorClip();
 			}
 			break;
 
 		// killough 3/16/98: Add support for setting
 		// floor lighting independently (e.g. lava)
 		case Transfer_FloorLight:
-			new DLightTransfer (sides[*lines[i].sidenum].sector, lines[i].args[0], true);
+			new DLightTransfer (lines[i].frontsector, lines[i].args[0], true);
 			break;
 
 		// killough 4/11/98: Add support for setting
 		// ceiling lighting independently
 		case Transfer_CeilingLight:
-			new DLightTransfer (sides[*lines[i].sidenum].sector, lines[i].args[0], false);
+			new DLightTransfer (lines[i].frontsector, lines[i].args[0], false);
 			break;
 
 		// [Graf Zahl] Add support for setting lighting
 		// per wall independently
 		case Transfer_WallLight:
-			new DWallLightTransfer (sides[*lines[i].sidenum].sector, lines[i].args[0], lines[i].args[1]);
+			new DWallLightTransfer (lines[i].frontsector, lines[i].args[0], lines[i].args[1]);
 			break;
 
 		case Sector_Attach3dMidtex:
@@ -1430,7 +1432,7 @@ void P_SpawnSpecials (void)
 			}
 			break;
 		}
-
+	}
 
 	// [BC] Save these values. If they change, and a client connects, send
 	// him the new values.
@@ -1532,8 +1534,8 @@ void DScroller::Tick ()
 				sides[m_Affectee].AddTextureXOffset(side_t::top, dx);
 				sides[m_Affectee].AddTextureYOffset(side_t::top, dy);
 			}
-			if (m_Parts & scw_mid && (lines[sides[m_Affectee].linenum].backsector == NULL ||
-				!(lines[sides[m_Affectee].linenum].flags&ML_3DMIDTEX)))
+			if (m_Parts & scw_mid && (sides[m_Affectee].linedef->backsector == NULL ||
+				!(sides[m_Affectee].linedef->flags&ML_3DMIDTEX)))
 			{
 				sides[m_Affectee].AddTextureXOffset(side_t::mid, dx);
 				sides[m_Affectee].AddTextureYOffset(side_t::mid, dy);
@@ -1629,8 +1631,8 @@ DScroller::DScroller (EScrollType type, fixed_t dx, fixed_t dy,
 		{
 			m_Interpolations[0] = sides[m_Affectee].SetInterpolation(side_t::top);
 		}
-		if (m_Parts & scw_mid && (lines[sides[m_Affectee].linenum].backsector == NULL ||
-			!(lines[sides[m_Affectee].linenum].flags&ML_3DMIDTEX)))
+		if (m_Parts & scw_mid && (sides[m_Affectee].linedef->backsector == NULL ||
+			!(sides[m_Affectee].linedef->flags&ML_3DMIDTEX)))
 		{
 			m_Interpolations[1] = sides[m_Affectee].SetInterpolation(side_t::mid);
 		}
@@ -1693,7 +1695,7 @@ DScroller::DScroller (fixed_t dx, fixed_t dy, const line_t *l,
 	m_Parts = scrollpos;
 	if ((m_Control = control) != -1)
 		m_LastHeight = sectors[control].CenterFloor() + sectors[control].CenterCeiling();
-	m_Affectee = *l->sidenum;
+	m_Affectee = int(l->sidedef[0] - sides);
 	sides[m_Affectee].Flags |= WALLF_NOAUTODECALS;
 	m_Interpolations[0] = m_Interpolations[1] = m_Interpolations[2] = NULL;
 
@@ -1701,8 +1703,8 @@ DScroller::DScroller (fixed_t dx, fixed_t dy, const line_t *l,
 	{
 		m_Interpolations[0] = sides[m_Affectee].SetInterpolation(side_t::top);
 	}
-	if (m_Parts & scw_mid && (lines[sides[m_Affectee].linenum].backsector == NULL ||
-		!(lines[sides[m_Affectee].linenum].flags&ML_3DMIDTEX)))
+	if (m_Parts & scw_mid && (sides[m_Affectee].linedef->backsector == NULL ||
+		!(sides[m_Affectee].linedef->flags&ML_3DMIDTEX)))
 	{
 		m_Interpolations[1] = sides[m_Affectee].SetInterpolation(side_t::mid);
 	}
@@ -1714,7 +1716,7 @@ DScroller::DScroller (fixed_t dx, fixed_t dy, const line_t *l,
 
 // Amount (dx,dy) vector linedef is shifted right to get scroll amount
 #define SCROLL_SHIFT 5
-#define SCROLLTYPE(i) ((i)<=0 ? 7:(i))
+#define SCROLLTYPE(i) (((i) <= 0) || ((i) & ~7) ? 7 : (i))
 
 // Initialize the scrollers
 static void P_SpawnScrollers(void)
@@ -1728,6 +1730,21 @@ static void P_SpawnScrollers(void)
 		fixed_t dy;
 		int control = -1, accel = 0;		// no control sector or acceleration
 		int special = l->special;
+
+		// Check for undefined parameters that are non-zero and output messages for them.
+		// We don't report for specials we don't understand.
+		if (special != 0)
+		{
+			int max = LineSpecialsInfo[special] != NULL ? LineSpecialsInfo[special]->map_args : countof(l->args);
+			for (int arg = max; arg < countof(l->args); ++arg)
+			{
+				if (l->args[arg] != 0)
+				{
+					Printf("Line %d (type %d:%s), arg %d is %d (should be 0)\n",
+						i, special, LineSpecialsInfo[special]->name, arg+1, l->args[arg]);
+				}
+			}
+		}
 
 		// killough 3/7/98: Types 245-249 are same as 250-254 except that the
 		// first side's sector's heights cause scrolling when they change, and
@@ -1750,7 +1767,7 @@ static void P_SpawnScrollers(void)
 			{
 				// if 1, then displacement
 				// if 2, then accelerative (also if 3)
-				control = int(sides[*l->sidenum].sector - sectors);
+				control = int(l->sidedef[0]->sector - sectors);
 				if (l->args[1] & 2)
 					accel = 1;
 			}
@@ -1823,7 +1840,7 @@ static void P_SpawnScrollers(void)
 				break;
 
 			// killough 3/2/98: scroll according to sidedef offsets
-			s = lines[i].sidenum[0];
+			s = int(lines[i].sidedef[0] - sides);
 			new DScroller (DScroller::sc_side, -sides[s].GetTextureXOffset(side_t::mid),
 				sides[s].GetTextureYOffset(side_t::mid), -1, s, accel, SCROLLTYPE(l->args[0]));
 			break;
@@ -1834,8 +1851,9 @@ static void P_SpawnScrollers(void)
 			if ( NETWORK_InClientMode( ) )
 				break;
 
+			s = int(lines[i].sidedef[0] - sides);
 			new DScroller (DScroller::sc_side, l->args[0] * (FRACUNIT/64), 0,
-						   -1, lines[i].sidenum[0], accel, SCROLLTYPE(l->args[1]));
+						   -1, s, accel, SCROLLTYPE(l->args[1]));
 			break;
 
 		case Scroll_Texture_Right:
@@ -1844,8 +1862,9 @@ static void P_SpawnScrollers(void)
 			if ( NETWORK_InClientMode( ) )
 				break;
 
+			s = int(lines[i].sidedef[0] - sides);
 			new DScroller (DScroller::sc_side, l->args[0] * (-FRACUNIT/64), 0,
-						   -1, lines[i].sidenum[0], accel, SCROLLTYPE(l->args[1]));
+						   -1, s, accel, SCROLLTYPE(l->args[1]));
 			break;
 
 		case Scroll_Texture_Up:
@@ -1854,8 +1873,9 @@ static void P_SpawnScrollers(void)
 			if ( NETWORK_InClientMode( ) )
 				break;
 
+			s = int(lines[i].sidedef[0] - sides);
 			new DScroller (DScroller::sc_side, 0, l->args[0] * (FRACUNIT/64),
-						   -1, lines[i].sidenum[0], accel, SCROLLTYPE(l->args[1]));
+						   -1, s, accel, SCROLLTYPE(l->args[1]));
 			break;
 
 		case Scroll_Texture_Down:
@@ -1864,8 +1884,9 @@ static void P_SpawnScrollers(void)
 			if ( NETWORK_InClientMode( ) )
 				break;
 
+			s = int(lines[i].sidedef[0] - sides);
 			new DScroller (DScroller::sc_side, 0, l->args[0] * (-FRACUNIT/64),
-						   -1, lines[i].sidenum[0], accel, SCROLLTYPE(l->args[1]));
+						   -1, s, accel, SCROLLTYPE(l->args[1]));
 			break;
 
 		case Scroll_Texture_Both:
@@ -1874,10 +1895,11 @@ static void P_SpawnScrollers(void)
 			if ( NETWORK_InClientMode( ) )
 				break;
 
+			s = int(lines[i].sidedef[0] - sides);
 			if (l->args[0] == 0) {
 				dx = (l->args[1] - l->args[2]) * (FRACUNIT/64);
 				dy = (l->args[4] - l->args[3]) * (FRACUNIT/64);
-				new DScroller (DScroller::sc_side, dx, dy, -1, lines[i].sidenum[0], accel);
+				new DScroller (DScroller::sc_side, dx, dy, -1, s, accel);
 			}
 			break;
 
@@ -1898,7 +1920,7 @@ static void P_SpawnScrollers(void)
 // phares 3/12/98: Start of friction effects
 
 // As the player moves, friction is applied by decreasing the x and y
-// momentum values on each tic. By varying the percentage of decrease,
+// velocity values on each tic. By varying the percentage of decrease,
 // we can simulate muddy or icy conditions. In mud, the player slows
 // down faster. In ice, the player slows down more slowly.
 //
@@ -1997,7 +2019,7 @@ void P_SetSectorFriction (int tag, int amount, bool alterFlag)
 	// the move distance is multiplied by 'friction/0x10000', so a
 	// higher friction value actually means 'less friction'.
 
-	// [RH] Twiddled these values so that momentum on ice (with
+	// [RH] Twiddled these values so that velocity on ice (with
 	//		friction 0xf900) is the same as in Heretic/Hexen.
 	if (friction >= ORIG_FRICTION)	// ice
 //		movefactor = ((0x10092 - friction)*(0x70))/0x158;
@@ -2204,8 +2226,8 @@ void DPusher::Tick ()
 					if (m_Source->GetClass()->TypeName == NAME_PointPusher)
 						pushangle += ANG180;    // away
 					pushangle >>= ANGLETOFINESHIFT;
-					thing->momx += FixedMul (speed, finecosine[pushangle]);
-					thing->momy += FixedMul (speed, finesine[pushangle]);
+					thing->velx += FixedMul (speed, finecosine[pushangle]);
+					thing->vely += FixedMul (speed, finesine[pushangle]);
 				}
 			}
 		}
@@ -2229,10 +2251,10 @@ void DPusher::Tick ()
 		if ( thing->player && thing->player->bSpectating )
 			continue;
 
+		sector_t *hsec = sec->GetHeightSec();
 		if (m_Type == p_wind)
 		{
-			if (sec->heightsec == NULL ||
-				sec->heightsec->MoreFlags & SECF_IGNOREHEIGHTSEC)
+			if (hsec == NULL)
 			{ // NOT special water sector
 				if (thing->z > thing->floorz) // above ground
 				{
@@ -2247,7 +2269,7 @@ void DPusher::Tick ()
 			}
 			else // special water sector
 			{
-				ht = sec->heightsec->floorplane.ZatPoint (thing->x, thing->y);
+				ht = hsec->floorplane.ZatPoint (thing->x, thing->y);
 				if (thing->z > ht) // above ground
 				{
 					xspeed = m_Xmag; // full force
@@ -2268,14 +2290,13 @@ void DPusher::Tick ()
 		{
 			const secplane_t *floor;
 
-			if (sec->heightsec == NULL ||
-				(sec->heightsec->MoreFlags & SECF_IGNOREHEIGHTSEC))
+			if (hsec == NULL)
 			{ // NOT special water sector
 				floor = &sec->floorplane;
 			}
 			else
 			{ // special water sector
-				floor = &sec->heightsec->floorplane;
+				floor = &hsec->floorplane;
 			}
 			if (thing->z > floor->ZatPoint (thing->x, thing->y))
 			{ // above ground
@@ -2287,8 +2308,8 @@ void DPusher::Tick ()
 				yspeed = m_Ymag;
 			}
 		}
-		thing->momx += xspeed<<(FRACBITS-PUSH_FACTOR);
-		thing->momy += yspeed<<(FRACBITS-PUSH_FACTOR);
+		thing->velx += xspeed<<(FRACBITS-PUSH_FACTOR);
+		thing->vely += yspeed<<(FRACBITS-PUSH_FACTOR);
 	}
 }
 

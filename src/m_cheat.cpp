@@ -106,6 +106,14 @@ void cht_DoCheat (player_t *player, int cheat)
 			SB_state = screen->GetPageCount ();
 		break;
 
+	case CHT_BUDDHA:
+		player->cheats ^= CF_BUDDHA;
+		if (player->cheats & CF_BUDDHA)
+			msg = GStrings("TXT_BUDDHAON");
+		else
+			msg = GStrings("TXT_BUDDHAOFF");
+		break;
+
 	case CHT_NOCLIP:
 		player->cheats ^= CF_NOCLIP;
 		if (player->cheats & CF_NOCLIP)
@@ -114,9 +122,9 @@ void cht_DoCheat (player_t *player, int cheat)
 			msg = GStrings("STSTR_NCOFF");
 		break;
 
-	case CHT_NOMOMENTUM:
-		player->cheats ^= CF_NOMOMENTUM;
-		if (player->cheats & CF_NOMOMENTUM)
+	case CHT_NOVELOCITY:
+		player->cheats ^= CF_NOVELOCITY;
+		if (player->cheats & CF_NOVELOCITY)
 			msg = GStrings("TXT_LEADBOOTSON");
 		else
 			msg = GStrings("TXT_LEADBOOTSOFF");
@@ -400,20 +408,24 @@ void cht_DoCheat (player_t *player, int cheat)
 		{
 			return;
 		}
-		// Take away all weapons that are either non-wimpy or use ammo.
-		for (item = player->mo->Inventory; item != NULL; )
 		{
-			AInventory *next = item->Inventory;
-			if (item->IsKindOf (RUNTIME_CLASS(AWeapon)))
+			// Take away all weapons that are either non-wimpy or use ammo.
+			AInventory **invp = &player->mo->Inventory, **lastinvp;
+			for (item = *invp; item != NULL; item = *invp)
 			{
-				AWeapon *weap = static_cast<AWeapon *> (item);
-				if (!(weap->WeaponFlags & WIF_WIMPY_WEAPON) ||
-					weap->AmmoType1 != NULL)
+				lastinvp = invp;
+				invp = &(*invp)->Inventory;
+				if (item->IsKindOf (RUNTIME_CLASS(AWeapon)))
 				{
-					item->Destroy ();
+					AWeapon *weap = static_cast<AWeapon *> (item);
+					if (!(weap->WeaponFlags & WIF_WIMPY_WEAPON) ||
+						weap->AmmoType1 != NULL)
+					{
+						item->Destroy ();
+						invp = lastinvp;
+					}
 				}
 			}
-			item = next;
 		}
 		msg = GStrings("TXT_CHEATIDKFA");
 		break;
@@ -446,8 +458,8 @@ void cht_DoCheat (player_t *player, int cheat)
 			// Don't allow this in deathmatch even with cheats enabled, because it's
 			// a very very cheap kill.
 			P_LineAttack (player->mo, player->mo->angle, PLAYERMISSILERANGE,
-				P_AimLineAttack (player->mo, player->mo->angle, PLAYERMISSILERANGE), 1000000,
-				NAME_None, NAME_BulletPuff);
+				P_AimLineAttack (player->mo, player->mo->angle, PLAYERMISSILERANGE), TELEFRAG_DAMAGE,
+				NAME_MDK, NAME_BulletPuff);
 		}
 		break;
 
@@ -719,7 +731,7 @@ void cht_Give (player_t *player, const char *name, int amount)
 		{
 			ABasicArmorPickup *armor = Spawn<ABasicArmorPickup> (0,0,0, NO_REPLACE);
 			armor->SaveAmount = 100*deh.BlueAC;
-			armor->SavePercent = gameinfo.gametype != GAME_Heretic ? FRACUNIT/2 : FRACUNIT*3/4;
+			armor->SavePercent = gameinfo.Armor2Percent > 0? gameinfo.Armor2Percent : FRACUNIT/2;
 			if (!armor->CallTryPickup (player->mo))
 			{
 				armor->Destroy ();
@@ -1135,7 +1147,7 @@ void cht_Suicide (player_t *plyr)
 	{
 		plyr->mo->flags |= MF_SHOOTABLE;
 		plyr->mo->flags2 &= ~MF2_INVULNERABLE;
-		P_DamageMobj (plyr->mo, plyr->mo, plyr->mo, 1000000, NAME_Suicide);
+		P_DamageMobj (plyr->mo, plyr->mo, plyr->mo, TELEFRAG_DAMAGE, NAME_Suicide);
 		if (plyr->mo->health <= 0) plyr->mo->flags &= ~MF_SHOOTABLE;
 	}
 }

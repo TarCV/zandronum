@@ -335,7 +335,7 @@ void P_SerializeWorld (FArchive &arc)
 			<< sec->Flags
 			<< sec->FloorSkyBox << sec->CeilingSkyBox
 			<< sec->ZoneNumber
-			<< sec->oldspecial
+			<< sec->secretsector
 			<< sec->interpolations[0]
 			<< sec->interpolations[1]
 			<< sec->interpolations[2]
@@ -429,19 +429,18 @@ void P_SerializeWorld (FArchive &arc)
 
 		for (j = 0; j < 2; j++)
 		{
-			if (li->sidenum[j] == NO_SIDE)
+			if (li->sidedef[j] == NULL)
 				continue;
 
-			side_t *si = &sides[li->sidenum[j]];
+			side_t *si = li->sidedef[j];
 			arc << si->textures[side_t::top]
 				<< si->textures[side_t::mid]
 				<< si->textures[side_t::bottom]
 				<< si->Light
 				<< si->Flags
 				<< si->LeftSide
-				<< si->RightSide;
-			if (SaveVersion >= 1575)
-				arc << si->Index;
+				<< si->RightSide
+				<< si->Index;
 			DBaseDecal::SerializeChain (arc, &si->AttachedDecals);
 			// [BC]
 			arc << si->SavedFlags
@@ -487,6 +486,10 @@ void extsector_t::Serialize(FArchive &arc)
 FArchive &operator<< (FArchive &arc, side_t::part &p)
 {
 	arc << p.xoffset << p.yoffset << p.interpolation << p.texture;// << p.Light;
+	if (SaveVersion >= 1645)
+	{
+		arc << p.xscale << p.yscale;
+	}
 	return arc;
 }
 

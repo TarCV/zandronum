@@ -131,7 +131,7 @@ void iCopyColors(BYTE *pout, const BYTE *pin, int count, int step, FCopyInfo *in
 		break;
 
 	case BLEND_GREENMAP:
-		// Skulltags's Guardsphere map
+		// Skulltag's Guardsphere map
 		for(i=0;i<count;i++)
 		{
 			a = TSrc::A(pin);
@@ -523,6 +523,7 @@ void FBitmap::CopyPixelData(int originx, int originy, const BYTE * patch, int sr
 		BYTE *buffer = data + 4*originx + Pitch*originy;
 		PalEntry penew[256];
 
+		memset(penew, 0, sizeof(penew));
 		if (inf && inf->blend)
 		{
 			iCopyColors<cPalEntry, cBGRA, bCopy>((BYTE*)penew, (const BYTE*)palette, 256, 4, inf);

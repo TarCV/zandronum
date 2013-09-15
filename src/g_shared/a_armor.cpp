@@ -43,24 +43,13 @@ void ABasicArmor::Tick ()
 	AbsorbCount = 0;
 	if (!Icon.isValid())
 	{
-		switch (gameinfo.gametype)
-		{
-		case GAME_Chex:
-		case GAME_Doom:
-			Icon = TexMan.CheckForTexture (SavePercent == FRACUNIT/3 ? "ARM1A0" : "ARM2A0", FTexture::TEX_Any);
-			break;
+		const char *icon = gameinfo.ArmorIcon1;
 
-		case GAME_Heretic:
-			Icon = TexMan.CheckForTexture (SavePercent == FRACUNIT/2 ? "SHLDA0" : "SHD2A0", FTexture::TEX_Any);
-			break;
+		if (SavePercent >= gameinfo.Armor2Percent && gameinfo.ArmorIcon2[0] != 0)
+			icon = gameinfo.ArmorIcon2;
 
-		case GAME_Strife:
-			Icon = TexMan.CheckForTexture (SavePercent == FRACUNIT/3 ? "I_ARM2" : "I_ARM1", FTexture::TEX_Any);
-			break;
-		
-		default:
-			break;
-		}
+		if (icon[0] != 0)
+			Icon = TexMan.CheckForTexture (icon, FTexture::TEX_Any);
 
 		// [BB] If the icon is now valid, let the clients know about it. This is necessary because the
 		// clients don't necessarily know the correct SavePercent value.
@@ -170,6 +159,24 @@ void ABasicArmor::AbsorbDamage (int damage, FName damageType, int &newdamage)
 			}
 		}
 		damage = newdamage;
+	}
+
+	// Once the armor has absorbed its part of the damage, then apply its damage factor, if any, to the player
+	if ((damage > 0) && (ArmorType != NAME_None)) // BasicArmor is not going to have any damage factor, so skip it.
+	{
+		// This code is taken and adapted from APowerProtection::ModifyDamage().
+		// The differences include not checking for the NAME_None key (doesn't seem appropriate here), 
+		// not using a default value, and of course the way the damage factor info is obtained.
+		const fixed_t *pdf = NULL;
+		DmgFactors *df = PClass::FindClass(ArmorType)->ActorInfo->DamageFactors;
+		if (df != NULL && df->CountUsed() != 0)
+		{
+			pdf = df->CheckKey(damageType);
+			if (pdf != NULL)
+			{
+				damage = newdamage = FixedMul(damage, *pdf);
+			}
+		}
 	}
 
 	// Once the armor has absorbed its part of the damage, then apply its damage factor, if any, to the player

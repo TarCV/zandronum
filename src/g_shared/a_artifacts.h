@@ -3,12 +3,13 @@
 
 #include "a_pickups.h"
 
-#define INVERSECOLOR 0x00345678
-#define GOLDCOLOR 0x009abcde
+#define INVERSECOLOR	0x00345678
+#define GOLDCOLOR		0x009abcde
 
 // [BC] More hacks!
-#define REDCOLOR 0x00beefee
-#define GREENCOLOR 0x00beefad
+#define REDCOLOR		0x00beefee
+#define GREENCOLOR		0x00beefad
+#define BLUECOLOR		0x00befeed
 
 class player_t;
 
@@ -30,7 +31,8 @@ public:
 
 	int EffectTics;
 	PalEntry BlendColor;
-	FNameNoInit mode;
+	FNameNoInit Mode;
+	fixed_t Strength;
 
 protected:
 	virtual void InitEffect ();
@@ -49,7 +51,8 @@ public:
 	const PClass *PowerupType;
 	int EffectTics;			// Non-0 to override the powerup's default tics
 	PalEntry BlendColor;	// Non-0 to override the powerup's default blend
-	FNameNoInit mode;		// Meaning depends on powerup - currently only of use for Invulnerability
+	FNameNoInit Mode;		// Meaning depends on powerup - used for Invulnerability and Invisibility
+	fixed_t Strength;		// Meaning depends on powerup - currently used only by Invisibility
 };
 
 class APowerInvulnerable : public APowerup
@@ -77,6 +80,7 @@ class APowerInvisibility : public APowerup
 {
 	DECLARE_CLASS (APowerInvisibility, APowerup)
 protected:
+	bool HandlePickup (AInventory *item);
 	void CommonInit ();
 	void InitEffect ();
 	void DoEffect ();
@@ -84,21 +88,10 @@ protected:
 	int AlterWeaponSprite (vissprite_t *vis);
 };
 
-class APowerGhost : public APowerInvisibility
-{
-	DECLARE_CLASS (APowerGhost, APowerInvisibility)
-protected:
-	void InitEffect ();
-	int AlterWeaponSprite (vissprite_t *vis);
-};
-
+// Needed only for m_cheat.cpp now
 class APowerShadow : public APowerInvisibility
 {
 	DECLARE_CLASS (APowerShadow, APowerInvisibility)
-protected:
-	bool HandlePickup (AInventory *item);
-	void InitEffect ();
-	int AlterWeaponSprite (vissprite_t *vis);
 };
 
 class APowerIronFeet : public APowerup
@@ -240,6 +233,22 @@ protected:
 class APowerHighJump : public APowerup
 {
 	DECLARE_CLASS( APowerHighJump, APowerup )
+protected:
+	void InitEffect( );
+	void EndEffect( );
+};
+
+class APowerDoubleFiringSpeed : public APowerup
+{
+	DECLARE_CLASS( APowerDoubleFiringSpeed, APowerup )
+protected:
+	void InitEffect( );
+	void EndEffect( );
+};
+
+class APowerInfiniteAmmo : public APowerup
+{
+	DECLARE_CLASS( APowerInfiniteAmmo, APowerup )
 protected:
 	void InitEffect( );
 	void EndEffect( );

@@ -203,8 +203,7 @@ static void SetEndSequence (char *nextmap, int type)
 		newseq.EndType = type;
 		seqnum = (int)EndSequences.Push (newseq);
 	}
-	strcpy (nextmap, "enDSeQ");
-	*((WORD *)(nextmap + 6)) = (WORD)seqnum;
+	mysnprintf(nextmap, sizeof(nextmap), "enDSeQ%04x", (WORD)seqnum);
 }
 
 //==========================================================================
@@ -488,7 +487,7 @@ void G_InitNew (const char *mapname, bool bTitleLevel)
 	if (paused)
 	{
 		paused = 0;
-		S_ResumeSound ();
+		S_ResumeSound (false);
 	}
 
 	// [BC] Reset the end level delay.
@@ -683,6 +682,8 @@ static bool		g_nomonsters;
 void G_ChangeLevel(const char *levelname, int position, bool keepFacing, int nextSkill, 
 				   bool nointermission, bool resetinv, bool nomonsters)
 {
+	level_info_t *nextinfo = NULL;
+
 	if (unloading)
 	{
 		Printf (TEXTCOLOR_RED "Unloading scripts cannot exit the level again.\n");
@@ -693,7 +694,7 @@ void G_ChangeLevel(const char *levelname, int position, bool keepFacing, int nex
 
 	if (strncmp(levelname, "enDSeQ", 6))
 	{
-		level_info_t *nextinfo = FindLevelInfo (nextlevel)->CheckLevelRedirect ();
+		nextinfo = FindLevelInfo (nextlevel)->CheckLevelRedirect ();
 		if (nextinfo)
 		{
 			nextlevel = nextinfo->mapname;
@@ -707,12 +708,20 @@ void G_ChangeLevel(const char *levelname, int position, bool keepFacing, int nex
 	if (nointermission) level.flags |= LEVEL_NOINTERMISSION;
 
 	cluster_info_t *thiscluster = FindClusterInfo (level.cluster);
-	cluster_info_t *nextcluster = FindClusterInfo (FindLevelInfo (nextlevel)->cluster);
+	cluster_info_t *nextcluster = nextinfo? FindClusterInfo (nextinfo->cluster) : NULL;
 
 	startpos = position;
 	startkeepfacing = keepFacing;
 	gameaction = ga_completed;
 	resetinventory = resetinv;
+		
+	if (nextinfo != NULL) 
+	{
+		if (thiscluster != nextcluster || (thiscluster && !(thiscluster->flags & CLUSTER_HUB)))
+		{
+			resetinventory |= !!(nextinfo->flags2 & LEVEL2_RESETINVENTORY);
+		}
+	}
 
 	// [RH] Give scripts a chance to do something
 	unloading = true;
@@ -918,7 +927,7 @@ void G_DoCompleted (void)
 	{
 		if (strncmp (nextlevel, "enDSeQ", 6) == 0)
 		{
-			wminfo.next = FString(nextlevel, 8);
+			wminfo.next = nextlevel;
 			wminfo.LName1 = NULL;
 		}
 		else
@@ -1660,7 +1669,7 @@ void G_WorldDone (void)
 			thiscluster->flags & CLUSTER_EXITTEXTINLUMP,
 			thiscluster->flags & CLUSTER_FINALEPIC,
 			thiscluster->flags & CLUSTER_LOOKUPEXITTEXT,
-			true);
+			true, strtol(nextlevel.GetChars()+6, NULL, 16));
 	}
 	else
 	{
@@ -1848,9 +1857,9 @@ void G_FinishTravel ()
 			pawn->x = pawndup->x;
 			pawn->y = pawndup->y;
 			pawn->z = pawndup->z;
-			pawn->momx = pawndup->momx;
-			pawn->momy = pawndup->momy;
-			pawn->momz = pawndup->momz;
+			pawn->velx = pawndup->velx;
+			pawn->vely = pawndup->vely;
+			pawn->velz = pawndup->velz;
 			pawn->Sector = pawndup->Sector;
 			pawn->floorz = pawndup->floorz;
 			pawn->ceilingz = pawndup->ceilingz;
@@ -1993,10 +2002,10 @@ void G_InitLevelLocals ()
 	level.musicorder = info->musicorder;
 
 	level.LevelName = level.info->LookupLevelName();
-	strncpy (level.nextmap, info->nextmap, 8);
-	level.nextmap[8] = 0;
-	strncpy (level.secretmap, info->secretmap, 8);
-	level.secretmap[8] = 0;
+	strncpy (level.nextmap, info->nextmap, 10);
+	level.nextmap[10] = 0;
+	strncpy (level.secretmap, info->secretmap, 10);
+	level.secretmap[10] = 0;
 	strncpy (level.skypic1, info->skypic1, 8);
 	level.skypic1[8] = 0;
 	if (!level.skypic2[0])

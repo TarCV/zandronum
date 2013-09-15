@@ -362,7 +362,7 @@ int NetbufferSize ()
 			SkipTicCmd (&skipper, numtics);
 		}
 	}
-	return skipper - netbuffer;
+	return int(skipper - netbuffer);
 }
 
 //
@@ -1257,7 +1257,7 @@ void NetUpdate (void)
 					}
 				}
 			}
-			HSendPacket (i, cmddata - netbuffer);
+			HSendPacket (i, int(cmddata - netbuffer));
 		}
 		else
 		{
@@ -1415,7 +1415,7 @@ bool DoArbitrate (void *userdata)
 		netbuffer[9] = data->gotsetup[0];
 		stream = &netbuffer[10];
 		D_WriteUserInfoStrings (consoleplayer, &stream, true);
-		SendSetup (data->playersdetected, data->gotsetup, stream - netbuffer);
+		SendSetup (data->playersdetected, data->gotsetup, int(stream - netbuffer));
 	}
 	else
 	{ // Send user info for all nodes
@@ -1430,7 +1430,7 @@ bool DoArbitrate (void *userdata)
 					netbuffer[1] = j;
 					stream = &netbuffer[9];
 					D_WriteUserInfoStrings (j, &stream, true);
-					HSendPacket (i, stream - netbuffer);
+					HSendPacket (i, int(stream - netbuffer));
 				}
 			}
 		}
@@ -1440,15 +1440,15 @@ bool DoArbitrate (void *userdata)
 	if (consoleplayer == Net_Arbitrator)
 	{
 		netbuffer[0] = NCMD_SETUP+2;
-		netbuffer[1] = doomcom.ticdup;
-		netbuffer[2] = doomcom.extratics;
+		netbuffer[1] = (BYTE)doomcom.ticdup;
+		netbuffer[2] = (BYTE)doomcom.extratics;
 		netbuffer[3] = NetMode;
 		stream = &netbuffer[4];
 		WriteString (startmap, &stream);
 		WriteLong (rngseed, &stream);
 		C_WriteCVars (&stream, CVAR_SERVERINFO, true);
 
-		SendSetup (data->playersdetected, data->gotsetup, stream - netbuffer);
+		SendSetup (data->playersdetected, data->gotsetup, int(stream - netbuffer));
 	}
 	return false;
 }
@@ -1668,7 +1668,7 @@ void D_QuitNetGame (void)
 			if (playeringame[i] && i != consoleplayer)
 				WriteLong (resendto[nodeforplayer[i]], &foo);
 		}
-		k = foo - netbuffer;
+		k = int(foo - netbuffer);
 	}
 
 	for (i = 0; i < 4; i++)
@@ -2199,8 +2199,20 @@ void Net_DoCommand (int type, BYTE **stream, int player)
 	case DEM_SUMMONFOE2:
 		{
 			const PClass *typeinfo;
+			int angle;
+			SWORD tid;
+			BYTE special;
+			int args[5];
 
 			s = ReadString (stream);
+			if (type >= DEM_SUMMON2 && type <= DEM_SUMMONFOE2)
+			{
+				angle = ReadWord(stream);
+				tid = ReadWord(stream);
+				special = ReadByte(stream);
+				for(i = 0; i < 5; i++) args[i] = ReadLong(stream);
+			}
+
 			typeinfo = PClass::FindClass (s);
 			if (typeinfo != NULL && typeinfo->ActorInfo != NULL)
 			{
@@ -2246,17 +2258,24 @@ void Net_DoCommand (int type, BYTE **stream, int player)
 								spawned->FriendPlayer = player + 1;
 								spawned->flags |= MF_FRIENDLY;
 								spawned->LastHeard = players[player].mo;
+								spawned->health = spawned->SpawnHealth();
 							}
 							else if (type == DEM_SUMMONFOE || type == DEM_SUMMONFOE2)
 							{
 								spawned->FriendPlayer = 0;
 								spawned->flags &= ~MF_FRIENDLY;
+								spawned->health = spawned->SpawnHealth();
 							}
 						}
 						if (type >= DEM_SUMMON2 && type <= DEM_SUMMONFOE2)
 						{
-							int angle = ReadWord(stream);
 							spawned->angle = source->angle - (ANGLE_1 * angle);
+							spawned->tid = tid;
+							spawned->special = special;
+							for(i = 0; i < 5; i++) {
+								spawned->args[i] = args[i];
+							}
+							if(tid) spawned->AddToHash();
 						}
 					}
 				}
@@ -2286,7 +2305,7 @@ void Net_DoCommand (int type, BYTE **stream, int player)
 				{
 					DImpactDecal::StaticCreate (s,
 						trace.X, trace.Y, trace.Z,
-						sides + trace.Line->sidenum[trace.Side], NULL);
+						trace.Line->sidedef[trace.Side], NULL);
 				}
 			}
 		}
@@ -2298,12 +2317,12 @@ void Net_DoCommand (int type, BYTE **stream, int player)
 			if (paused)
 			{
 				paused = 0;
-				S_ResumeSound ();
+				S_ResumeSound (false);
 			}
 			else
 			{
 				paused = player + 1;
-				S_PauseSound (false);
+				S_PauseSound (false, false);
 			}
 			BorderNeedRefresh = screen->GetPageCount ();
 		}
@@ -2523,10 +2542,13 @@ void Net_SkipCommand (int type, BYTE **stream)
 
 		case DEM_GIVECHEAT:
 		case DEM_TAKECHEAT:
+			skip = strlen ((char *)(*stream)) + 3;
+			break;
+
 		case DEM_SUMMON2:
 		case DEM_SUMMONFRIEND2:
 		case DEM_SUMMONFOE2:
-			skip = strlen ((char *)(*stream)) + 3;
+			skip = strlen ((char *)(*stream)) + 26;
 			break;
 
 		case DEM_MUSICCHANGE:

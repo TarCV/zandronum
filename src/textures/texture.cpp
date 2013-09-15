@@ -71,6 +71,7 @@ FTexture *TGATexture_TryCreate(FileReader &, int lumpnum);
 FTexture *RawPageTexture_TryCreate(FileReader &, int lumpnum);
 FTexture *FlatTexture_TryCreate(FileReader &, int lumpnum);
 FTexture *PatchTexture_TryCreate(FileReader &, int lumpnum);
+FTexture *EmptyTexture_TryCreate(FileReader &, int lumpnum);
 FTexture *AutomapTexture_TryCreate(FileReader &, int lumpnum);
 
 
@@ -88,6 +89,7 @@ FTexture * FTexture::CreateTexture (int lumpnum, int usetype)
 		{ RawPageTexture_TryCreate,		TEX_MiscPatch },
 		{ FlatTexture_TryCreate,		TEX_Flat },
 		{ PatchTexture_TryCreate,		TEX_Any },
+		{ EmptyTexture_TryCreate,		TEX_Any },
 		{ AutomapTexture_TryCreate,		TEX_MiscPatch },
 	};
 
@@ -496,7 +498,7 @@ void FTexture::FillBuffer(BYTE *buff, int pitch, int height, FTextureFormat fmt)
 	{
 		FCopyInfo inf = {OP_OVERWRITE, };
 		FBitmap bmp(buff, pitch, pitch/4, height);
-		CopyTrueColorPixels(&bmp, 0, 0, 0, &inf); 
+		CopyTrueColorPixels(&bmp, 0, 0, -1, -1, 0, &inf); 
 		break;
 	}
 
@@ -517,19 +519,23 @@ void FTexture::FillBuffer(BYTE *buff, int pitch, int height, FTextureFormat fmt)
 //
 //===========================================================================
 
-int FTexture::CopyTrueColorPixels(FBitmap *bmp, int x, int y, int rotate, FCopyInfo *inf)
+int FTexture::CopyTrueColorPixels(FBitmap *bmp, int x, int y, int w, int h, int rotate, FCopyInfo *inf)
 {
 	PalEntry *palette = screen->GetPalette();
 	for(int i=1;i<256;i++) palette[i].a = 255;	// set proper alpha values
-	bmp->CopyPixelData(x, y, GetPixels(), Width, Height, Height, 1, rotate, palette, inf);
+	if (w < 0 || w > Width) w = Width;
+	if (h < 0 || h > Height) h = Height;
+	bmp->CopyPixelData(x, y, GetPixels(), w, h, Height, 1, rotate, palette, inf);
 	for(int i=1;i<256;i++) palette[i].a = 0;
 	return 0;
 }
 
-int FTexture::CopyTrueColorTranslated(FBitmap *bmp, int x, int y, int rotate, FRemapTable *remap, FCopyInfo *inf)
+int FTexture::CopyTrueColorTranslated(FBitmap *bmp, int x, int y, int w, int h, int rotate, FRemapTable *remap, FCopyInfo *inf)
 {
 	PalEntry *palette = remap->Palette;
-	bmp->CopyPixelData(x, y, GetPixels(), Width, Height, Height, 1, rotate, palette, inf);
+	if (w < 0 || w > Width) w = Width;
+	if (h < 0 || h > Height) h = Height;
+	bmp->CopyPixelData(x, y, GetPixels(), w, h, Height, 1, rotate, palette, inf);
 	return 0;
 }
 

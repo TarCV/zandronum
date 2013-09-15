@@ -42,13 +42,13 @@
 
 #define GAME_MAJOR_VERSION 1
 #define GAME_MINOR_VERSION 2
-#define GAMEVER_STRING "1.3"
+#define GAMEVER_STRING "2.0"
 #define DOTVERSIONSTR GAMEVER_STRING "-alpha"
 #define DOTVERSIONSTR_NOREV DOTVERSIONSTR
 
 #define ZDVER_STRING "2.3.1"
-#define ZD_SVN_REVISION_STRING "1551"
-#define ZD_SVN_REVISION_NUMBER 1551
+#define ZD_SVN_REVISION_STRING "1814"
+#define ZD_SVN_REVISION_NUMBER 1814
 
 // [BB] The version string that includes revision / compatibility data.
 #define DOTVERSIONSTR_REV DOTVERSIONSTR "-r" SVN_REVISION_STRING
@@ -90,18 +90,18 @@
 // Protocol version used in demos.
 // Bump it if you change existing DEM_ commands or add new ones.
 // Otherwise, it should be safe to leave it alone.
-#define DEMOGAMEVERSION 0x210
+#define DEMOGAMEVERSION 0x211
 
 // Minimum demo version we can play.
 // Bump it whenever you change or remove existing DEM_ commands.
-#define MINDEMOVERSION 0x210
+#define MINDEMOVERSION 0x211
 
 // SAVEVER is the version of the information stored in level snapshots.
 // Note that SAVEVER is not directly comparable to VERSION.
 // SAVESIG should match SAVEVER.
 
 // MINSAVEVER is the minimum level snapshot version that can be loaded.
-#define MINSAVEVER 1507
+#define MINSAVEVER 1643
 
 #if ZD_SVN_REVISION_NUMBER < MINSAVEVER
 // Never write a savegame with a version lower than what we need

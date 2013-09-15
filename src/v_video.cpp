@@ -168,11 +168,11 @@ CUSTOM_CVAR (Int, vid_refreshrate, 0, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 	}
 }
 
-CUSTOM_CVAR (Float, dimamount, 0.2f, CVAR_ARCHIVE)
+CUSTOM_CVAR (Float, dimamount, -1.f, CVAR_ARCHIVE)
 {
-	if (self < 0.f)
+	if (self < 0.f && self != -1.f)
 	{
-		self = 0.f;
+		self = -1.f;
 	}
 	else if (self > 1.f)
 	{
@@ -296,14 +296,24 @@ void DCanvas::FlatFill (int left, int top, int right, int bottom, FTexture *src,
 void DCanvas::Dim (PalEntry color)
 {
 	PalEntry dimmer;
-	float amount = dimamount;
+	float amount;
+
+	if (dimamount >= 0)
+	{
+		dimmer = PalEntry(dimcolor);
+		amount = dimamount;
+	}
+	else
+	{
+		dimmer = gameinfo.dimcolor;
+		amount = gameinfo.dimamount;
+	}
 
 	if (gameinfo.gametype == GAME_Hexen && gamestate == GS_DEMOSCREEN)
 	{ // On the Hexen title screen, the default dimming is not
 		// enough to make the menus readable.
 		amount = MIN<float> (1.f, amount*2.f);
 	}
-	dimmer = PalEntry(dimcolor);
 	// Add the cvar's dimming on top of the color passed to the function
 	if (color.a != 0)
 	{
@@ -1534,6 +1544,15 @@ CUSTOM_CVAR (Bool, vid_nowidescreen, false, CVAR_GLOBALCONFIG|CVAR_ARCHIVE)
 	}
 }
 
+CUSTOM_CVAR (Int, vid_aspect, 0, CVAR_GLOBALCONFIG|CVAR_ARCHIVE)
+{
+	setsizeneeded = true;
+	if (StatusBar != NULL)
+	{
+		StatusBar->ScreenSizeChanged();
+	}
+}
+
 // Tries to guess the physical dimensions of the screen based on the
 // screen's pixel dimensions. Can return:
 // 0: 4:3
@@ -1542,6 +1561,11 @@ CUSTOM_CVAR (Bool, vid_nowidescreen, false, CVAR_GLOBALCONFIG|CVAR_ARCHIVE)
 // 4: 5:4
 int CheckRatio (int width, int height)
 {
+	if ((vid_aspect >=1) && (vid_aspect <=4))
+	{
+		// [SP] User wants to force aspect ratio; let them.
+		return vid_aspect == 3? 0: int(vid_aspect);
+	}
 	if (vid_nowidescreen)
 	{
 		if (!vid_tft)

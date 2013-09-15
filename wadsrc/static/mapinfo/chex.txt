@@ -23,8 +23,10 @@ gameinfo
 	defaultbloodcolor = "3f 7d 39"
 	defaultbloodparticlecolor = "5f af 57"
 	backpacktype = "ZorchPack"
+	armoricons = "ARM1A0", 0.5, "ARM2A0"
 	statusbar = "sbarinfo/doom.txt"
 	intermissionmusic = "$MUSIC_INTER"
+	intermissioncounter = true
 	weaponslot = 1, "Bootspoon", "SuperBootspork"
 	weaponslot = 2, "MiniZorcher"
 	weaponslot = 3, "LargeZorcher", "SuperLargeZorcher"
@@ -32,6 +34,12 @@ gameinfo
 	weaponslot = 5, "ZorchPropulsor"
 	weaponslot = 6, "PhasingZorcher"
 	weaponslot = 7, "LAZDevice"
+	dimcolor = "ff d7 00"
+	dimamount = 0.2
+	definventorymaxamount = 25
+	defaultrespawntime = 12
+	defaultdropstyle = 1
+	endoom = "ENDOOM"
 }
 
 skill baby

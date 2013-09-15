@@ -36,7 +36,7 @@
 
 #include "doomtype.h"
 #include "doomdef.h"
-#include "autosegs.h"
+//#include "autosegs.h"
 #include "sc_man.h"
 //[BL] New Includes
 #include "sectinfo.h"
@@ -53,7 +53,7 @@ class FScanner;
 #define GCC_YSEG
 #else
 #define MSVC_YSEG
-#define GCC_YSEG __attribute__((section(YREG_SECTION)))
+#define GCC_YSEG __attribute__((section(SECTION_YREG)))
 #endif
 
 
@@ -199,10 +199,12 @@ enum ELevelFlags
 	LEVEL2_HEXENHACK			= 0x00800000,	// Level was defined in a Hexen style MAPINFO
 
 	LEVEL2_SMOOTHLIGHTING		= 0x01000000,	// Level uses the smooth lighting feature.
-	LEVEL2_NOBOTNODES			= 0x02000000,	// [BC] Level does not use bot nodes.
+	LEVEL2_POLYGRIND			= 0x02000000,	// Polyobjects grind corpses to gibs.
+	LEVEL2_RESETINVENTORY		= 0x04000000,	// Resets player inventory when starting this level (unless in a hub)
+	LEVEL2_NOBOTNODES			= 0x08000000,	// [BC] Level does not use bot nodes.
 	// [BB] Ceartain game modes are supposed to behave differently on
 	// the map. For example in duel mode the countdown and the map reset are skipped.
-	LEVEL2_ISLOBBY				= 0x04000000,
+	LEVEL2_ISLOBBY				= 0x10000000,
 };
 
 
@@ -245,12 +247,19 @@ typedef TMap<int, FName> FMusicMap;
 
 struct level_info_t
 {
-	char		mapname[9];
 	int			levelnum;
+	
+	char		mapname[9];
 	char		pname[9];
-	char		nextmap[9];
-	char		secretmap[9];
+	char		nextmap[11];	// The endsequence string is 10 chars so we need more space here
+	char		secretmap[11];
 	char		skypic1[9];
+	char		skypic2[9];
+	char		fadetable[9];
+	char		f1[9];
+	char		bordertexture[9];
+	char		mapbg[9];
+
 	int			cluster;
 	int			partime;
 	int			sucktime;
@@ -258,14 +267,11 @@ struct level_info_t
 	DWORD		flags2;
 	FString		Music;
 	FString		LevelName;
-	char		fadetable[9];
 	SBYTE		WallVertLight, WallHorizLight;
-	char		f1[9];
 	int			musicorder;
 	FCompressedMemFile	*snapshot;
 	DWORD		snapshotVer;
 	struct acsdefered_t *defered;
-	char		skypic2[9];
 	float		skyspeed1;
 	float		skyspeed2;
 	DWORD		fadeto;
@@ -292,8 +298,6 @@ struct level_info_t
 
 	FString		SoundInfo;
 	FString		SndSeq;
-	char		bordertexture[9];
-	char		mapbg[9];
 
 	float		teamdamage;
 
@@ -364,9 +368,9 @@ struct FLevelLocals
 	int			levelnum;
 	int			lumpnum;
 	FString		LevelName;
-	char		mapname[256];			// the server name (base1, etc)
-	char		nextmap[9];				// go here when fraglimit is hit
-	char		secretmap[9];			// map to go to when used secret exit
+	char		mapname[256];			// the lump name (E1M1, MAP01, etc)
+	char		nextmap[11];			// go here when using the regular exit
+	char		secretmap[11];			// map to go to when used secret exit
 
 	DWORD		flags;
 	DWORD		flags2;
@@ -541,11 +545,16 @@ enum ESkillProperty
 	SKILLP_AutoUseHealth,
 	SKILLP_SpawnFilter,
 	SKILLP_EasyBossBrain,
-	SKILLP_ACSReturn
+	SKILLP_ACSReturn,
+	SKILLP_MonsterHealth,
+	SKILLP_FriendlyHealth,
+	SKILLP_NoPain
 };
 int G_SkillProperty(ESkillProperty prop);
 
 typedef TMap<FName, FString> SkillMenuNames;
+
+typedef TMap<FName, FName> SkillActorReplacement;
 
 struct FSkillInfo
 {
@@ -568,6 +577,11 @@ struct FSkillInfo
 	FString MustConfirmText;
 	char Shortcut;
 	FString TextColor;
+	SkillActorReplacement Replace;
+	SkillActorReplacement Replaced;
+	fixed_t MonsterHealth;
+	fixed_t FriendlyHealth;
+	bool NoPain;
 
 	FSkillInfo() {}
 	FSkillInfo(const FSkillInfo &other)
@@ -576,9 +590,15 @@ struct FSkillInfo
 	}
 	FSkillInfo &operator=(const FSkillInfo &other);
 	int GetTextColor() const;
+
+	void SetReplacement(FName a, FName b);
+	FName GetReplacement(FName a);
+	void SetReplacedBy(FName b, FName a);
+	FName GetReplacedBy(FName b);
 };
 
 extern TArray<FSkillInfo> AllSkills;
+extern int DefaultSkill;
 
 
 

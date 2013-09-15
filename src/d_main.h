@@ -38,8 +38,6 @@ struct event_t;
 //
 void D_DoomMain (void);
 
-// Called by IO functions when input is detected.
-void D_PostEvent (const event_t* ev);
 
 void D_Display ();
 
@@ -52,7 +50,7 @@ void D_PageDrawer (void);
 void D_AdvanceDemo (void);
 void D_StartTitle (void);
 // [BC] Added the "bLoadedAutomatically" parameter.
-void D_AddFile (const char *file, bool bLoadedAutomatically = false);
+void D_AddFile (const char *file, bool check = true, bool bLoadedAutomatically = false);
 
 
 // [RH] Set this to something to draw an icon during the next screen refresh.

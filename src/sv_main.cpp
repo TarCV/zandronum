@@ -2467,13 +2467,13 @@ void SERVER_SendFullUpdate( ULONG ulClient )
 				// [WS/BB] Always inform client of the actor's lastX/Y/Z.
 				ULONG ulBits = CM_LAST_X|CM_LAST_Y|CM_LAST_Z;
 
-				if ( pActor->momx != 0 )
+				if ( pActor->velx != 0 )
 					ulBits |= CM_MOMX;
 
-				if ( pActor->momy != 0 )
+				if ( pActor->vely != 0 )
 					ulBits |= CM_MOMY;
 
-				if ( pActor->momz != 0 )
+				if ( pActor->velz != 0 )
 					ulBits |= CM_MOMZ;
 
 				if ( pActor->movedir != 0 )
@@ -2809,7 +2809,7 @@ void SERVER_DisconnectClient( ULONG ulClient, bool bBroadcast, bool bSaveInfo )
 	if ( players[ulClient].mo )
 	{
 		// [BB] Stop all scripts of the player that are still running.
-		if ( !( compatflags2 & COMPATF2_DONT_STOP_PLAYER_SCRIPTS_ON_DISCONNECT ) )
+		if ( !( zacompatflags & ZACOMPATF_DONT_STOP_PLAYER_SCRIPTS_ON_DISCONNECT ) )
 			FBehavior::StaticStopMyScripts ( players[ulClient].mo );
 		// If he's disconnecting while carrying an important item like a flag, etc., make sure he, 
 		// drops it before he leaves.
@@ -4336,11 +4336,11 @@ void SERVER_SetThingNonZeroAngleAndMomentum( AActor *pActor )
 
 	if ( pActor->angle != 0 )
 		ulBits |= CM_ANGLE;
-	if ( pActor->momx != 0 )
+	if ( pActor->velx != 0 )
 		ulBits |= CM_MOMX;
-	if ( pActor->momy != 0 )
+	if ( pActor->vely != 0 )
 		ulBits |= CM_MOMY;
-	if ( pActor->momz != 0 )
+	if ( pActor->velz != 0 )
 		ulBits |= CM_MOMZ;
 
 	if ( ulBits )
@@ -4928,7 +4928,7 @@ static bool server_Taunt( BYTESTREAM_s *pByteStream )
 	if (( players[g_lCurrentClient].bSpectating ) ||
 		( players[g_lCurrentClient].health <= 0 ) ||
 		( players[g_lCurrentClient].mo == NULL ) ||
-		( i_compatflags & COMPATF_DISABLETAUNTS ))
+		( zacompatflags & ZACOMPATF_DISABLETAUNTS ))
 	{
 		return ( false );
 	}

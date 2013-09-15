@@ -25,6 +25,7 @@
 #include "r_main.h"
 #include "p_lnspec.h"
 #include "r_interpolate.h"
+#include "g_level.h"
 // [BC] New #includes.
 #include "cl_demo.h"
 #include "network.h"
@@ -1104,8 +1105,8 @@ void ThrustMobj (AActor *actor, seg_t *seg, FPolyObj *po)
 
 	thrustX = FixedMul (force, finecosine[thrustAngle]);
 	thrustY = FixedMul (force, finesine[thrustAngle]);
-	actor->momx += thrustX;
-	actor->momy += thrustY;
+	actor->velx += thrustX;
+	actor->vely += thrustY;
 	if (po->crush && !NETWORK_InClientMode( ))
 	{
 		if (po->bHurtOnTouch || !P_CheckMove (actor, actor->x + thrustX, actor->y + thrustY))
@@ -1114,6 +1115,7 @@ void ThrustMobj (AActor *actor, seg_t *seg, FPolyObj *po)
 			P_TraceBleed (po->crush, actor);
 		}
 	}
+	if (level.flags2 & LEVEL2_POLYGRIND) actor->Grind(false); // crush corpses that get caught in a polyobject's way
 }
 
 //==========================================================================

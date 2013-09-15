@@ -64,6 +64,10 @@
 // [BC] New #includes.
 #include "sv_commands.h"
 
+#ifdef _MSC_VER
+#pragma warning(disable:4244)
+#endif
+
 //EXTERN_CVAR (Int, tx)
 //EXTERN_CVAR (Int, ty)
 
@@ -882,8 +886,8 @@ static void R_DrawSky (visplane_t *pl)
 		{
 			lastskycol[x] = 0xffffffff;
 		}
-		wallscan (pl->minx, pl->maxx, (short *)pl->top, (short *)pl->bottom, swall, lwall, 
-			backskytex == NULL ? R_GetOneSkyColumn : R_GetTwoSkyColumns);
+		wallscan (pl->minx, pl->maxx, (short *)pl->top, (short *)pl->bottom, swall, lwall,
+			frontyScale, backskytex == NULL ? R_GetOneSkyColumn : R_GetTwoSkyColumns);
 	}
 	else
 	{ // The texture does not tile nicely
@@ -923,7 +927,7 @@ static void R_DrawSkyStriped (visplane_t *pl)
 		{
 			lastskycol[x] = 0xffffffff;
 		}
-		wallscan (pl->minx, pl->maxx, top, bot, swall, lwall, 
+		wallscan (pl->minx, pl->maxx, top, bot, swall, lwall, rw_pic->yScale,
 			backskytex == NULL ? R_GetOneSkyColumn : R_GetTwoSkyColumns);
 		yl = yh;
 		yh += drawheight;
@@ -1345,7 +1349,7 @@ void R_DrawSkyPlane (visplane_t *pl)
 			const line_t *l = &lines[(pl->sky & ~PL_SKYFLAT)-1];
 
 			// Sky transferred from first sidedef
-			const side_t *s = *l->sidenum + sides;
+			const side_t *s = l->sidedef[0];
 			int pos;
 
 			// Texture comes from upper texture of reference sidedef

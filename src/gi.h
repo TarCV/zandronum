@@ -69,6 +69,7 @@ struct gameinfo_t
 	char titlePage[9];
 	bool drawreadthis;
 	bool noloopfinalemusic;
+	bool intermissioncounter;
 	TArray<FName> creditPages;
 	TArray<FName> finalePages;
 	TArray<FName> infoPages;
@@ -81,18 +82,27 @@ struct gameinfo_t
 	FString chatSound;
 	FString finaleMusic;
 	char finaleFlat[9];
-	FString quitSound;
 	char borderFlat[9];
+	char SkyFlatName[9];
+	char ArmorIcon1[9];
+	char ArmorIcon2[9];
+	char Endoom[9];
+	fixed_t Armor2Percent;
+	FString quitSound;
 	gameborder_t *border;
 	int telefogheight;
 	int defKickback;
-	char SkyFlatName[9];
 	FString translator;
 	DWORD defaultbloodcolor;
 	DWORD defaultbloodparticlecolor;
 	FString backpacktype;
 	FString statusbar;
 	FString intermissionMusic;
+	DWORD dimcolor;
+	float dimamount;
+	int definventorymaxamount;
+	int defaultrespawntime;
+	int defaultdropstyle;
 
 	const char *GetFinalePage(unsigned int num) const;
 };

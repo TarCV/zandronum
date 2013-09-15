@@ -279,7 +279,7 @@ static int P_Set3DFloor(line_t * line, int param,int param2, int alpha)
 			// if flooding is used the floor must be non-solid and is automatically made shootthrough and seethrough
 			if ((param2&128) && !(flags & FF_SOLID)) flags |= FF_FLOOD|FF_SEETHROUGH|FF_SHOOTTHROUGH;
 			if (param2&512) flags |= FF_FADEWALLS;
-			FTextureID tex = sides[line->sidenum[0]].GetTexture(side_t::top);
+			FTextureID tex = line->sidedef[0]->GetTexture(side_t::top);
 			if (!tex.Exists() && alpha<255)
 			{
 				alpha=clamp(-tex.GetIndex(), 0, 255);
@@ -291,8 +291,8 @@ static int P_Set3DFloor(line_t * line, int param,int param2, int alpha)
 		P_Add3DFloor(ss, sec, line, flags, alpha);
 	}
 	// To be 100% safe this should be done even if the alpha by texture value isn't used.
-	if (!sides[line->sidenum[0]].GetTexture(side_t::top).isValid()) 
-		sides[line->sidenum[0]].SetTexture(side_t::top, FNullTextureID());
+	if (!line->sidedef[0]->GetTexture(side_t::top).isValid()) 
+		line->sidedef[0]->SetTexture(side_t::top, FNullTextureID());
 	return 1;
 }
 
@@ -402,7 +402,6 @@ bool P_CheckFor3DCeilingHit(AActor * mo)
 // that the given sector uses to light floors/ceilings/walls according to the 3D floors.
 //
 //==========================================================================
-#define CenterSpot(sec) (vertex_t*)&(sec)->soundorg[0]
 
 void P_Recalculate3DFloors(sector_t * sector)
 {

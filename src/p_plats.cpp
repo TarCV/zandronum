@@ -121,9 +121,9 @@ void DPlat::Tick ()
 
 				switch (m_Type)
 				{
+					case platRaiseAndStayLockout:
+						break;
 					case platRaiseAndStay:
-						if (gameinfo.gametype == GAME_Heretic)
-							break;
 					case platDownByValue:
 					case platDownWaitUpStay:
 					case platDownWaitUpStayStone:
@@ -230,6 +230,7 @@ void DPlat::Tick ()
 		{
 			case platUpByValueStay:
 			case platRaiseAndStay:
+			case platRaiseAndStayLockout:
 
 				// [BC] If we're the server, tell clients to destroy the plat.
 				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
@@ -451,7 +452,7 @@ manual_plat:
 		{
 			if (line)
 			{
-				sec->SetTexture(sector_t::floor, sides[line->sidenum[0]].sector->GetTexture(sector_t::floor));
+				sec->SetTexture(sector_t::floor, line->sidedef[0]->sector->GetTexture(sector_t::floor));
 
 				// [BC] Update clients about this flat change.
 				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
@@ -467,6 +468,7 @@ manual_plat:
 		switch (type)
 		{
 		case DPlat::platRaiseAndStay:
+		case DPlat::platRaiseAndStayLockout:
 			newheight = sec->FindNextHighestFloor (&spot);
 			plat->m_High = sec->floorplane.PointToDist (spot, newheight);
 			plat->m_Low = sec->floorplane.d;

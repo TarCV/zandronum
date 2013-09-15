@@ -403,6 +403,29 @@ void P_BobWeapon (player_t *player, pspdef_t *psp, fixed_t *x, fixed_t *y)
 
 //============================================================================
 //
+// PROC A_WeaponBob
+//
+// The player's weapon will bob, but they cannot fire it at this time.
+//
+//---------------------------------------------------------------------------
+
+DEFINE_ACTION_FUNCTION(AInventory, A_WeaponBob)
+{
+	player_t *player = self->player;
+
+	if (player == NULL || player->ReadyWeapon == NULL)
+	{
+		return;
+	}
+
+	// Prepare for bobbing action.
+	player->cheats |= CF_WEAPONBOBBING;
+	player->psprites[ps_weapon].sx = 0;
+	player->psprites[ps_weapon].sy = WEAPONTOP;
+}
+
+//---------------------------------------------------------------------------
+//
 // PROC A_WeaponReady
 //
 // Readies a weapon for firing or bobbing with its three ancillary functions,
@@ -705,9 +728,9 @@ DEFINE_ACTION_FUNCTION(AInventory, A_Raise)
 	{
 		return;
 	}
-	// [BB] COMPATF_OLD_WEAPON_SWITCH also restores the original weapon switch cancellation behavior.
-	// [CK] Changed to now be separate from COMPATF_OLD_WEAPON_SWITCH
-	if (player->PendingWeapon != WP_NOCHANGE && !( compatflags2 & COMPATF2_FULL_WEAPON_LOWER ))
+	// [BB] ZACOMPATF_OLD_WEAPON_SWITCH also restores the original weapon switch cancellation behavior.
+	// [CK] Changed to now be separate from ZACOMPATF_OLD_WEAPON_SWITCH
+	if (player->PendingWeapon != WP_NOCHANGE && !( zacompatflags & ZACOMPATF_FULL_WEAPON_LOWER ))
 	{
 		P_SetPsprite (player, ps_weapon, player->ReadyWeapon->GetDownState());
 		return;

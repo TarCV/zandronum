@@ -765,9 +765,9 @@ static void CalcPosVel(int type, const AActor *actor, const sector_t *sector,
 		// Only actors maintain velocity information.
 		if (type == SOURCE_Actor && actor != NULL)
 		{
-			vel->X = FIXED2FLOAT(actor->momx) * TICRATE;
-			vel->Y = FIXED2FLOAT(actor->momz) * TICRATE;
-			vel->Z = FIXED2FLOAT(actor->momy) * TICRATE;
+			vel->X = FIXED2FLOAT(actor->velx) * TICRATE;
+			vel->Y = FIXED2FLOAT(actor->velz) * TICRATE;
+			vel->Z = FIXED2FLOAT(actor->vely) * TICRATE;
 		}
 		else
 		{
@@ -1320,7 +1320,7 @@ sfxinfo_t *S_LoadSound(sfxinfo_t *sfx)
 			FWadLump wlump = Wads.OpenLumpNum(sfx->lumpnum);
 			sfxstart = sfxdata = new BYTE[size];
 			wlump.Read(sfxdata, size);
-			SDWORD len = ((SDWORD *)sfxdata)[1];
+			SDWORD len = LittleLong(((SDWORD *)sfxdata)[1]);
 
 			// If the sound is raw, just load it as such.
 			// Otherwise, try the sound as DMX format.
@@ -1337,7 +1337,7 @@ sfxinfo_t *S_LoadSound(sfxinfo_t *sfx)
 				}
 				else
 				{
-					frequency = ((WORD *)sfxdata)[1];
+					frequency = LittleShort(((WORD *)sfxdata)[1]);
 					if (frequency == 0)
 					{
 						frequency = 11025;
@@ -1733,7 +1733,7 @@ bool S_IsActorPlayingSomething (AActor *actor, int channel, int sound_id)
 // Stop music and sound effects, during game PAUSE.
 //==========================================================================
 
-void S_PauseSound (bool notmusic)
+void S_PauseSound (bool notmusic, bool notsfx)
 {
 	// [BC] Server doesn't use music/sound.
 	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
@@ -1744,8 +1744,11 @@ void S_PauseSound (bool notmusic)
 		I_PauseSong (mus_playing.handle);
 		MusicPaused = true;
 	}
-	SoundPaused = true;
-	GSnd->SetSfxPaused (true, 0);
+	if (!notsfx)
+	{
+		SoundPaused = true;
+		GSnd->SetSfxPaused (true, 0);
+	}
 }
 
 //==========================================================================
@@ -1755,7 +1758,7 @@ void S_PauseSound (bool notmusic)
 // Resume music and sound effects, after game PAUSE.
 //==========================================================================
 
-void S_ResumeSound ()
+void S_ResumeSound (bool notsfx)
 {
 	// [BC] Server doesn't use music/sound.
 	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
@@ -1766,8 +1769,61 @@ void S_ResumeSound ()
 		I_ResumeSong (mus_playing.handle);
 		MusicPaused = false;
 	}
-	SoundPaused = false;
-	GSnd->SetSfxPaused (false, 0);
+	if (!notsfx)
+	{
+		SoundPaused = false;
+		GSnd->SetSfxPaused (false, 0);
+	}
+}
+
+//==========================================================================
+//
+// S_SetSoundPaused
+//
+// Called with state non-zero when the app is active, zero when it isn't.
+//
+//==========================================================================
+
+void S_SetSoundPaused (int state)
+{
+	if (state)
+	{
+		if (paused <= 0)
+		{
+			S_ResumeSound(true);
+			if (GSnd != NULL)
+			{
+				GSnd->SetInactive(false);
+			}
+			if ((NETWORK_GetState( ) == NETSTATE_SINGLE)
+#ifdef _DEBUG
+				&& !demoplayback
+#endif
+				)
+			{
+				paused = 0;
+			}
+		}
+	}
+	else
+	{
+		if (paused == 0)
+		{
+			S_PauseSound(false, true);
+			if (GSnd !=  NULL)
+			{
+				GSnd->SetInactive(true);
+			}
+			if ((NETWORK_GetState( ) == NETSTATE_SINGLE)
+#ifdef _DEBUG
+				&& !demoplayback
+#endif
+				)
+			{
+				paused = -1;
+			}
+		}
+	}
 }
 
 //==========================================================================
@@ -1917,9 +1973,9 @@ static void S_SetListener(SoundListener &listener, AActor *listenactor)
 	{
 		listener.angle = (float)(listenactor->angle) * ((float)PI / 2147483648.f);
 		/*
-		listener.velocity.X = listenactor->momx * (TICRATE/65536.f);
-		listener.velocity.Y = listenactor->momz * (TICRATE/65536.f);
-		listener.velocity.Z = listenactor->momy * (TICRATE/65536.f);
+		listener.velocity.X = listenactor->velx * (TICRATE/65536.f);
+		listener.velocity.Y = listenactor->velz * (TICRATE/65536.f);
+		listener.velocity.Z = listenactor->vely * (TICRATE/65536.f);
 		*/
 		listener.velocity.Zero();
 		listener.position.X = FIXED2FLOAT(listenactor->x);
@@ -2294,7 +2350,7 @@ bool S_StartMusic (const char *m_id)
 // specified, it will only be played if the specified CD is in a drive.
 //==========================================================================
 
-TArray<char> musiccache;
+TArray<BYTE> musiccache;
 
 bool S_ChangeMusic (const char *musicname, int order, bool looping, bool force)
 {

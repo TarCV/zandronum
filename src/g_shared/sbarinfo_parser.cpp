@@ -610,6 +610,8 @@ void SBarInfo::ParseSBarInfoBlock(FScanner &sc, SBarInfoBlock &block)
 						cmd.flags |= DRAWNUMBER_TOTALSECRETS;
 					else if(sc.Compare("armorclass"))
 						cmd.flags |= DRAWNUMBER_ARMORCLASS;
+					else if(sc.Compare("airtime"))
+						cmd.flags |= DRAWNUMBER_AIRTIME;
 					else if(sc.Compare("globalvar"))
 					{
 						cmd.flags |= DRAWNUMBER_GLOBALVAR;
@@ -784,12 +786,12 @@ void SBarInfo::ParseSBarInfoBlock(FScanner &sc, SBarInfoBlock &block)
 						sc.MustGetToken(',');
 				}
 				this->getCoordinates(sc, block.fullScreenOffsets, cmd.x, cmd.y);
-				cmd.special2 = *(cmd.x + 30);
-				cmd.special3 = *(cmd.y + 24);
+				cmd.sbcoord2 = cmd.x + 30;
+				cmd.sbcoord3 = cmd.y + 24;
 				cmd.translation = CR_GOLD;
 				if(sc.CheckToken(',')) //more font information
 				{
-					this->getCoordinates(sc, block.fullScreenOffsets, cmd.special2, cmd.special3);
+					this->getCoordinates(sc, block.fullScreenOffsets, cmd.sbcoord2, cmd.sbcoord3);
 					if(sc.CheckToken(','))
 					{
 						sc.MustGetToken(TK_Identifier);
@@ -824,7 +826,7 @@ void SBarInfo::ParseSBarInfoBlock(FScanner &sc, SBarInfoBlock &block)
 				else if(sc.Compare("Strife"))
 					cmd.special = GAME_Strife;
 				else
-					sc.ScriptError("Unkown style '%s'.", sc.String);
+					sc.ScriptError("Unknown style '%s'.", sc.String);
 
 				sc.MustGetToken(',');
 				while(sc.CheckToken(TK_Identifier))
@@ -849,6 +851,10 @@ void SBarInfo::ParseSBarInfoBlock(FScanner &sc, SBarInfoBlock &block)
 					{
 						cmd.flags |= DRAWINVENTORYBAR_TRANSLUCENT;
 					}
+					else if(sc.Compare("vertical"))
+					{
+						cmd.flags |= DRAWINVENTORYBAR_VERTICAL;
+					}
 					else
 					{
 						sc.ScriptError("Unknown flag '%s'.", sc.String);
@@ -866,12 +872,12 @@ void SBarInfo::ParseSBarInfoBlock(FScanner &sc, SBarInfoBlock &block)
 
 				sc.MustGetToken(',');
 				this->getCoordinates(sc, block.fullScreenOffsets, cmd.x, cmd.y);
-				cmd.special2 = *(cmd.x + 26);
-				cmd.special3 = *(cmd.y + 22);
+				cmd.sbcoord2 = cmd.x + 26;
+				cmd.sbcoord3 = cmd.y + 22;
 				cmd.translation = CR_GOLD;
 				if(sc.CheckToken(',')) //more font information
 				{
-					this->getCoordinates(sc, block.fullScreenOffsets, cmd.special2, cmd.special3);
+					this->getCoordinates(sc, block.fullScreenOffsets, cmd.sbcoord2, cmd.sbcoord3);
 					if(sc.CheckToken(','))
 					{
 						sc.MustGetToken(TK_Identifier);
@@ -947,6 +953,8 @@ void SBarInfo::ParseSBarInfoBlock(FScanner &sc, SBarInfoBlock &block)
 					cmd.flags = DRAWNUMBER_ITEMS;
 				else if(sc.Compare("secrets"))
 					cmd.flags = DRAWNUMBER_SECRETS;
+				else if(sc.Compare("airtime"))
+					cmd.flags = DRAWNUMBER_AIRTIME;
 				else if(sc.Compare("poweruptime"))
 				{
 					cmd.flags |= DRAWNUMBER_POWERUPTIME;
@@ -1403,11 +1411,11 @@ void SBarInfo::ParseMugShotBlock(FScanner &sc, FMugShotState &state)
 	}
 }
 
-void SBarInfo::getCoordinates(FScanner &sc, bool fullScreenOffsets, int &x, int &y)
+void SBarInfo::getCoordinates(FScanner &sc, bool fullScreenOffsets, SBarInfoCoordinate &x, SBarInfoCoordinate &y)
 {
 	bool negative = false;
 	bool relCenter = false;
-	int *coords[2] = {&x, &y};
+	SBarInfoCoordinate *coords[2] = {&x, &y};
 	for(int i = 0;i < 2;i++)
 	{
 		negative = false;
@@ -1418,7 +1426,7 @@ void SBarInfo::getCoordinates(FScanner &sc, bool fullScreenOffsets, int &x, int 
 		// [-]INT center
 		negative = sc.CheckToken('-');
 		sc.MustGetToken(TK_IntConst);
-		*coords[i] = negative ? -sc.Number : sc.Number;
+		coords[i]->Set(negative ? -sc.Number : sc.Number, false);
 		if(sc.CheckToken('+'))
 		{
 			sc.MustGetToken(TK_Identifier);
@@ -1428,24 +1436,12 @@ void SBarInfo::getCoordinates(FScanner &sc, bool fullScreenOffsets, int &x, int 
 		}
 		if(fullScreenOffsets)
 		{
-			if(relCenter)
-				*coords[i] |= SBarInfoCoordinate::REL_CENTER;
-			else
-				*coords[i] &= ~SBarInfoCoordinate::REL_CENTER;
+			coords[i]->SetRelCenter(relCenter);
 		}
 	}
 
 	if(!fullScreenOffsets)
-		y = (negative ? -sc.Number : sc.Number) - (200 - this->height);
-}
-
-void SBarInfo::getCoordinates(FScanner &sc, bool fullScreenOffsets, SBarInfoCoordinate &x, SBarInfoCoordinate &y)
-{
-	int tmpX = *x;
-	int tmpY = *y;
-	getCoordinates(sc, fullScreenOffsets, tmpX, tmpY);
-	x = tmpX;
-	y = tmpY;
+		y.SetCoord((negative ? -sc.Number : sc.Number) - (200 - this->height));
 }
 
 int SBarInfo::getSignedInteger(FScanner &sc)
@@ -1554,8 +1550,8 @@ SBarInfoCommand::SBarInfoCommand() //sets the default values for more predicable
 	special3 = 0;
 	special4 = 0;
 	flags = 0;
-	x = 0;
-	y = 0;
+	x.Set(0, 0);
+	y.Set(0, 0);
 	value = 0;
 	image_index = 0;
 	sprite_index.SetInvalid();

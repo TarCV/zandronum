@@ -158,7 +158,7 @@ public:
 	void Unload ();
 	virtual void SetFrontSkyLayer ();
 
-	int CopyTrueColorPixels(FBitmap *bmp, int x, int y, int rotate, FCopyInfo *inf = NULL);
+	int CopyTrueColorPixels(FBitmap *bmp, int x, int y, int w, int h, int rotate, FCopyInfo *inf = NULL);
 	int GetSourceLump() { return DefinitionLump; }
 
 protected:
@@ -416,11 +416,11 @@ const BYTE *FMultiPatchTexture::GetColumn (unsigned int column, const Span **spa
 
 //==========================================================================
 //
-// FMultiPatchTexture :: GetColumn
+// GetBlendMap
 //
 //==========================================================================
 
-BYTE * GetBlendMap(PalEntry blend, BYTE *blendwork)
+BYTE *GetBlendMap(PalEntry blend, BYTE *blendwork)
 {
 
 	switch (blend.a==0 ? blend.r : -1)
@@ -494,31 +494,30 @@ void FMultiPatchTexture::MakeTexture ()
 	Pixels = new BYTE[numpix];
 	memset (Pixels, 0, numpix);
 
-	// This is not going to be easy for paletted output. Using the
-	// real time mixing tables gives results that just look bad and
-	// downconverting a true color image also has its problems so the only
-	// real choice is to do normal compositing with any translucent patch
-	// just masking the affected pixels, then do a full true color composition
-	// and merge these pixels in.
 	for (int i = 0; i < NumParts; ++i)
 	{
-		BYTE *trans = Parts[i].Translation ? Parts[i].Translation->Remap : NULL;
 		if (Parts[i].op != OP_COPY)
 		{
 			hasTranslucent = true;
 		}
-		else
-		{
-			if (Parts[i].Blend != 0)
-			{
-				trans = GetBlendMap(Parts[i].Blend, blendwork);
-			}
-			Parts[i].Texture->CopyToBlock (Pixels, Width, Height,
-				Parts[i].OriginX, Parts[i].OriginY, Parts[i].Rotate, trans);
-		}
 	}
 
-	if (hasTranslucent)
+	if (!hasTranslucent)
+	{
+		for (int i = 0; i < NumParts; ++i)
+		{
+			BYTE *trans = Parts[i].Translation ? Parts[i].Translation->Remap : NULL;
+			{
+				if (Parts[i].Blend != 0)
+				{
+					trans = GetBlendMap(Parts[i].Blend, blendwork);
+				}
+				Parts[i].Texture->CopyToBlock (Pixels, Width, Height,
+					Parts[i].OriginX, Parts[i].OriginY, Parts[i].Rotate, trans);
+			}
+		}
+	}
+	else
 	{
 		// In case there are translucent patches let's do the composition in
 		// True color to keep as much precision as possible before downconverting to the palette.
@@ -551,10 +550,13 @@ void FMultiPatchTexture::MakeTexture ()
 //
 //===========================================================================
 
-int FMultiPatchTexture::CopyTrueColorPixels(FBitmap *bmp, int x, int y, int rotate, FCopyInfo *inf)
+int FMultiPatchTexture::CopyTrueColorPixels(FBitmap *bmp, int x, int y, int w, int h, int rotate, FCopyInfo *inf)
 {
 	int retv = -1;
 	FCopyInfo info;
+
+	if (w < 0 || w > Width) w = Width;
+	if (h < 0 || h > Height) h = Height;
 
 	for(int i=0;i<NumParts;i++)
 	{
@@ -569,7 +571,10 @@ int FMultiPatchTexture::CopyTrueColorPixels(FBitmap *bmp, int x, int y, int rota
 			if (Parts[i].Translation != NULL)
 			{
 				// Using a translation forces downconversion to the base palette
-				ret = Parts[i].Texture->CopyTrueColorTranslated(bmp, x+Parts[i].OriginX, y+Parts[i].OriginY, Parts[i].Rotate, Parts[i].Translation, &info);
+				ret = Parts[i].Texture->CopyTrueColorTranslated(bmp, 
+					x+Parts[i].OriginX, y+Parts[i].OriginY, 
+					w-Parts[i].OriginX, h-Parts[i].OriginY, 
+					Parts[i].Rotate, Parts[i].Translation, &info);
 			}
 			else
 			{
@@ -597,7 +602,10 @@ int FMultiPatchTexture::CopyTrueColorPixels(FBitmap *bmp, int x, int y, int rota
 						info.blend = BLEND_OVERLAY;
 					}
 				}
-				ret = Parts[i].Texture->CopyTrueColorPixels(bmp, x+Parts[i].OriginX, y+Parts[i].OriginY, Parts[i].Rotate, &info);
+				ret = Parts[i].Texture->CopyTrueColorPixels(bmp, 
+						x+Parts[i].OriginX, y+Parts[i].OriginY, 
+						w-Parts[i].OriginX, h-Parts[i].OriginY, 
+						Parts[i].Rotate, &info);
 			}
 		}
 		else
@@ -610,8 +618,11 @@ int FMultiPatchTexture::CopyTrueColorPixels(FBitmap *bmp, int x, int y, int rota
 			if (bmp1.Create(Parts[i].Texture->GetWidth(), Parts[i].Texture->GetHeight()))
 			{
 				Parts[i].Texture->CopyTrueColorPixels(&bmp1, 0, 0);
-				bmp->CopyPixelDataRGB(x+Parts[i].OriginX, y+Parts[i].OriginY, bmp1.GetPixels(), 
-					bmp1.GetWidth(), bmp1.GetHeight(), 4, bmp1.GetPitch()*4, Parts[i].Rotate, CF_BGRA, inf);
+				bmp->CopyPixelDataRGB(
+					x+Parts[i].OriginX, y+Parts[i].OriginY, bmp1.GetPixels(),
+					MIN<int>(w-Parts[i].OriginX, bmp1.GetWidth()), 
+					MIN<int>(h-Parts[i].OriginY, bmp1.GetHeight()), 
+					4, bmp1.GetPitch()*4, Parts[i].Rotate, CF_BGRA, inf);
 			}
 		}
 
@@ -1108,7 +1119,7 @@ void FMultiPatchTexture::ParsePatch(FScanner &sc, TexPart & part)
 				static const char *styles[] = {"copy", "translucent", "add", "subtract", "reversesubtract", "modulate", "copyalpha", NULL };
 				sc.MustGetString();
 				part.op = sc.MustMatchString(styles);
-				bComplex = (part.op != OP_COPY);
+				bComplex |= (part.op != OP_COPY);
 				bTranslucentPatches = bComplex;
 			}
 		}

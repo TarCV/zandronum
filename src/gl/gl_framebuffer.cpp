@@ -47,14 +47,17 @@
 #include "r_main.h"
 #include "m_png.h"
 #include "m_crc32.h"
-#include "gl/gl_basic.h"
-#include "gl/gl_struct.h"
-#include "gl/gl_texture.h"
-#include "gl/gl_functions.h"
-#include "gl/gl_shader.h"
-#include "gl/gl_framebuffer.h"
-#include "gl/gl_translate.h"
 #include "vectors.h"
+#include "v_palette.h"
+#include "templates.h"
+#include "gl/common/glc_clock.h"
+#include "gl/common/glc_texture.h"
+#include "gl/common/glc_templates.h"
+#include "gl/common/glc_data.h"
+#include "gl/common/glc_translate.h"
+#include "gl/gl_framebuffer.h"
+#include "gl/old_renderer/gl1_renderer.h"
+#include "gl/new_renderer/gl2_renderer.h"
 // [BB] Added include.
 #ifdef _MSC_VER
 #include "../hqnx/hqnx.h"
@@ -64,9 +67,11 @@ IMPLEMENT_CLASS(OpenGLFrameBuffer)
 EXTERN_CVAR (Float, vid_brightness)
 EXTERN_CVAR (Float, vid_contrast)
 
-void gl_InitSpecialTextures();
-void gl_FreeSpecialTextures();
 void gl_SetupMenu();
+
+GLRendererBase *GLRenderer;
+
+CVAR(Bool, gl_testnewrenderer, false, 0)
 
 //==========================================================================
 //
@@ -77,6 +82,14 @@ void gl_SetupMenu();
 OpenGLFrameBuffer::OpenGLFrameBuffer(int width, int height, int bits, int refreshHz, bool fullscreen) : 
 	Super(width, height, bits, refreshHz, fullscreen) 
 {
+	if (!gl_testnewrenderer)
+	{
+		GLRenderer = new GLRendererOld::GL1Renderer;
+	}
+	else
+	{
+		GLRenderer = new GLRendererNew::GL2Renderer;
+	}
 	memcpy (SourcePalette, GPalette.BaseColors, sizeof(PalEntry)*256);
 	UpdatePalette ();
 	ScreenshotBuffer = NULL;
@@ -100,9 +113,8 @@ OpenGLFrameBuffer::OpenGLFrameBuffer(int width, int height, int bits, int refres
 OpenGLFrameBuffer::~OpenGLFrameBuffer()
 {
 	gl_FreeSpecialTextures();
-	// all native textures must be completely removed before destroying the frame buffer
-	FGLTexture::DeleteAll();
-	gl_ClearShaders();
+	delete GLRenderer;
+	GLRenderer = NULL;
 }
 
 //==========================================================================
@@ -169,14 +181,8 @@ void OpenGLFrameBuffer::InitializeState()
 
 	gl.Viewport(0, (GetTrueHeight()-GetHeight())/2, GetWidth(), GetHeight()); 
 
-	gl_InitShaders();
-	gl_InitFog();
 	Begin2D(false);
-
-	if (gl_vertices.Size())
-	{
-		gl.ArrayPointer(&gl_vertices[0], sizeof(GLVertex));
-	}
+	GLRenderer->Initialize();
 }
 
 //==========================================================================
@@ -187,47 +193,23 @@ void OpenGLFrameBuffer::InitializeState()
 
 void OpenGLFrameBuffer::Update()
 {
-	if (!CanUpdate()) return;
+	if (!CanUpdate()) 
+	{
+		GLRenderer->Flush();
+		return;
+	}
 
 	Begin2D(false);
 
 	DrawRateStuff();
+	GLRenderer->Flush();
 
 	if (GetTrueHeight() != GetHeight())
 	{
-		// Letterbox time! Draw black top and bottom borders.
-		int borderHeight = (GetTrueHeight() - GetHeight()) / 2;
-
-		gl.Viewport(0, 0, GetWidth(), GetTrueHeight());
-		gl.MatrixMode(GL_PROJECTION);
-		gl.LoadIdentity();
-		gl.Ortho(0.0, GetWidth() * 1.0, 0.0, GetTrueHeight(), -1.0, 1.0);
-		gl.MatrixMode(GL_MODELVIEW);
-		gl.Color3f(0.f, 0.f, 0.f);
-		gl_EnableTexture(false);
-		gl_DisableShader();
-
-		gl.Begin(GL_QUADS);
-		// upper quad
-		gl.Vertex2i(0, borderHeight);
-		gl.Vertex2i(0, 0);
-		gl.Vertex2i(GetWidth(), 0);
-		gl.Vertex2i(GetWidth(), borderHeight);
-		gl.End();
-
-		gl.Begin(GL_QUADS);
-		// lower quad
-		gl.Vertex2i(0, GetTrueHeight());
-		gl.Vertex2i(0, GetTrueHeight() - borderHeight);
-		gl.Vertex2i(GetWidth(), GetTrueHeight() - borderHeight);
-		gl.Vertex2i(GetWidth(), GetTrueHeight());
-		gl.End();
-
-		gl_EnableTexture(true);
+		if (GLRenderer != NULL) 
+			GLRenderer->ClearBorders();
 
 		Begin2D(false);
-		gl.Viewport(0, (GetTrueHeight() - GetHeight()) / 2, GetWidth(), GetHeight()); 
-
 	}
 
 	Finish.Reset();
@@ -338,7 +320,7 @@ bool OpenGLFrameBuffer::SetFlash(PalEntry rgb, int amount)
 void OpenGLFrameBuffer::GetFlash(PalEntry &rgb, int &amount)
 {
 	rgb = Flash;
-	rgb.a=0;
+	rgb.a = 0;
 	amount = Flash.a;
 }
 
@@ -403,7 +385,7 @@ bool OpenGLFrameBuffer::Begin2D(bool)
 		);
 	gl.Disable(GL_DEPTH_TEST);
 	gl.Disable(GL_MULTISAMPLE);
-	gl_EnableFog(false);
+	if (GLRenderer != NULL) GLRenderer->Begin2D();
 	return true;
 }
 
@@ -417,114 +399,10 @@ void STACK_ARGS OpenGLFrameBuffer::DrawTextureV(FTexture *img, int x0, int y0, u
 {
 	DrawParms parms;
 
-	if (!ParseDrawTextureTags(img, x0, y0, tag, tags, &parms, true))
+	if (ParseDrawTextureTags(img, x0, y0, tag, tags, &parms, true))
 	{
-		return;
+		if (GLRenderer != NULL) GLRenderer->DrawTexture(img, parms);
 	}
-
-	float x = FIXED2FLOAT(parms.x - Scale (parms.left, parms.destwidth, parms.texwidth));
-	float y = FIXED2FLOAT(parms.y - Scale (parms.top, parms.destheight, parms.texheight));
-	float w = FIXED2FLOAT(parms.destwidth);
-	float h = FIXED2FLOAT(parms.destheight);
-	float ox, oy, cx, cy, r, g, b;
-	float light = 1.f;
-
-	FGLTexture * gltex = FGLTexture::ValidateTexture(img);
-
-	const PatchTextureInfo * pti;
-
-	if (parms.colorOverlay)
-	{
-		// Right now there's only black. Should be implemented properly later
-		light = 1.f - APART(parms.colorOverlay)/255.f;
-	}
-
-	if (!img->bHasCanvas)
-	{
-		if (!parms.alphaChannel) 
-		{
-			int translation = 0;
-			if (parms.remap != NULL)
-			{
-				GLTranslationPalette * pal = static_cast<GLTranslationPalette*>(parms.remap->GetNative());
-				if (pal) translation = -pal->GetIndex();
-			}
-			pti = gltex->BindPatch(CM_DEFAULT, translation);
-		}
-		else 
-		{
-			// This is an alpha texture
-			pti = gltex->BindPatch(CM_SHADE, 0);
-		}
-
-		if (!pti) return;
-
-		ox = pti->GetUL();
-		oy = pti->GetVT();
-		cx = pti->GetUR();
-		cy = pti->GetVB();
-	}
-	else
-	{
-		gltex->Bind(CM_DEFAULT, 0, 0);
-		cx=1.f;
-		cy=-1.f;
-		ox = oy = 0.f;
-	}
-	
-	if (parms.flipX)
-	{
-		float temp = ox;
-		ox = cx;
-		cx = temp;
-	}
-	
-	// also take into account texInfo->windowLeft and texInfo->windowRight
-	// just ignore for now...
-	if (parms.windowleft || parms.windowright != img->GetScaledWidth()) return;
-	
-	if (parms.style.Flags & STYLEF_ColorIsFixed)
-	{
-		r = RPART(parms.fillcolor)/255.0f;
-		g = GPART(parms.fillcolor)/255.0f;
-		b = BPART(parms.fillcolor)/255.0f;
-	}
-	else
-	{
-		r = g = b = light;
-	}
-	
-	// scissor test doesn't use the current viewport for the coordinates, so use real screen coordinates
-	int btm = (SCREENHEIGHT - GetHeight()) / 2;
-	btm = SCREENHEIGHT - btm;
-
-	gl.Enable(GL_SCISSOR_TEST);
-	int space = (GetTrueHeight()-GetHeight())/2;
-	gl.Scissor(parms.lclip, btm - parms.dclip + space, parms.rclip - parms.lclip, parms.dclip - parms.uclip);
-	
-	gl_SetRenderStyle(parms.style, !parms.masked, false);
-
-	gl.Color4f(r, g, b, FIXED2FLOAT(parms.alpha));
-	
-	gl.Disable(GL_ALPHA_TEST);
-	gl_ApplyShader();
-	gl.Begin(GL_TRIANGLE_STRIP);
-	gl.TexCoord2f(ox, oy);
-	gl.Vertex2i(x, y);
-	gl.TexCoord2f(ox, cy);
-	gl.Vertex2i(x, y + h);
-	gl.TexCoord2f(cx, oy);
-	gl.Vertex2i(x + w, y);
-	gl.TexCoord2f(cx, cy);
-	gl.Vertex2i(x + w, y + h);
-	gl.End();
-	gl.Enable(GL_ALPHA_TEST);
-	
-	gl.Scissor(0, 0, GetWidth(), GetHeight());
-	gl.Disable(GL_SCISSOR_TEST);
-	gl_SetTextureMode(TM_MODULATE);
-	gl.BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	gl.BlendEquation(GL_FUNC_ADD);
 }
 
 //==========================================================================
@@ -534,15 +412,8 @@ void STACK_ARGS OpenGLFrameBuffer::DrawTextureV(FTexture *img, int x0, int y0, u
 //==========================================================================
 void OpenGLFrameBuffer::DrawLine(int x1, int y1, int x2, int y2, int palcolor, uint32 color)
 {
-	PalEntry p = color? (PalEntry)color : GPalette.BaseColors[color];
-	gl_EnableTexture(false);
-	gl_DisableShader();
-	gl.Color3ub(p.r, p.g, p.b);
-	gl.Begin(GL_LINES);
-	gl.Vertex2i(x1, y1);
-	gl.Vertex2i(x2, y2);
-	gl.End();
-	gl_EnableTexture(true);
+	if (GLRenderer != NULL) 
+		GLRenderer->DrawLine(x1, y1, x2, y2, palcolor, color);
 }
 
 //==========================================================================
@@ -552,14 +423,8 @@ void OpenGLFrameBuffer::DrawLine(int x1, int y1, int x2, int y2, int palcolor, u
 //==========================================================================
 void OpenGLFrameBuffer::DrawPixel(int x1, int y1, int palcolor, uint32 color)
 {
-	PalEntry p = color? (PalEntry)color : GPalette.BaseColors[color];
-	gl_EnableTexture(false);
-	gl_DisableShader();
-	gl.Color3ub(p.r, p.g, p.b);
-	gl.Begin(GL_POINTS);
-	gl.Vertex2i(x1, y1);
-	gl.End();
-	gl_EnableTexture(true);
+	if (GLRenderer != NULL) 
+		GLRenderer->DrawPixel(x1, y1, palcolor, color);
 }
 
 //==========================================================================
@@ -571,31 +436,14 @@ void OpenGLFrameBuffer::Dim(PalEntry)
 {
 	// Unlike in the software renderer the color is being ignored here because
 	// view blending only affects the actual view with the GL renderer.
-	Dim((DWORD)dimcolor , dimamount, 0, 0, GetWidth(), GetHeight());
+	if (GLRenderer != NULL) 
+		GLRenderer->Dim((DWORD)dimcolor , dimamount, 0, 0, GetWidth(), GetHeight());
 }
 
 void OpenGLFrameBuffer::Dim(PalEntry color, float damount, int x1, int y1, int w, int h)
 {
-	float r, g, b;
-	
-	gl_EnableTexture(false);
-	gl_DisableShader();
-	gl.BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	gl.AlphaFunc(GL_GREATER,0);
-	
-	r = color.r/255.0f;
-	g = color.g/255.0f;
-	b = color.b/255.0f;
-	
-	gl.Begin(GL_TRIANGLE_FAN);
-	gl.Color4f(r, g, b, damount);
-	gl.Vertex2i(x1, y1);
-	gl.Vertex2i(x1, y1 + h);
-	gl.Vertex2i(x1 + w, y1 + h);
-	gl.Vertex2i(x1 + w, y1);
-	gl.End();
-	
-	gl_EnableTexture(true);
+	if (GLRenderer != NULL) 
+		GLRenderer->Dim(color, damount, x1, y1, w, h);
 }
 
 //==========================================================================
@@ -605,36 +453,9 @@ void OpenGLFrameBuffer::Dim(PalEntry color, float damount, int x1, int y1, int w
 //==========================================================================
 void OpenGLFrameBuffer::FlatFill (int left, int top, int right, int bottom, FTexture *src, bool local_origin)
 {
-	float fU1,fU2,fV1,fV2;
 
-	FGLTexture *gltexture=FGLTexture::ValidateTexture(src);
-	
-	if (!gltexture) return;
-
-	const WorldTextureInfo * wti = gltexture->Bind(CM_DEFAULT, 0, 0);
-	if (!wti) return;
-	
-	if (!local_origin)
-	{
-		fU1=wti->GetU(left);
-		fV1=wti->GetV(top);
-		fU2=wti->GetU(right);
-		fV2=wti->GetV(bottom);
-	}
-	else
-	{
-		fU1=wti->GetU(0);
-		fV1=wti->GetV(0);
-		fU2=wti->GetU(right-left);
-		fV2=wti->GetV(bottom-top);
-	}
-	gl_ApplyShader();
-	gl.Begin(GL_TRIANGLE_STRIP);
-	gl.TexCoord2f(fU1, fV1); gl.Vertex2f(left, top);
-	gl.TexCoord2f(fU1, fV2); gl.Vertex2f(left, bottom);
-	gl.TexCoord2f(fU2, fV1); gl.Vertex2f(right, top);
-	gl.TexCoord2f(fU2, fV2); gl.Vertex2f(right, bottom);
-	gl.End();
+	if (GLRenderer != NULL) 
+		GLRenderer->FlatFill(left, top, right, bottom, src, local_origin);
 }
 
 //==========================================================================
@@ -644,35 +465,8 @@ void OpenGLFrameBuffer::FlatFill (int left, int top, int right, int bottom, FTex
 //==========================================================================
 void OpenGLFrameBuffer::Clear(int left, int top, int right, int bottom, int palcolor, uint32 color)
 {
-	int rt;
-	int offY = 0;
-	PalEntry p = palcolor==-1? (PalEntry)color : GPalette.BaseColors[palcolor];
-	int width = right-left;
-	int height= bottom-top;
-	
-	
-	rt = screen->GetHeight() - top;
-	
-	int space = (static_cast<OpenGLFrameBuffer*>(screen)->GetTrueHeight()-screen->GetHeight())/2;	// ugh...
-	rt += space;
-	/*
-	if (!m_windowed && (m_trueHeight != m_height))
-	{
-		offY = (m_trueHeight - m_height) / 2;
-		rt += offY;
-	}
-	*/
-	
-	gl_DisableShader();
-
-	gl.Enable(GL_SCISSOR_TEST);
-	gl.Scissor(left, rt - height, width, height);
-	
-	gl.ClearColor(p.r/255.0f, p.g/255.0f, p.b/255.0f, 0.f);
-	gl.Clear(GL_COLOR_BUFFER_BIT);
-	gl.ClearColor(0.f, 0.f, 0.f, 0.f);
-	
-	gl.Disable(GL_SCISSOR_TEST);
+	if (GLRenderer != NULL) 
+		GLRenderer->Clear(left, top, right, bottom, palcolor, color);
 }
 
 //===========================================================================
@@ -706,3 +500,15 @@ void OpenGLFrameBuffer::ReleaseScreenshotBuffer()
 	if (ScreenshotBuffer != NULL) delete [] ScreenshotBuffer;
 	ScreenshotBuffer = NULL;
 }
+
+
+void OpenGLFrameBuffer::WriteSavePic (player_t *player, FILE *file, int width, int height)
+{
+	GLRenderer->WriteSavePic(player, file, width, height);
+}
+
+void OpenGLFrameBuffer::RenderView (player_t* player)
+{
+	GLRenderer->RenderView(player);
+}
+

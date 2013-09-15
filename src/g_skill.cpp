@@ -42,6 +42,7 @@
 #include "v_font.h"
 
 TArray<FSkillInfo> AllSkills;
+int DefaultSkill = -1;
 
 //==========================================================================
 //
@@ -52,6 +53,8 @@ TArray<FSkillInfo> AllSkills;
 void FMapInfoParser::ParseSkill ()
 {
 	FSkillInfo skill;
+	bool thisisdefault = false;
+	bool acsreturnisset = false;
 
 	skill.AmmoFactor = FRACUNIT;
 	skill.DoubleAmmoFactor = 2*FRACUNIT;
@@ -65,11 +68,16 @@ void FMapInfoParser::ParseSkill ()
 	skill.RespawnLimit = 0;
 	skill.Aggressiveness = FRACUNIT;
 	skill.SpawnFilter = 0;
-	skill.ACSReturn = AllSkills.Size();
+	skill.ACSReturn = 0;
 	skill.MenuNameIsLump = false;
 	skill.MustConfirm = false;
 	skill.Shortcut = 0;
 	skill.TextColor = "";
+	skill.Replace.Clear();
+	skill.Replaced.Clear();
+	skill.MonsterHealth = FRACUNIT;
+	skill.FriendlyHealth = FRACUNIT;
+	skill.NoPain = false;
 
 	sc.MustGetString();
 	skill.Name = sc.String;
@@ -158,6 +166,18 @@ void FMapInfoParser::ParseSkill ()
 			ParseAssign();
 			sc.MustGetNumber ();
 			skill.ACSReturn = sc.Number;
+			acsreturnisset = true;
+		}
+		else if (sc.Compare("ReplaceActor"))
+		{
+			ParseAssign();
+			sc.MustGetString();
+			FName replaced = sc.String;
+			ParseComma();
+			sc.MustGetString();
+			FName replacer = sc.String;
+			skill.SetReplacement(replaced, replacer);
+			skill.SetReplacedBy(replacer, replaced);
 		}
 		else if (sc.Compare("Name"))
 		{
@@ -213,6 +233,30 @@ void FMapInfoParser::ParseSkill ()
 			sc.MustGetString();
 			skill.TextColor.Format("[%s]", sc.String);
 		}
+		else if (sc.Compare("MonsterHealth"))
+		{
+			ParseAssign();
+			sc.MustGetFloat();
+			skill.MonsterHealth = FLOAT2FIXED(sc.Float);				
+		}
+		else if (sc.Compare("FriendlyHealth"))
+		{
+			ParseAssign();
+			sc.MustGetFloat();
+			skill.FriendlyHealth = FLOAT2FIXED(sc.Float);
+		}
+		else if (sc.Compare("NoPain"))
+		{
+			skill.NoPain = true;
+		}
+		else if (sc.Compare("DefaultSkill"))
+		{
+			if (DefaultSkill >= 0)
+			{
+				sc.ScriptError("%s is already the default skill\n", AllSkills[DefaultSkill].Name.GetChars());
+			}
+			thisisdefault = true;
+		}
 		else if (!ParseCloseBrace())
 		{
 			// Unknown
@@ -229,9 +273,25 @@ void FMapInfoParser::ParseSkill ()
 	{
 		if (AllSkills[i].Name == skill.Name)
 		{
+			if (!acsreturnisset)
+			{ // Use the ACS return for the skill we are overwriting.
+				skill.ACSReturn = AllSkills[i].ACSReturn;
+			}
 			AllSkills[i] = skill;
+			if (thisisdefault)
+			{
+				DefaultSkill = i;
+			}
 			return;
 		}
+	}
+	if (!acsreturnisset)
+	{
+		skill.ACSReturn = AllSkills.Size();
+	}
+	if (thisisdefault)
+	{
+		DefaultSkill = AllSkills.Size();
 	}
 	AllSkills.Push(skill);
 }
@@ -266,7 +326,7 @@ int G_SkillProperty(ESkillProperty prop)
 
 		case SKILLP_Respawn:
 			if (dmflags & DF_MONSTERS_RESPAWN && AllSkills[gameskill].RespawnCounter==0) 
-				return TICRATE * (gameinfo.gametype != GAME_Strife ? 12 : 16);
+				return TICRATE * gameinfo.defaultrespawntime;
 			return AllSkills[gameskill].RespawnCounter;
 
 		case SKILLP_RespawnLimit:
@@ -289,6 +349,15 @@ int G_SkillProperty(ESkillProperty prop)
 
 		case SKILLP_ACSReturn:
 			return AllSkills[gameskill].ACSReturn;
+		
+		case SKILLP_MonsterHealth:
+			return AllSkills[gameskill].MonsterHealth;
+
+		case SKILLP_FriendlyHealth:
+			return AllSkills[gameskill].FriendlyHealth;
+
+		case SKILLP_NoPain:			
+			return AllSkills[gameskill].NoPain;			
 		}
 	}
 	return 0;
@@ -338,6 +407,11 @@ FSkillInfo &FSkillInfo::operator=(const FSkillInfo &other)
 	MustConfirmText = other.MustConfirmText;
 	Shortcut = other.Shortcut;
 	TextColor = other.TextColor;
+	Replace = other.Replace;
+	Replaced = other.Replaced;
+	MonsterHealth = other.MonsterHealth;
+	FriendlyHealth = other.FriendlyHealth;
+	NoPain = other.NoPain;
 	return *this;
 }
 
@@ -363,3 +437,48 @@ int FSkillInfo::GetTextColor() const
 	return color;
 }
 
+//==========================================================================
+//
+// FSkillInfo::SetReplacement
+//
+//==========================================================================
+
+void FSkillInfo::SetReplacement(FName a, FName b)
+{
+	Replace[a] = b;
+}
+
+//==========================================================================
+//
+// FSkillInfo::GetReplacement
+//
+//==========================================================================
+
+FName FSkillInfo::GetReplacement(FName a)
+{
+	if (Replace.CheckKey(a)) return Replace[a];
+	else return NAME_None;
+}
+
+//==========================================================================
+//
+// FSkillInfo::SetReplaced
+//
+//==========================================================================
+
+void FSkillInfo::SetReplacedBy(FName b, FName a)
+{
+	Replaced[b] = a;
+}
+
+//==========================================================================
+//
+// FSkillInfo::GetReplaced
+//
+//==========================================================================
+
+FName FSkillInfo::GetReplacedBy(FName b)
+{
+	if (Replaced.CheckKey(b)) return Replaced[b];
+	else return NAME_None;
+}

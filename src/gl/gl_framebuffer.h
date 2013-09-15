@@ -4,17 +4,21 @@
 #ifdef _WIN32
 #include "win32iface.h"
 #include "win32gliface.h"
+#endif
+namespace GLRendererOld
+{
+	class GLTexture;
+}
 
-class GLTexture;
-class FShader;
-
+extern long gl_frameMS;
+extern long gl_frameCount;
+#ifdef _WIN32
 class OpenGLFrameBuffer : public Win32GLFrameBuffer
 {
 	typedef Win32GLFrameBuffer Super;
 	DECLARE_CLASS(OpenGLFrameBuffer, Win32GLFrameBuffer)
 #else
 #include "sdlglvideo.h"
-#include "gl/gltexture.h"
 class OpenGLFrameBuffer : public SDLGLFB
 {
 //	typedef SDLGLFB Super;	//[C]commented, DECLARE_CLASS defines this in linux
@@ -99,13 +103,11 @@ private:
 	class Wiper_Crossfade;		friend class Wiper_Crossfade;
 
 	Wiper *ScreenWipe;
-	GLTexture *wipestartscreen;
-	GLTexture *wipeendscreen;
+	GLRendererOld::GLTexture *wipestartscreen;
+	GLRendererOld::GLTexture *wipeendscreen;
 
+public:
 	AActor * LastCamera;
-
-	void SetFixedColormap (player_t *player);
-
 };
 
 

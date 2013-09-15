@@ -118,10 +118,10 @@ void	P_ExplodeMissile (AActor *missile, line_t *explodeline, AActor *target);
 AActor *P_SpawnMissile (AActor* source, AActor* dest, const PClass *type);
 AActor *P_SpawnMissileZ (AActor* source, fixed_t z, AActor* dest, const PClass *type);
 AActor *P_SpawnMissileXYZ (fixed_t x, fixed_t y, fixed_t z, AActor *source, AActor *dest, const PClass *type, bool checkspawn = true);
-AActor *P_SpawnMissileAngle (AActor *source, const PClass *type, angle_t angle, fixed_t momz);
-AActor *P_SpawnMissileAngleSpeed (AActor *source, const PClass *type, angle_t angle, fixed_t momz, fixed_t speed);
-AActor *P_SpawnMissileAngleZ (AActor *source, fixed_t z, const PClass *type, angle_t angle, fixed_t momz);
-AActor *P_SpawnMissileAngleZSpeed (AActor *source, fixed_t z, const PClass *type, angle_t angle, fixed_t momz, fixed_t speed, AActor *owner=NULL, bool checkspawn = true);
+AActor *P_SpawnMissileAngle (AActor *source, const PClass *type, angle_t angle, fixed_t velz);
+AActor *P_SpawnMissileAngleSpeed (AActor *source, const PClass *type, angle_t angle, fixed_t velz, fixed_t speed);
+AActor *P_SpawnMissileAngleZ (AActor *source, fixed_t z, const PClass *type, angle_t angle, fixed_t velz);
+AActor *P_SpawnMissileAngleZSpeed (AActor *source, fixed_t z, const PClass *type, angle_t angle, fixed_t velz, fixed_t speed, AActor *owner=NULL, bool checkspawn = true);
 AActor *P_SpawnMissileZAimed (AActor *source, fixed_t z, AActor *dest, const PClass *type);
 
 AActor *P_SpawnPlayerMissile (AActor* source, const PClass *type);
@@ -146,6 +146,7 @@ bool	P_Thing_Move (int tid, AActor *source, int mapspot, bool fog);
 int		P_Thing_Damage (int tid, AActor *whofor0, int amount, FName type);
 void	P_Thing_SetVelocity(AActor *actor, fixed_t vx, fixed_t vy, fixed_t vz, bool add, bool setbob);
 void P_RemoveThing(AActor * actor);
+bool P_Thing_Raise(AActor *thing, bool bIgnorePositionCheck = false); // [BB] Added bIgnorePositionCheck.
 
 //
 // P_ENEMY
@@ -357,11 +358,13 @@ struct FCheckPosition
 	// ripping damage once per tic instead of once per move.
 	bool			DoRipping;
 	AActor			*LastRipped;
+	int				PushTime;
 
 	FCheckPosition(bool rip=false)
 	{
 		DoRipping = rip;
 		LastRipped = NULL;
+		PushTime = 0;
 	}
 };
 
@@ -407,8 +410,8 @@ void	P_TraceBleed (int damage, fixed_t x, fixed_t y, fixed_t z, AActor *target, 
 void	P_TraceBleed (int damage, AActor *target, angle_t angle, int pitch);
 void	P_TraceBleed (int damage, AActor *target, AActor *missile);		// missile version
 void	P_TraceBleed (int damage, AActor *target);		// random direction version
-void	P_RailAttack (AActor *source, int damage, int offset, int color1 = 0, int color2 = 0, float maxdiff = 0, bool silent = false, const PClass *puff = NULL);	// [RH] Shoot a railgun
-void	P_RailAttackWithPossibleSpread(AActor *source, int damage, int offset, int color1 = 0, int color2 = 0, float maxdiff = 0, bool silent = false, const PClass *puff = NULL);	// [BB] Shoot a railgun with spread applied if necessary
+void	P_RailAttack (AActor *source, int damage, int offset, int color1 = 0, int color2 = 0, float maxdiff = 0, bool silent = false, const PClass *puff = NULL, bool pierce = true);	// [RH] Shoot a railgun
+void	P_RailAttackWithPossibleSpread(AActor *source, int damage, int offset, int color1 = 0, int color2 = 0, float maxdiff = 0, bool silent = false, const PClass *puff = NULL, bool pierce = true);	// [BB] Shoot a railgun with spread applied if necessary
 bool	P_HitFloor (AActor *thing);
 bool	P_HitWater (AActor *thing, sector_t *sec, fixed_t splashx = FIXED_MIN, fixed_t splashy = FIXED_MIN, fixed_t splashz=FIXED_MIN, bool checkabove = false);
 bool	P_CheckMissileSpawn (AActor *missile, bool bExplode = true);
@@ -418,7 +421,8 @@ void	P_PlaySpawnSound(AActor *missile, AActor *spawner);
 void	P_AimCamera (AActor *t1, fixed_t &x, fixed_t &y, fixed_t &z, sector_t *&sec);
 
 // [RH] Means of death
-void	P_RadiusAttack (AActor *spot, AActor *source, int damage, int distance, FName damageType, bool hurtSelf, bool dodamage=true);
+void	P_RadiusAttack (AActor *spot, AActor *source, int damage, int distance, 
+						FName damageType, bool hurtSelf, bool dodamage=true, int fulldamagedistance=0);
 
 void	P_DelSector_List();
 void	P_DelSeclist(msecnode_t *);							// phares 3/16/98
@@ -463,7 +467,7 @@ extern FBlockNode**		blocklinks; 	// for thing chains
 void P_TouchSpecialThing (AActor *special, AActor *toucher);
 void P_DamageMobj (AActor *target, AActor *inflictor, AActor *source, int damage, FName mod, int flags=0);
 bool P_GiveBody (AActor *actor, int num);
-void P_PoisonPlayer (player_t *player, AActor *poisoner, AActor *source, int poison);
+bool P_PoisonPlayer (player_t *player, AActor *poisoner, AActor *source, int poison);
 void P_PoisonDamage (player_t *player, AActor *source, int damage, bool playPainSound);
 
 enum EDmgFlags

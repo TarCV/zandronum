@@ -17,6 +17,7 @@ EXTERN_CVAR(Bool, gl_texture)
 EXTERN_CVAR(Int, gl_texture_filter)
 EXTERN_CVAR(Float, gl_texture_filter_anisotropic)
 EXTERN_CVAR(Int, gl_texture_format)
+EXTERN_CVAR(Bool, gl_texture_usehires)
 
 EXTERN_CVAR(Int, gl_weaponlight)
 EXTERN_CVAR(Bool, gl_atifog)
@@ -40,28 +41,12 @@ EXTERN_CVAR (Bool, gl_light_particles);
 EXTERN_CVAR(Int, gl_fogmode)
 EXTERN_CVAR(Int, gl_lightmode)
 EXTERN_CVAR(Bool,gl_mirror_envmap)
+EXTERN_CVAR(Int,gl_nearclip)
 
-extern float pitch;
-extern float viewvecX,viewvecY;
-
-extern int rendered_lines,rendered_flats,rendered_sprites,rendered_decals,render_vertexsplit,render_texsplit;
 extern int iter_dlightf, iter_dlight, draw_dlight, draw_dlightf;
-extern DWORD gl_fixedcolormap;
-extern int gl_lightcount;
 extern int gl_spriteindex;
 extern int palette_brightness;
-extern AActor * viewactor;
 extern bool gl_shaderactive;
-
-typedef enum
-{
-        area_normal,
-        area_below,
-        area_above,
-		area_default
-} area_t;
-
-extern area_t			in_area;
 
 
 #endif // _GL_INTERN_H

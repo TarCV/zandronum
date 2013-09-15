@@ -52,7 +52,7 @@ void M_Deinit ();
 
 // Called by intro code to force menu up upon a keypress,
 // does nothing if menu is already up.
-void M_StartControlPanel (bool makeSound);
+void M_StartControlPanel (bool makeSound, bool wantTop=false);
 
 // Setup multiplayer menu
 bool M_StartMultiplayerMenu (void);
@@ -96,6 +96,9 @@ void M_DeactivateMenuInput ();
 
 void M_NotifyNewSave (const char *file, const char *title, bool okForQuicksave);
 
+// Draw a slider. Set fracdigits negative to not display the current value numerically.
+void M_DrawSlider (int x, int y, double min, double max, double cur, int fracdigits=1);
+
 // Menu flag definitions.
 #define MNF_ALIGNLEFT			1	// Align menu to the left
 #define MNF_CENTERED			2	// Menu text is centered
@@ -110,6 +113,7 @@ typedef enum {
 	rightmore,
 	safemore,
 	rsafemore,
+	joymore,
 	slider,
 	absslider,
 	inverter,
@@ -117,7 +121,6 @@ typedef enum {
 	discretes,
 	cdiscrete,
 	ediscrete,
-	discrete_guid,
 	control,
 	screenres,
 	bitflag,
@@ -128,6 +131,10 @@ typedef enum {
 	colorpicker,
 	intslider,
 	palettegrid,
+	joy_sens,
+	joy_slider,
+	joy_map,
+	joy_inverter,
 	string,
 	pwstring,
 	skintype,
@@ -144,8 +151,10 @@ typedef enum {
 
 } itemtype;
 
-struct GUIDName;
+struct IJoystickConfig;
+void UpdateJoystickMenu(IJoystickConfig *selected);
 
+// Yeargh! It's a monster!
 struct menuitem_t
 {
 	itemtype		  type;
@@ -158,6 +167,7 @@ struct menuitem_t
 		FColorCVar		 *colorcvar;
 		int				  selmode;
 		float			  fval;
+		int				  joyselection;
 	} a;
 	union {
 		float			  min;		/* aka numvalues aka invflag */
@@ -172,7 +182,7 @@ struct menuitem_t
 		int				  key2;
 		char			 *res2;
 		void			 *extra;
-		float			  discretecenter;
+		float			  discretecenter;	// 1 to center or 2 to disable repeat (do I even use centered discretes?)
 	} c;
 	union {
 		float			  step;
@@ -183,13 +193,13 @@ struct menuitem_t
 		struct value_t	 *values;
 		struct valuestring_t *valuestrings;
 		struct valueenum_t	 *enumvalues;
-		GUIDName		 *guidvalues;
 		char			 *command;
 		void			(*cfunc)(FBaseCVar *cvar, float newval);
 		void			(*mfunc)(void);
 		void			(*lfunc)(int);
 		int				  highlight;
 		int				  flagmask;
+		int				  joyslidernum;
 	} e;
 	union {
 
@@ -274,6 +284,26 @@ struct menustack_t
 	bool isNewStyle;
 	bool drawSkull;
 };
+
+enum EMenuKey
+{
+	MKEY_Up,
+	MKEY_Down,
+	MKEY_Left,
+	MKEY_Right,
+	MKEY_PageUp,
+	MKEY_PageDown,
+	//----------------- Keys past here do not repeat.
+	MKEY_Enter,
+	MKEY_Back,		// Back to previous menu
+	MKEY_Clear,		// Clear keybinding/flip player sprite preview
+
+	NUM_MKEYS
+};
+
+void M_ButtonHandler(EMenuKey key, bool repeat);
+void M_OptButtonHandler(EMenuKey key, bool repeat);
+void M_DrawConText (int color, int x, int y, const char *str);
 
 extern value_t YesNo[2];
 extern value_t NoYes[2];

@@ -361,9 +361,9 @@ sector_t *R_FakeFlat(sector_t *sec, sector_t *tempsec,
 
 	FakeSide = FAKED_Center;
 
-	if (sec->heightsec && !(sec->heightsec->MoreFlags & SECF_IGNOREHEIGHTSEC) && !(sec->e && sec->e->XFloor.ffloors.Size()))
+	const sector_t *s = sec->GetHeightSec();
+	if (s != NULL)
 	{
-		const sector_t *s = sec->heightsec;
 		sector_t *heightsec = viewsector->heightsec;
 		bool underwater = r_fakingunderwater ||
 			(heightsec && viewz <= heightsec->floorplane.ZatPoint (viewx, viewy));
@@ -657,7 +657,7 @@ void R_AddLine (seg_t *line)
 	}
 	else
 	{ // The seg is only part of the wall.
-		if (line->linedef->sidenum[0] != DWORD(line->sidedef - sides))
+		if (line->linedef->sidedef[0] != line->sidedef)
 		{
 			swap (v1, v2);
 		}

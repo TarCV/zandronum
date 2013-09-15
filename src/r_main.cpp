@@ -55,8 +55,7 @@
 #include "r_plane.h"
 #include "r_3dfloors.h"
 #include "v_palette.h"
-#include "gl/gl_data.h"
-#include "gl/gl_texture.h"
+#include "gl/common/glc_data.h"
 #include "gl/gl_functions.h"
 
 // [BC] New #includes.
@@ -236,6 +235,27 @@ static bool NoInterpolateView;
 
 //==========================================================================
 //
+// SlopeDiv
+//
+// Utility function, called by R_PointToAngle.
+//
+//==========================================================================
+
+angle_t SlopeDiv (unsigned int num, unsigned den)
+{
+	unsigned int ans;
+
+	if (den < 512)
+		return (ANG45 - 1); //tantoangle[SLOPERANGE]
+
+	ans = (num << 3) / (den >> 8);
+
+	return ans <= SLOPERANGE ? tantoangle[ans] : (ANG45 - 1);
+}
+
+
+//==========================================================================
+//
 // R_PointToAngle
 //
 // To get a global angle from cartesian coordinates, the coordinates are
@@ -249,7 +269,7 @@ angle_t R_PointToAngle2 (fixed_t x1, fixed_t y1, fixed_t x, fixed_t y)
 {
 #if 1
 	// The precision of the code below is abysmal so use the CRT atan2 function instead!
-	return quickertoint((float)atan2f(y-y1, x-x1) * (ANGLE_180/M_PI));
+	return quickertoint((float)(atan2f(float(y-y1), float(x-x1)) * (ANGLE_180/M_PI)));
 #else
 	x -= x1;
 	y -= y1;
@@ -259,65 +279,56 @@ angle_t R_PointToAngle2 (fixed_t x1, fixed_t y1, fixed_t x, fixed_t y)
 		return 0;
 	}
 
-	fixed_t ax = abs (x);
-	fixed_t ay = abs (y);
-	int div;
-	angle_t angle;
-
-	if (ax > ay)
-	{
-		swap (ax, ay);
-	}
-	div = SlopeDiv (ax, ay);
-	angle = tantoangle[div];
-
 	if (x >= 0)
 	{
 		if (y >= 0)
 		{
 			if (x > y)
 			{ // octant 0
-				return angle;
+				return SlopeDiv(y, x);
 			}
 			else
 			{ // octant 1
-				return ANG90 - 1 - angle;
+				return ANG90 - 1 - SlopeDiv(x, y);
 			}
 		}
 		else // y < 0
 		{
-			if (x > -y)
+			y = -y;
+			if (x > y)
 			{ // octant 8
-				return (angle_t)-(SDWORD)angle;
+				return 0 - SlopeDiv(y, x);
 			}
 			else
 			{ // octant 7
-				return ANG270 + angle;
+				return ANG270 + SlopeDiv(x, y);
 			}
 		}
 	}
 	else // x < 0
 	{
+		x = -x;
 		if (y >= 0)
 		{
-			if (-x > y)
+			if (x > y)
 			{ // octant 3
-				return ANG180 - 1 - angle;
+				return ANG180 - 1 - SlopeDiv(y, x);
 			}
 			else
 			{ // octant 2
-				return ANG90 + angle;
+				return ANG90 + SlopeDiv(x, y);
 			}
 		}
 		else // y < 0
 		{
-			if (x < y)
+			y = -y;
+			if (x > y)
 			{ // octant 4
-				return ANG180 + angle;
+				return ANG180 + SlopeDiv(y, x);
 			}
 			else
 			{ // octant 5
-				return ANG270 - 1 - angle;
+				return ANG270 - 1 - SlopeDiv(x, y);
 			}
 		}
 	}
@@ -704,7 +715,7 @@ void R_ExecuteSetViewSize ()
 //
 //==========================================================================
 
-CUSTOM_CVAR (Int, screenblocks, 11, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+CUSTOM_CVAR (Int, screenblocks, 11, CVAR_ARCHIVE)
 {
 	if (self > 12)
 		self = 12;
@@ -1170,6 +1181,7 @@ void R_SetupFrame (AActor *actor)
 	}
 
 	extralight = camera->player ? camera->player->extralight : 0;
+	newblend = 0;
 
 	// killough 3/20/98, 4/4/98: select colormap based on player status
 	// [RH] Can also select a blend
@@ -1197,21 +1209,19 @@ void R_SetupFrame (AActor *actor)
 			}
 		}
 	}
-	else if (viewsector->heightsec &&
-		!(viewsector->heightsec->MoreFlags & SECF_IGNOREHEIGHTSEC))
-	{
-		const sector_t *s = viewsector->heightsec;
-		newblend = viewz < s->floorplane.ZatPoint (viewx, viewy)
-			? s->bottommap
-			: viewz > s->ceilingplane.ZatPoint (viewx, viewy)
-			? s->topmap
-			: s->midmap;
-		if (APART(newblend) == 0 && newblend >= numfakecmaps)
-			newblend = 0;
-	}
 	else
 	{
-		newblend = 0;
+		const sector_t *s = viewsector->GetHeightSec();
+		if (s != NULL)
+		{
+			newblend = viewz < s->floorplane.ZatPoint (viewx, viewy)
+				? s->bottommap
+				: viewz > s->ceilingplane.ZatPoint (viewx, viewy)
+				? s->topmap
+				: s->midmap;
+			if (APART(newblend) == 0 && newblend >= numfakecmaps)
+				newblend = 0;
+		}
 	}
 
 	// [RH] Don't override testblend unless entering a sector with a
@@ -1258,6 +1268,10 @@ void R_SetupFrame (AActor *actor)
 
 		case GREENCOLORMAP:
 			fixedcolormap = GreenColormap;
+			break;
+
+		case BLUECOLORMAP:
+			fixedcolormap = BlueColormap;
 			break;
 
 		case GOLDCOLORMAP:

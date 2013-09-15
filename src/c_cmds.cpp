@@ -257,6 +257,15 @@ CCMD( idchoppers )
 	}
 }
 
+CCMD (buddha)
+{
+	if (CheckCheatmode())
+		return;
+
+	Net_WriteByte(DEM_GENERICCHEAT);
+	Net_WriteByte(CHT_BUDDHA);
+}
+
 CCMD (notarget)
 {
 	if (CheckCheatmode ())
@@ -862,7 +871,7 @@ CCMD (r_visibility)
 	}
 	else if ( NETWORK_GetState( ) != NETSTATE_CLIENT )
 	{
-		R_SetVisibility (atof (argv[1]));
+		R_SetVisibility ((float)atof (argv[1]));
 	}
 	else
 	{
@@ -1020,7 +1029,7 @@ CCMD(linetarget)
 		Printf("Target=%s, Health=%d, Spawnhealth=%d\n",
 			linetarget->GetClass()->TypeName.GetChars(),
 			linetarget->health,
-			linetarget->GetDefault()->health);
+			linetarget->SpawnHealth());
 	}
 	else Printf("No target found\n");
 }

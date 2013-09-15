@@ -2,6 +2,7 @@ ACTOR Inventory native
 {
 	Inventory.Amount 1
 	Inventory.MaxAmount 1
+	Inventory.InterHubAmount 1
 	Inventory.UseSound "misc/invuse"
 	Inventory.PickupSound "misc/i_pkup"
 	
@@ -9,7 +10,7 @@ ACTOR Inventory native
 	action native A_CustomPunch(int damage, bool norandom = false, bool useammo = true, class<Actor> pufftype = "BulletPuff", float range = 0);
 	action native A_FireBullets(float spread_xy, float spread_z, int numbullets, int damageperbullet, class<Actor> pufftype = "BulletPuff", int flags = 1, float range = 0);
 	action native A_FireCustomMissile(class<Actor> missiletype, float angle = 0, bool useammo = true, int spawnofs_xy = 0, float spawnheight = 0, bool aimatangle = false, float pitch = 0);
-	action native A_RailAttack(int damage, int spawnofs_xy = 0, int useammo = true, color color1 = "", color color2 = "", bool silent = false, float maxdiff = 0, class<Actor> pufftype = "BulletPuff");
+	action native A_RailAttack(int damage, int spawnofs_xy = 0, int useammo = true, color color1 = "", color color2 = "", int flags = 0, float maxdiff = 0, class<Actor> pufftype = "BulletPuff");
 	action native A_Light(int extralight);
 	action native A_Light0();
 	action native A_Light1();
@@ -117,17 +118,11 @@ ACTOR HexenArmor : Armor native
 	+Inventory.UNDROPPABLE
 }
 
-ACTOR DehackedPickup : Inventory native
-{
-}
+ACTOR DehackedPickup : Inventory native {}
 
-ACTOR FakeInventory : Inventory native
-{
-}
+ACTOR FakeInventory : Inventory native {}
 
-ACTOR CustomInventory : Inventory native
-{
-}
+ACTOR CustomInventory : Inventory native {}
 
 Actor Health : Inventory native
 {
@@ -156,9 +151,7 @@ ACTOR PowerupGiver : Inventory native
 	Inventory.PickupSound "misc/p_pkup"
 }
 
-ACTOR Powerup : Inventory native
-{
-}
+ACTOR Powerup : Inventory native {}
 
 ACTOR PowerInvulnerable : Powerup native
 {
@@ -176,16 +169,24 @@ ACTOR PowerStrength : Powerup native
 ACTOR PowerInvisibility : Powerup native
 {
 	Powerup.Duration -60
+	Powerup.Strength 80
+	Powerup.Mode "Fuzzy"
 }
 
-ACTOR PowerGhost : PowerInvisibility native
+ACTOR PowerGhost : PowerInvisibility
 {
+	+GHOST
+	Powerup.Duration -60
+	Powerup.Strength 60
+	Powerup.Mode "None"
 }
 
 ACTOR PowerShadow : PowerInvisibility native
 {
-	Powerup.Duration -55
 	+INVENTORY.HUBPOWER
+	Powerup.Duration -55
+	Powerup.Strength 75
+	Powerup.Mode "Cumulative"
 }
 
 // [BB]
@@ -213,9 +214,7 @@ ACTOR PowerLightAmp : Powerup native
 	Powerup.Duration -120
 }
 
-ACTOR PowerTorch : PowerLightAmp native
-{
-}
+ACTOR PowerTorch : PowerLightAmp native {}
 
 ACTOR PowerFlight : Powerup native
 {
@@ -304,18 +303,21 @@ ACTOR PowerRegeneration : Powerup native
 	Powerup.Duration -120
 }
 
-ACTOR PowerHighJump : Powerup native
-{
-}
+ACTOR PowerHighJump : Powerup native {}
+
+ACTOR PowerDoubleFiringSpeed : Powerup native {}
 
 ACTOR PowerMorph : Powerup native
 {
 	Powerup.Duration -40
 }
 
-ACTOR MapRevealer : Inventory native
+ACTOR PowerInfiniteAmmo : Powerup native
 {
+	Powerup.Duration -30
 }
+
+ACTOR MapRevealer : Inventory native {}
 
 ACTOR PuzzleItem : Inventory native
 {
@@ -340,6 +342,8 @@ Actor Weapon : Inventory native
 	action native A_ZoomFactor(float scale = 1, int flags = 0);
 	const int ZOOM_INSTANT = 1;
 	const int ZOOM_NOSCALETURNING = 2;
+	
+	action native A_SetCrosshair(int xhair);
 }
 
 ACTOR WeaponGiver : Weapon native
@@ -355,6 +359,4 @@ Actor WeaponHolder : Inventory native
 	+INVENTORY.UNDROPPABLE
 }
 
-Actor WeaponPiece : Inventory native
-{
-}
+Actor WeaponPiece : Inventory native {}
