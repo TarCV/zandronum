@@ -1,5 +1,5 @@
 cmake_minimum_required( VERSION 2.4 )
-project(ZDoom)
+project(GZDoom)
 
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR} )
 include( CreateLaunchers )
@@ -55,7 +55,7 @@ IF( NOT CMAKE_BUILD_TYPE )
 ENDIF( NOT CMAKE_BUILD_TYPE )
 
 set( ZDOOM_OUTPUT_DIR ${CMAKE_BINARY_DIR} CACHE PATH "Directory where zdoom.pk3 and the executable will be created." )
-set( ZDOOM_EXE_NAME "zdoom" CACHE FILEPATH "Name of the executable to create." )
+set( ZDOOM_EXE_NAME "gzdoom" CACHE FILEPATH "Name of the executable to create" )
 if( MSVC )
 	# Allow the user to use ZDOOM_OUTPUT_DIR as a single release point.
 	# Use zdoom, zdoomd, zdoom64, and zdoomd64 for the binary names
@@ -89,14 +89,15 @@ if( MSVC )
 	# String pooling
 	# Function-level linking
 	# Disable run-time type information
-	set( ALL_C_FLAGS "/GF /Gy /GR-" )
+	# Set floating point model to fast or the GL render will suffer for it.
+	set( ALL_C_FLAGS "/GF /Gy /GR- /fp:fast" )
 	
 	# Avoid CRT DLL dependancies in release builds, optionally generate assembly output for checking crash locations.
 	option( ZDOOM_GENERATE_ASM "Generate assembly output." OFF )
 	if( ZDOOM_GENERATE_ASM )
-		set( REL_C_FLAGS "/MT /Oy /FAcs" )
+		set( REL_C_FLAGS "/MT /Oy /Oi /FAcs" )
 	else( ZDOOM_GENERATE_ASM )
-		set( REL_C_FLAGS "/MT /Oy" )
+		set( REL_C_FLAGS "/MT /Oy /Oi" )
 	endif( ZDOOM_GENERATE_ASM )
 	
 	# Debug allocations in debug builds
@@ -186,6 +187,8 @@ add_subdirectory( tools )
 add_subdirectory( dumb )
 add_subdirectory( gdtoa )
 add_subdirectory( wadsrc )
+add_subdirectory( wadsrc_bm )
+add_subdirectory( wadsrc_lights )
 add_subdirectory( src )
 
 if( NOT WIN32 AND NOT APPLE )
