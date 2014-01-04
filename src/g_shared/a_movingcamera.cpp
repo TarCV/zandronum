@@ -577,6 +577,7 @@ class AActorMover : public APathFollower
 {
 	DECLARE_CLASS (AActorMover, APathFollower)
 public:
+	void BeginPlay();
 	void PostBeginPlay ();
 	void Activate (AActor *activator);
 	void Deactivate (AActor *activator);
@@ -585,6 +586,11 @@ protected:
 };
 
 IMPLEMENT_CLASS (AActorMover)
+
+void AActorMover::BeginPlay()
+{
+	ChangeStatNum(STAT_ACTORMOVER);
+}
 
 void AActorMover::PostBeginPlay ()
 {
@@ -671,6 +677,7 @@ void AActorMover::Activate (AActor *activator)
 	tracer->PrevX = tracer->x;
 	tracer->PrevY = tracer->y;
 	tracer->PrevZ = tracer->z;
+	tracer->PrevAngle = tracer->angle;
 }
 
 void AActorMover::Deactivate (AActor *activator)
