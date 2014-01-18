@@ -75,11 +75,9 @@
 #include "p_acs.h"
 #include "templates.h"
 #include "a_movingcamera.h"
+#include "po_man.h"
 
 CVAR (Bool, sv_showwarnings, false, CVAR_GLOBALCONFIG|CVAR_ARCHIVE)
-
-// :((((((
-FPolyObj	*GetPolyobj( int polyNum );
 
 EXTERN_CVAR( Float, sv_aircontrol )
 
@@ -258,11 +256,11 @@ void RemoveUnnecessaryPositionUpdateFlags( AActor *pActor, ULONG &ulBits )
 		ulBits  &= ~CM_Y;
 	if ( (pActor->lastNetZUpdateTic == gametic) && (pActor->lastZ == pActor->z) )
 		ulBits  &= ~CM_Z;
-	if ( (pActor->lastNetMomXUpdateTic == gametic) && (pActor->lastMomx == pActor->momx) )
+	if ( (pActor->lastNetMomXUpdateTic == gametic) && (pActor->lastMomx == pActor->velx) )
 		ulBits  &= ~CM_MOMX;
-	if ( (pActor->lastNetMomYUpdateTic == gametic) && (pActor->lastMomy == pActor->momy) )
+	if ( (pActor->lastNetMomYUpdateTic == gametic) && (pActor->lastMomy == pActor->vely) )
 		ulBits  &= ~CM_MOMY;
-	if ( (pActor->lastNetMomZUpdateTic == gametic) && (pActor->lastMomz == pActor->momz) )
+	if ( (pActor->lastNetMomZUpdateTic == gametic) && (pActor->lastMomz == pActor->velz) )
 		ulBits  &= ~CM_MOMZ;
 	if ( (pActor->lastNetMovedirUpdateTic == gametic) && (pActor->lastMovedir == pActor->movedir) )
 		ulBits  &= ~CM_MOVEDIR;
@@ -392,17 +390,17 @@ void ActorNetPositionUpdated( AActor *pActor, ULONG &ulBits )
 	if ( ulBits & CM_MOMX )
 	{
 		pActor->lastNetMomXUpdateTic = gametic;
-		pActor->lastMomx = pActor->momx;
+		pActor->lastMomx = pActor->velx;
 	}
 	if ( ulBits & CM_MOMY )
 	{
 		pActor->lastNetMomYUpdateTic = gametic;
-		pActor->lastMomy = pActor->momy;
+		pActor->lastMomy = pActor->vely;
 	}
 	if ( ulBits & CM_MOMZ )
 	{
 		pActor->lastNetMomZUpdateTic = gametic;
-		pActor->lastMomz = pActor->momz;
+		pActor->lastMomz = pActor->velz;
 	}
 	if ( ulBits & CM_MOVEDIR )
 	{
@@ -594,9 +592,9 @@ void SERVERCOMMANDS_MovePlayer( ULONG ulPlayer, ULONG ulPlayerExtra, ULONG ulFla
 			NETWORK_WriteLong( &SERVER_GetClient( ulIdx )->UnreliablePacketBuffer.ByteStream, players[ulPlayer].mo->angle );
 
 			// Write velocity.
-			NETWORK_WriteShort( &SERVER_GetClient( ulIdx )->UnreliablePacketBuffer.ByteStream, players[ulPlayer].mo->momx >> FRACBITS );
-			NETWORK_WriteShort( &SERVER_GetClient( ulIdx )->UnreliablePacketBuffer.ByteStream, players[ulPlayer].mo->momy >> FRACBITS );
-			NETWORK_WriteShort( &SERVER_GetClient( ulIdx )->UnreliablePacketBuffer.ByteStream, players[ulPlayer].mo->momz >> FRACBITS );
+			NETWORK_WriteShort( &SERVER_GetClient( ulIdx )->UnreliablePacketBuffer.ByteStream, players[ulPlayer].mo->velx >> FRACBITS );
+			NETWORK_WriteShort( &SERVER_GetClient( ulIdx )->UnreliablePacketBuffer.ByteStream, players[ulPlayer].mo->vely >> FRACBITS );
+			NETWORK_WriteShort( &SERVER_GetClient( ulIdx )->UnreliablePacketBuffer.ByteStream, players[ulPlayer].mo->velz >> FRACBITS );
 
 			// Write whether or not the player is crouching.
 			NETWORK_WriteByte( &SERVER_GetClient( ulIdx )->UnreliablePacketBuffer.ByteStream, ( players[ulPlayer].crouchdir >= 0 ) ? true : false );
@@ -1514,9 +1512,9 @@ void SERVERCOMMANDS_MoveLocalPlayer( ULONG ulPlayer )
 	NETWORK_WriteLong( &SERVER_GetClient( ulPlayer )->UnreliablePacketBuffer.ByteStream, players[ulPlayer].mo->z );
 
 	// Write velocity.
-	NETWORK_WriteLong( &SERVER_GetClient( ulPlayer )->UnreliablePacketBuffer.ByteStream, players[ulPlayer].mo->momx );
-	NETWORK_WriteLong( &SERVER_GetClient( ulPlayer )->UnreliablePacketBuffer.ByteStream, players[ulPlayer].mo->momy );
-	NETWORK_WriteLong( &SERVER_GetClient( ulPlayer )->UnreliablePacketBuffer.ByteStream, players[ulPlayer].mo->momz );
+	NETWORK_WriteLong( &SERVER_GetClient( ulPlayer )->UnreliablePacketBuffer.ByteStream, players[ulPlayer].mo->velx );
+	NETWORK_WriteLong( &SERVER_GetClient( ulPlayer )->UnreliablePacketBuffer.ByteStream, players[ulPlayer].mo->vely );
+	NETWORK_WriteLong( &SERVER_GetClient( ulPlayer )->UnreliablePacketBuffer.ByteStream, players[ulPlayer].mo->velz );
 }
 
 //*****************************************************************************
@@ -1983,11 +1981,11 @@ void SERVERCOMMANDS_MoveThing( AActor *pActor, ULONG ulBits, ULONG ulPlayerExtra
 
 	// Write velocity.
 	if ( ulBits & CM_MOMX )
-		command.addShort( pActor->momx >> FRACBITS );
+		command.addShort( pActor->velx >> FRACBITS );
 	if ( ulBits & CM_MOMY )
-		command.addShort( pActor->momy >> FRACBITS );
+		command.addShort( pActor->vely >> FRACBITS );
 	if ( ulBits & CM_MOMZ )
-		command.addShort( pActor->momz >> FRACBITS );
+		command.addShort( pActor->velz >> FRACBITS );
 
 	// Write pitch.
 	if ( ulBits & CM_PITCH )
@@ -2050,11 +2048,11 @@ void SERVERCOMMANDS_MoveThingExact( AActor *pActor, ULONG ulBits, ULONG ulPlayer
 
 	// Write velocity.
 	if ( ulBits & CM_MOMX )
-		command.addLong( pActor->momx );
+		command.addLong( pActor->velx );
 	if ( ulBits & CM_MOMY )
-		command.addLong( pActor->momy );
+		command.addLong( pActor->vely );
 	if ( ulBits & CM_MOMZ )
-		command.addLong( pActor->momz );
+		command.addLong( pActor->velz );
 
 	// Write pitch.
 	if ( ulBits & CM_PITCH )
@@ -2916,9 +2914,9 @@ void SERVERCOMMANDS_TeleportThing( AActor *pActor, bool bSourceFog, bool bDestFo
 		NETWORK_WriteShort( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pActor->x >> FRACBITS );
 		NETWORK_WriteShort( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pActor->y >> FRACBITS );
 		NETWORK_WriteShort( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pActor->z >> FRACBITS );
-		NETWORK_WriteShort( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pActor->momx >> FRACBITS );
-		NETWORK_WriteShort( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pActor->momy >> FRACBITS );
-		NETWORK_WriteShort( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pActor->momz >> FRACBITS );
+		NETWORK_WriteShort( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pActor->velx >> FRACBITS );
+		NETWORK_WriteShort( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pActor->vely >> FRACBITS );
+		NETWORK_WriteShort( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pActor->velz >> FRACBITS );
 		NETWORK_WriteShort( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pActor->reactiontime );
 		NETWORK_WriteLong( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pActor->angle );
 		NETWORK_WriteByte( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, bSourceFog );
@@ -3373,8 +3371,8 @@ void SERVERCOMMANDS_SetGameDMFlags( ULONG ulPlayerExtra, ULONG ulFlags )
 	command.addLong ( dmflags );
 	command.addLong ( dmflags2 );
 	command.addLong ( compatflags );
-	command.addLong ( compatflags2 );
-	command.addLong ( dmflags3 );
+	command.addLong ( zacompatflags );
+	command.addLong ( zadmflags );
 	command.sendCommandToClients( ulPlayerExtra, ulFlags );
 }
 
@@ -3403,6 +3401,8 @@ void SERVERCOMMANDS_SetGameModeLimits( ULONG ulPlayerExtra, ULONG ulFlags )
 	command.addFloat( sv_coop_damagefactor );
 	// [WS] Send in alwaysapplydmflags.
 	command.addByte( alwaysapplydmflags );
+	// [AM] Send lobby map.
+	command.addString( lobby );
 	command.sendCommandToClients( ulPlayerExtra, ulFlags );
 }
 
@@ -3961,9 +3961,9 @@ void SERVERCOMMANDS_SpawnMissile( AActor *pMissile, ULONG ulPlayerExtra, ULONG u
 		NETWORK_WriteShort( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pMissile->x >> FRACBITS );
 		NETWORK_WriteShort( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pMissile->y >> FRACBITS );
 		NETWORK_WriteShort( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pMissile->z >> FRACBITS );
-		NETWORK_WriteLong( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pMissile->momx );
-		NETWORK_WriteLong( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pMissile->momy );
-		NETWORK_WriteLong( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pMissile->momz );
+		NETWORK_WriteLong( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pMissile->velx );
+		NETWORK_WriteLong( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pMissile->vely );
+		NETWORK_WriteLong( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pMissile->velz );
 		NETWORK_WriteShort( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, usActorNetworkIndex );
 		NETWORK_WriteShort( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pMissile->lNetID );
 		if ( pMissile->target )
@@ -3973,7 +3973,7 @@ void SERVERCOMMANDS_SpawnMissile( AActor *pMissile, ULONG ulPlayerExtra, ULONG u
 	}
 	// [BB] It's possible that the angle can't be derived from the momentum
 	// of the missle. In this case the correct angle has to be told to the clients.
- 	if( pMissile->angle != R_PointToAngle2( 0, 0, pMissile->momx, pMissile->momy ) )
+ 	if( pMissile->angle != R_PointToAngle2( 0, 0, pMissile->velx, pMissile->vely ) )
 		SERVERCOMMANDS_SetThingAngle( pMissile, ulPlayerExtra, ulFlags );
 }
 
@@ -4005,9 +4005,9 @@ void SERVERCOMMANDS_SpawnMissileExact( AActor *pMissile, ULONG ulPlayerExtra, UL
 		NETWORK_WriteLong( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pMissile->x );
 		NETWORK_WriteLong( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pMissile->y );
 		NETWORK_WriteLong( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pMissile->z );
-		NETWORK_WriteLong( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pMissile->momx );
-		NETWORK_WriteLong( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pMissile->momy );
-		NETWORK_WriteLong( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pMissile->momz );
+		NETWORK_WriteLong( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pMissile->velx );
+		NETWORK_WriteLong( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pMissile->vely );
+		NETWORK_WriteLong( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pMissile->velz );
 		NETWORK_WriteShort( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, usActorNetworkIndex );
 		NETWORK_WriteShort( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pMissile->lNetID );
 		if ( pMissile->target )
@@ -4017,7 +4017,7 @@ void SERVERCOMMANDS_SpawnMissileExact( AActor *pMissile, ULONG ulPlayerExtra, UL
 	}
 	// [BB] It's possible that the angle can't be derived from the momentum
 	// of the missle. In this case the correct angle has to be told to the clients.
- 	if( pMissile->angle != R_PointToAngle2( 0, 0, pMissile->momx, pMissile->momy ) )
+ 	if( pMissile->angle != R_PointToAngle2( 0, 0, pMissile->velx, pMissile->vely ) )
 		SERVERCOMMANDS_SetThingAngleExact( pMissile, ulPlayerExtra, ulFlags );
 }
 
@@ -4977,7 +4977,7 @@ void SERVERCOMMANDS_SetLineTexture( ULONG ulLine, ULONG ulPlayerExtra, ULONG ulF
 			SERVER_CheckClientBuffer( ulIdx, 5 + 8, true );
 			NETWORK_WriteHeader( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, SVC_SETLINETEXTURE );
 			NETWORK_WriteShort( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, ulLine );
-			NETWORK_WriteString( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, sides[lines[ulLine].sidenum[0]].GetTexture(side_t::top).isValid() ? TexMan[sides[lines[ulLine].sidenum[0]].GetTexture(side_t::top)]->Name : "-" );
+			NETWORK_WriteString( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, lines[ulLine].sidedef[0]->GetTexture(side_t::top).isValid() ? TexMan[lines[ulLine].sidedef[0]->GetTexture(side_t::top)]->Name : "-" );
 			NETWORK_WriteByte( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, 0 );
 			NETWORK_WriteByte( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, 0 );
 		}
@@ -4987,7 +4987,7 @@ void SERVERCOMMANDS_SetLineTexture( ULONG ulLine, ULONG ulPlayerExtra, ULONG ulF
 			SERVER_CheckClientBuffer( ulIdx, 5 + 8, true );
 			NETWORK_WriteHeader( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, SVC_SETLINETEXTURE );
 			NETWORK_WriteShort( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, ulLine );
-			NETWORK_WriteString( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, sides[lines[ulLine].sidenum[0]].GetTexture(side_t::mid).isValid() ? TexMan[sides[lines[ulLine].sidenum[0]].GetTexture(side_t::mid)]->Name : "-" );
+			NETWORK_WriteString( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, lines[ulLine].sidedef[0]->GetTexture(side_t::mid).isValid() ? TexMan[lines[ulLine].sidedef[0]->GetTexture(side_t::mid)]->Name : "-" );
 			NETWORK_WriteByte( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, 0 );
 			NETWORK_WriteByte( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, 1 );
 		}
@@ -4997,12 +4997,12 @@ void SERVERCOMMANDS_SetLineTexture( ULONG ulLine, ULONG ulPlayerExtra, ULONG ulF
 			SERVER_CheckClientBuffer( ulIdx, 5 + 8, true );
 			NETWORK_WriteHeader( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, SVC_SETLINETEXTURE );
 			NETWORK_WriteShort( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, ulLine );
-			NETWORK_WriteString( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, sides[lines[ulLine].sidenum[0]].GetTexture(side_t::bottom).isValid() ? TexMan[sides[lines[ulLine].sidenum[0]].GetTexture(side_t::bottom)]->Name : "-" );
+			NETWORK_WriteString( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, lines[ulLine].sidedef[0]->GetTexture(side_t::bottom).isValid() ? TexMan[lines[ulLine].sidedef[0]->GetTexture(side_t::bottom)]->Name : "-" );
 			NETWORK_WriteByte( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, 0 );
 			NETWORK_WriteByte( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, 2 );
 		}
 
-		if (( lines[ulLine].sidenum[1] == NO_SIDE ) || ( lines[ulLine].sidenum[1] >= (ULONG)numsides ))
+		if ( lines[ulLine].sidedef[1] == NULL )
 			continue;
 
 		if ( lines[ulLine].ulTexChangeFlags & TEXCHANGE_BACKTOP )
@@ -5010,7 +5010,7 @@ void SERVERCOMMANDS_SetLineTexture( ULONG ulLine, ULONG ulPlayerExtra, ULONG ulF
 			SERVER_CheckClientBuffer( ulIdx, 5 + 8, true );
 			NETWORK_WriteHeader( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, SVC_SETLINETEXTURE );
 			NETWORK_WriteShort( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, ulLine );
-			NETWORK_WriteString( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, sides[lines[ulLine].sidenum[1]].GetTexture(side_t::top).isValid() ? TexMan[sides[lines[ulLine].sidenum[1]].GetTexture(side_t::top)]->Name : "-" );
+			NETWORK_WriteString( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, lines[ulLine].sidedef[1]->GetTexture(side_t::top).isValid() ? TexMan[lines[ulLine].sidedef[1]->GetTexture(side_t::top)]->Name : "-" );
 			NETWORK_WriteByte( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, 1 );
 			NETWORK_WriteByte( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, 0 );
 		}
@@ -5020,7 +5020,7 @@ void SERVERCOMMANDS_SetLineTexture( ULONG ulLine, ULONG ulPlayerExtra, ULONG ulF
 			SERVER_CheckClientBuffer( ulIdx, 5 + 8, true );
 			NETWORK_WriteHeader( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, SVC_SETLINETEXTURE );
 			NETWORK_WriteShort( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, ulLine );
-			NETWORK_WriteString( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, sides[lines[ulLine].sidenum[1]].GetTexture(side_t::mid).isValid() ? TexMan[sides[lines[ulLine].sidenum[1]].GetTexture(side_t::mid)]->Name : "-" );
+			NETWORK_WriteString( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, lines[ulLine].sidedef[1]->GetTexture(side_t::mid).isValid() ? TexMan[lines[ulLine].sidedef[1]->GetTexture(side_t::mid)]->Name : "-" );
 			NETWORK_WriteByte( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, 1 );
 			NETWORK_WriteByte( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, 1 );
 		}
@@ -5030,7 +5030,7 @@ void SERVERCOMMANDS_SetLineTexture( ULONG ulLine, ULONG ulPlayerExtra, ULONG ulF
 			SERVER_CheckClientBuffer( ulIdx, 5 + 8, true );
 			NETWORK_WriteHeader( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, SVC_SETLINETEXTURE );
 			NETWORK_WriteShort( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, ulLine );
-			NETWORK_WriteString( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, sides[lines[ulLine].sidenum[1]].GetTexture(side_t::bottom).isValid() ? TexMan[sides[lines[ulLine].sidenum[1]].GetTexture(side_t::bottom)]->Name : "-" );
+			NETWORK_WriteString( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, lines[ulLine].sidedef[1]->GetTexture(side_t::bottom).isValid() ? TexMan[lines[ulLine].sidedef[1]->GetTexture(side_t::bottom)]->Name : "-" );
 			NETWORK_WriteByte( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, 1 );
 			NETWORK_WriteByte( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, 2 );
 		}
@@ -7039,7 +7039,7 @@ void SERVERCOMMANDS_SetPolyobjPosition( LONG lPolyNum, ULONG ulPlayerExtra, ULON
 	ULONG		ulIdx;
 	FPolyObj	*pPoly;
 
-	pPoly = GetPolyobj( lPolyNum );
+	pPoly = PO_GetPolyobj( lPolyNum );
 	if ( pPoly == NULL )
 		return;
 
@@ -7057,8 +7057,8 @@ void SERVERCOMMANDS_SetPolyobjPosition( LONG lPolyNum, ULONG ulPlayerExtra, ULON
 		SERVER_CheckClientBuffer( ulIdx, 11, true );
 		NETWORK_WriteHeader( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, SVC_SETPOLYOBJPOSITION );
 		NETWORK_WriteShort( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, lPolyNum );
-		NETWORK_WriteLong( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pPoly->startSpot[0] );
-		NETWORK_WriteLong( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pPoly->startSpot[1] );
+		NETWORK_WriteLong( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pPoly->StartSpot.x );
+		NETWORK_WriteLong( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pPoly->StartSpot.y );
 	}
 }
 
@@ -7069,7 +7069,7 @@ void SERVERCOMMANDS_SetPolyobjRotation( LONG lPolyNum, ULONG ulPlayerExtra, ULON
 	ULONG		ulIdx;
 	FPolyObj	*pPoly;
 
-	pPoly = GetPolyobj( lPolyNum );
+	pPoly = PO_GetPolyobj( lPolyNum );
 	if ( pPoly == NULL )
 		return;
 
@@ -7094,31 +7094,20 @@ void SERVERCOMMANDS_SetPolyobjRotation( LONG lPolyNum, ULONG ulPlayerExtra, ULON
 //*****************************************************************************
 //*****************************************************************************
 //
-void SERVERCOMMANDS_Earthquake( AActor *pCenter, LONG lIntensity, LONG lDuration, LONG lTemorRadius, ULONG ulPlayerExtra, ULONG ulFlags )
+void SERVERCOMMANDS_Earthquake( AActor *pCenter, LONG lIntensity, LONG lDuration, LONG lTemorRadius, FSoundID Quakesound, ULONG ulPlayerExtra, ULONG ulFlags )
 {
-	ULONG	ulIdx;
-
 	if ( !EnsureActorHasNetID (pCenter) )
 		return;
 
-	for ( ulIdx = 0; ulIdx < MAXPLAYERS; ulIdx++ )
-	{
-		if ( SERVER_IsValidClient( ulIdx ) == false )
-			continue;
+	const char *pszQuakeSound = S_GetName( Quakesound );
 
-		if ((( ulFlags & SVCF_SKIPTHISCLIENT ) && ( ulPlayerExtra == ulIdx )) ||
-			(( ulFlags & SVCF_ONLYTHISCLIENT ) && ( ulPlayerExtra != ulIdx )))
-		{
-			continue;
-		}
-
-		SERVER_CheckClientBuffer( ulIdx, 6, true );
-		NETWORK_WriteHeader( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, SVC_EARTHQUAKE );
-		NETWORK_WriteShort( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, pCenter->lNetID );
-		NETWORK_WriteByte( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, lIntensity );
-		NETWORK_WriteByte( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, lDuration );
-		NETWORK_WriteByte( &SERVER_GetClient( ulIdx )->PacketBuffer.ByteStream, lTemorRadius );
-	}
+	NetCommand command ( SVC_EARTHQUAKE );
+	command.addShort ( pCenter->lNetID );
+	command.addByte ( lIntensity );
+	command.addShort ( lDuration );
+	command.addShort ( lTemorRadius );
+	command.addString ( pszQuakeSound );
+	command.sendCommandToClients ( ulPlayerExtra, ulFlags );
 }
 
 //*****************************************************************************

@@ -720,7 +720,7 @@ static int FlushLines (const char *start, const char *stop)
 	return i;
 }
 
-static void AddLine (const char *text, bool more, int len)
+static void AddLine (const char *text, bool more, size_t len)
 {
 	if (BufferRover + len + 1 - ConsoleBuffer > CONSOLESIZE)
 	{
@@ -1632,7 +1632,7 @@ static bool C_HandleKey (event_t *ev, BYTE *buffer, int len)
 		{
 			if (buffer[1] == buffer[0])
 			{
-				buffer[buffer[0] + 2] = ev->data1;
+				buffer[buffer[0] + 2] = BYTE(ev->data1);
 			}
 			else
 			{
@@ -1644,7 +1644,7 @@ static bool C_HandleKey (event_t *ev, BYTE *buffer, int len)
 				for (; e >= c; e--)
 					*(e + 1) = *e;
 
-				*c = ev->data1;
+				*c = char(ev->data1);
 			}
 			buffer[0]++;
 			buffer[1]++;
@@ -1659,11 +1659,11 @@ static bool C_HandleKey (event_t *ev, BYTE *buffer, int len)
 	case EV_GUI_WheelDown:
 		if (!(ev->data3 & GKM_SHIFT))
 		{
-			data1 = GK_PGDN + ev->subtype - EV_GUI_WheelDown;
+			data1 = GK_PGDN + EV_GUI_WheelDown - ev->subtype;
 		}
 		else
 		{
-			data1 = GK_DOWN + ev->subtype - EV_GUI_WheelDown;
+			data1 = GK_DOWN + EV_GUI_WheelDown - ev->subtype;
 		}
 		// Intentional fallthrough
 
@@ -1998,7 +1998,7 @@ static void C_PasteText(FString clip, BYTE *buffer, int len)
 	{
 		// Only paste the first line.
 		long brk = clip.IndexOfAny("\r\n\b");
-		int cliplen = brk >= 0 ? brk : clip.Len();
+		int cliplen = brk >= 0 ? brk : (int)clip.Len();
 
 		// Make sure there's room for the whole thing.
 		if (buffer[0] + cliplen > len)
@@ -2063,8 +2063,8 @@ CCMD (echo)
 	int last = argv.argc()-1;
 	for (int i = 1; i <= last; ++i)
 	{
-		strbin (argv[i]);
-		Printf ("%s%s", argv[i], i!=last ? " " : "\n");
+		FString formatted = strbin1 (argv[i]);
+		Printf ("%s%s", formatted.GetChars(), i!=last ? " " : "\n");
 	}
 }
 
