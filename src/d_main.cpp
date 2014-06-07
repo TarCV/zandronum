@@ -48,6 +48,7 @@
 #include <time.h>
 #include <math.h>
 #include <assert.h>
+#include <sys/stat.h>
 
 // [BB] network.h has to be included before stats.h under Linux.
 // The reason should be investigated.
@@ -135,7 +136,11 @@
 #include "v_palette.h"
 #include "m_cheat.h"
 #include "compatibility.h"
+#include "m_joy.h"
+#include "sc_man.h"
+#include "resourcefiles/resourcefile.h"
 #include "r_3dfloors.h"
+
 
 // [ZZ] PWO header file
 #include "g_shared/pwo.h"
@@ -157,8 +162,7 @@ extern void M_SetDefaultMode ();
 extern void R_ExecuteSetViewSize ();
 extern void G_NewInit ();
 extern void SetupPlayerClasses ();
-extern bool CheckCheatmode ();
-extern const IWADInfo *D_FindIWAD(const char *basewad);
+const IWADInfo *D_FindIWAD(TArray<FString> &wadfiles, const char *iwad, const char *basewad);
 
 // PUBLIC FUNCTION PROTOTYPES ----------------------------------------------
 
@@ -166,7 +170,7 @@ void D_CheckNetGame ();
 void D_ProcessEvents ();
 void G_BuildTiccmd (ticcmd_t* cmd);
 void D_DoAdvanceDemo ();
-void D_AddWildFile (const char *pattern);
+void D_AddWildFile (TArray<FString> &wadfiles, const char *pattern);
 
 // PRIVATE FUNCTION PROTOTYPES ---------------------------------------------
 
@@ -176,7 +180,6 @@ static const char *BaseFileSearch (const char *file, const char *ext, bool lookf
 // EXTERNAL DATA DECLARATIONS ----------------------------------------------
 
 EXTERN_CVAR (Float, turbo)
-EXTERN_CVAR (Int, crosshair)
 EXTERN_CVAR (Bool, freelook)
 EXTERN_CVAR (Float, m_pitch)
 EXTERN_CVAR (Float, m_yaw)
@@ -206,7 +209,9 @@ CVAR (Int, wipetype, 1, CVAR_ARCHIVE);
 CVAR (Int, snd_drawoutput, 0, 0);
 
 bool DrawFSHUD;				// [RH] Draw fullscreen HUD?
-wadlist_t *wadfiles;		// [RH] remove limit on # of loaded wads
+TArray<FString> allwads;
+// [BB]
+TArray<FString> autoloadedwads;
 bool devparm;				// started game with -devparm
 const char *D_DrawIcon;	// [RH] Patch name of icon to draw on next refresh
 int NoWipe;				// [RH] Allow wipe? (Needs to be set each time)
@@ -228,7 +233,6 @@ cycle_t FrameCycles;
 
 // PRIVATE DATA DEFINITIONS ------------------------------------------------
 
-static wadlist_t **wadtail = &wadfiles;
 static int demosequence;
 static int pagetic;
 
@@ -265,6 +269,10 @@ void D_ProcessEvents (void)
 	for (; eventtail != eventhead ; eventtail = (eventtail+1)&(MAXEVENTS-1))
 	{
 		ev = &events[eventtail];
+		if (ev->type == EV_None)
+			continue;
+		if (ev->type == EV_DeviceChange)
+			UpdateJoystickMenu(I_UpdateDeviceList());
 		if (C_Responder (ev))
 			continue;				// console ate the event
 		if (M_Responder (ev))
@@ -285,6 +293,11 @@ void D_ProcessEvents (void)
 
 void D_PostEvent (const event_t *ev)
 {
+	// Do not post duplicate consecutive EV_DeviceChange events.
+	if (ev->type == EV_DeviceChange && events[eventhead].type == EV_DeviceChange)
+	{
+		return;
+	}
 	events[eventhead] = *ev;
 	if (ev->type == EV_Mouse && !testpolymost && !paused && menuactive == MENU_Off &&
 		ConsoleState != c_down && ConsoleState != c_falling)
@@ -308,6 +321,41 @@ void D_PostEvent (const event_t *ev)
 		}
 	}
 	eventhead = (eventhead+1)&(MAXEVENTS-1);
+}
+
+//==========================================================================
+//
+// D_RemoveNextCharEvent
+//
+// Removes the next EV_GUI_Char event in the input queue. Used by the menu,
+// since it (generally) consumes EV_GUI_KeyDown events and not EV_GUI_Char
+// events, and it needs to ensure that there is no left over input when it's
+// done. If there are multiple EV_GUI_KeyDowns before the EV_GUI_Char, then
+// there are dead chars involved, so those should be removed, too. We do
+// this by changing the message type to EV_None rather than by actually
+// removing the event from the queue.
+// 
+//==========================================================================
+
+void D_RemoveNextCharEvent()
+{
+	assert(events[eventtail].type == EV_GUI_Event && events[eventtail].subtype == EV_GUI_KeyDown);
+	for (int evnum = eventtail; evnum != eventhead; evnum = (evnum+1) & (MAXEVENTS-1))
+	{
+		event_t *ev = &events[evnum];
+		if (ev->type != EV_GUI_Event)
+			break;
+		if (ev->subtype == EV_GUI_KeyDown || ev->subtype == EV_GUI_Char)
+		{
+			ev->type = EV_None;
+			if (ev->subtype == EV_GUI_Char)
+				break;
+		}
+		else
+		{
+			break;
+		}
+	}
 }
 
 //==========================================================================
@@ -401,7 +449,7 @@ CVAR (Flag, sv_coop_halveammo,		dmflags, DF_COOP_HALVE_AMMO);
 //
 //==========================================================================
 
-// [BB] Only necessary to handle DF2_FORCE_GL_DEFAULTS.
+// [BB] Only necessary to handle ZADF_FORCE_GL_DEFAULTS.
 #ifndef NO_GL
 EXTERN_CVAR(Int, gl_lightmode)
 #endif
@@ -456,7 +504,7 @@ CUSTOM_CVAR (Int, dmflags2, 0, CVAR_SERVERINFO | CVAR_CAMPAIGNLOCK)
 	}
 
 #ifndef NO_GL
-	// [BB] This makes gl_lightmode handle DF2_FORCE_GL_DEFAULTS.
+	// [BB] This makes gl_lightmode handle ZADF_FORCE_GL_DEFAULTS.
 	// [BB] Don't do this on startup since gl.flags is not properly initialized yet.
 	if ( gamestate != GS_STARTUP )
 		gl_lightmode = gl_lightmode;
@@ -482,25 +530,21 @@ CVAR (Flag, sv_disallowspying,		dmflags2, DF2_DISALLOW_SPYING);
 CVAR (Flag, sv_chasecam,			dmflags2, DF2_CHASECAM);
 CVAR (Flag, sv_disallowsuicide,		dmflags2, DF2_NOSUICIDE);
 CVAR (Flag, sv_noautoaim,			dmflags2, DF2_NOAUTOAIM);
-CVAR (Flag, sv_forcegldefaults,		dmflags2, DF2_FORCE_GL_DEFAULTS);
-CVAR (Flag, sv_norocketjumping,		dmflags2, DF2_NO_ROCKET_JUMPING);
-CVAR (Flag, sv_awarddamageinsteadkills,		dmflags2, DF2_AWARD_DAMAGE_INSTEAD_KILLS);
-CVAR (Flag, sv_forcealpha,		dmflags2, DF2_FORCE_ALPHA);
-CVAR (Flag, sv_coop_spactorspawn,	dmflags2, DF2_COOP_SP_ACTOR_SPAWN);
+CVAR (Flag, sv_dontcheckammo,		dmflags2, DF2_DONTCHECKAMMO);
+CVAR (Flag, sv_killbossmonst,		dmflags2, DF2_KILLBOSSMONST);
 
 CVAR (Flag, sv_norunes,				dmflags2, DF2_NO_RUNES);
 CVAR (Flag, sv_instantreturn,		dmflags2, DF2_INSTANT_RETURN);
 CVAR (Flag, sv_noteamselect,		dmflags2, DF2_NO_TEAM_SELECT);
 CVAR (Flag, sv_shotgunstart,		dmflags2, DF2_COOP_SHOTGUNSTART);
-CVAR (Flag, sv_keepteams,			dmflags2, DF2_YES_KEEP_TEAMS);
 
 //==========================================================================
 //
-// [BB] CVAR dmflags3
+// [BB] CVAR zadmflags
 //
 //==========================================================================
 
-CUSTOM_CVAR (Int, dmflags3, 0, CVAR_SERVERINFO)
+CUSTOM_CVAR (Int, zadmflags, 0, CVAR_SERVERINFO)
 {
 	// [BB] If we're the server, tell clients that the dmflags changed.
 	if (( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( gamestate != GS_STARTUP ))
@@ -510,12 +554,18 @@ CUSTOM_CVAR (Int, dmflags3, 0, CVAR_SERVERINFO)
 	}
 }
 
-CVAR (Flag, sv_noidentifytarget,			dmflags3, DF3_NO_IDENTIFY_TARGET);
-CVAR (Flag, sv_applylmsspectatorsettings,	dmflags3, DF3_ALWAYS_APPLY_LMS_SPECTATORSETTINGS);
-CVAR (Flag, sv_nocoopinfo,			dmflags3, DF3_NO_COOP_INFO);
-CVAR (Flag, sv_unblockplayers,			dmflags3, DF3_UNBLOCK_PLAYERS);
-CVAR (Flag, sv_nomedals,			dmflags3, DF3_NO_MEDALS);
-CVAR (Flag, sv_sharekeys,			dmflags3, DF3_SHARE_KEYS);
+CVAR (Flag, sv_noidentifytarget,			zadmflags, ZADF_NO_IDENTIFY_TARGET);
+CVAR (Flag, sv_applylmsspectatorsettings,	zadmflags, ZADF_ALWAYS_APPLY_LMS_SPECTATORSETTINGS);
+CVAR (Flag, sv_nocoopinfo,			zadmflags, ZADF_NO_COOP_INFO);
+CVAR (Flag, sv_unblockplayers,			zadmflags, ZADF_UNBLOCK_PLAYERS);
+CVAR (Flag, sv_nomedals,			zadmflags, ZADF_NO_MEDALS);
+CVAR (Flag, sv_sharekeys,			zadmflags, ZADF_SHARE_KEYS);
+CVAR (Flag, sv_keepteams,			zadmflags, ZADF_YES_KEEP_TEAMS);
+CVAR (Flag, sv_forcegldefaults,		zadmflags, ZADF_FORCE_GL_DEFAULTS);
+CVAR (Flag, sv_norocketjumping,		zadmflags, ZADF_NO_ROCKET_JUMPING);
+CVAR (Flag, sv_awarddamageinsteadkills,		zadmflags, ZADF_AWARD_DAMAGE_INSTEAD_KILLS);
+CVAR (Flag, sv_forcealpha,		zadmflags, ZADF_FORCE_ALPHA);
+CVAR (Flag, sv_coop_spactorspawn,	zadmflags, ZADF_COOP_SP_ACTOR_SPAWN);
 
 //==========================================================================
 //
@@ -549,11 +599,11 @@ CUSTOM_CVAR (Int, compatflags, 0, CVAR_SERVERINFO)
 
 //==========================================================================
 //
-// [BB] CVAR compatflags2
+// [BB] CVAR zacompatflags
 //
 //==========================================================================
 
-CUSTOM_CVAR (Int, compatflags2, 0, CVAR_SERVERINFO)
+CUSTOM_CVAR (Int, zacompatflags, 0, CVAR_SERVERINFO)
 {
 	// [BC] If we're the server, tell clients that the dmflags changed.
 	if (( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( gamestate != GS_STARTUP ))
@@ -575,23 +625,36 @@ CUSTOM_CVAR(Int, compatmode, 0, CVAR_ARCHIVE|CVAR_NOINITCALL)
 		break;
 
 	case 1:	// Doom2.exe compatible with a few relaxed settings
-		v = COMPATF_SHORTTEX|COMPATF_STAIRINDEX|COMPATF_USEBLOCKING|COMPATF_NODOORLIGHT|
-			COMPATF_TRACE|COMPATF_MISSILECLIP|COMPATF_SOUNDTARGET|COMPATF_DEHHEALTH|COMPATF_CROSSDROPOFF;
+		v = COMPATF_SHORTTEX|COMPATF_STAIRINDEX|COMPATF_USEBLOCKING|COMPATF_NODOORLIGHT|COMPATF_SPRITESORT|
+			COMPATF_TRACE|COMPATF_MISSILECLIP|COMPATF_SOUNDTARGET|COMPATF_DEHHEALTH|COMPATF_CROSSDROPOFF|
+			COMPATF_LIGHT;
 		break;
 
 	case 2:	// same as 1 but stricter (NO_PASSMOBJ and INVISIBILITY are also set)
-		v = COMPATF_SHORTTEX|COMPATF_STAIRINDEX|COMPATF_USEBLOCKING|COMPATF_NODOORLIGHT|
+		v = COMPATF_SHORTTEX|COMPATF_STAIRINDEX|COMPATF_USEBLOCKING|COMPATF_NODOORLIGHT|COMPATF_SPRITESORT|
 			COMPATF_TRACE|COMPATF_MISSILECLIP|COMPATF_SOUNDTARGET|COMPATF_NO_PASSMOBJ|COMPATF_LIMITPAIN|
-			COMPATF_DEHHEALTH|COMPATF_INVISIBILITY|COMPATF_CROSSDROPOFF;
+			COMPATF_DEHHEALTH|COMPATF_INVISIBILITY|COMPATF_CROSSDROPOFF|COMPATF_CORPSEGIBS|COMPATF_HITSCAN|
+			COMPATF_WALLRUN|COMPATF_NOTOSSDROPS|COMPATF_LIGHT;
 		break;
 
-	case 3:
-		v = COMPATF_TRACE|COMPATF_SOUNDTARGET|COMPATF_BOOMSCROLL;
+	case 3: // Boom compat mode
+		v = COMPATF_TRACE|COMPATF_SOUNDTARGET|COMPATF_BOOMSCROLL|COMPATF_MISSILECLIP;
 		break;
 
-	case 4:
-		v = COMPATF_SOUNDTARGET;
+	case 4: // Old ZDoom compat mode
+		v = COMPATF_SOUNDTARGET|COMPATF_LIGHT;
 		break;
+
+	case 5: // MBF compat mode
+		v = COMPATF_TRACE|COMPATF_SOUNDTARGET|COMPATF_BOOMSCROLL|COMPATF_MISSILECLIP|COMPATF_MUSHROOM|
+			COMPATF_MBFMONSTERMOVE|COMPATF_NOBLOCKFRIENDS;
+		break;
+
+	case 6:	// Boom with some added settings to reenable spme 'broken' behavior
+		v = COMPATF_TRACE|COMPATF_SOUNDTARGET|COMPATF_BOOMSCROLL|COMPATF_MISSILECLIP|COMPATF_NO_PASSMOBJ|
+			COMPATF_INVISIBILITY|COMPATF_CORPSEGIBS|COMPATF_HITSCAN|COMPATF_WALLRUN|COMPATF_NOTOSSDROPS;
+		break;
+
 	}
 	compatflags = v;
 }
@@ -617,28 +680,38 @@ CVAR (Flag, compat_silentinstantfloors,compatflags, COMPATF_SILENT_INSTANT_FLOOR
 CVAR (Flag, compat_sectorsounds,compatflags, COMPATF_SECTORSOUNDS);
 CVAR (Flag, compat_missileclip,	compatflags, COMPATF_MISSILECLIP);
 CVAR (Flag, compat_crossdropoff,compatflags, COMPATF_CROSSDROPOFF);
+CVAR (Flag, compat_anybossdeath,compatflags, COMPATF_ANYBOSSDEATH);
+CVAR (Flag, compat_minotaur,	compatflags, COMPATF_MINOTAUR);
+CVAR (Flag, compat_mushroom,	compatflags, COMPATF_MUSHROOM);
+CVAR (Flag, compat_mbfmonstermove,compatflags, COMPATF_MBFMONSTERMOVE);
+CVAR (Flag, compat_corpsegibs,	compatflags, COMPATF_CORPSEGIBS);
+CVAR (Flag, compat_noblockfriends,compatflags,COMPATF_NOBLOCKFRIENDS);
+CVAR (Flag, compat_spritesort,	compatflags,COMPATF_SPRITESORT);
+CVAR (Flag, compat_hitscan,		compatflags,COMPATF_HITSCAN);
+CVAR (Flag, compat_light,		compatflags,COMPATF_LIGHT);
 // [BB] Skulltag compat flags.
-CVAR (Flag, compat_limited_airmovement, compatflags, COMPATF_LIMITED_AIRMOVEMENT);
-CVAR (Flag, compat_plasmabump,	compatflags, COMPATF_PLASMA_BUMP_BUG);
-CVAR (Flag, compat_instantrespawn,	compatflags, COMPATF_INSTANTRESPAWN);
-CVAR (Flag, compat_disabletaunts,	compatflags, COMPATF_DISABLETAUNTS);
-CVAR (Flag, compat_originalsoundcurve,	compatflags, COMPATF_ORIGINALSOUNDCURVE);
-CVAR (Flag, compat_oldintermission,	compatflags, COMPATF_OLDINTERMISSION);
-CVAR (Flag, compat_disablestealthmonsters,	compatflags, COMPATF_DISABLESTEALTHMONSTERS);
-CVAR (Flag, compat_oldradiusdmg,	compatflags, COMPATF_OLDRADIUSDMG);
-//CVAR (Flag, compat_disablecooperativebackpacks,	compatflags, COMPATF_DISABLECOOPERATIVEBACKPACKS);
-CVAR (Flag, compat_nocrosshair,		compatflags, COMPATF_NO_CROSSHAIR);
-CVAR (Flag, compat_oldweaponswitch,		compatflags, COMPATF_OLD_WEAPON_SWITCH);
-CVAR (Flag, compat_netscriptsareclientside,		compatflags2, COMPATF2_NETSCRIPTS_ARE_CLIENTSIDE);
-CVAR (Flag, compat_clientssendfullbuttoninfo,		compatflags2, COMPATF2_CLIENTS_SEND_FULL_BUTTON_INFO);
-CVAR (Flag, compat_noland,		compatflags2, COMPATF2_NO_LAND);
-CVAR (Flag, compat_oldrandom,		compatflags2, COMPATF2_OLD_RANDOM_GENERATOR);
-CVAR (Flag, compat_nogravity_spheres,		compatflags2, COMPATF2_NOGRAVITY_SPHERES);
-CVAR (Flag, compat_dont_stop_player_scripts_on_disconnect,		compatflags2, COMPATF2_DONT_STOP_PLAYER_SCRIPTS_ON_DISCONNECT);
-CVAR (Flag, compat_explosionthrust,		compatflags2, COMPATF2_OLD_EXPLOSION_THRUST);
-CVAR (Flag, compat_bridgedrops,		compatflags2, COMPATF2_OLD_BRIDGE_DROPS);
-CVAR (Flag, compat_123b33jumpphysics,		compatflags2, COMPATF2_ZDOOM_123B33_JUMP_PHYSICS);
-CVAR (Flag, compat_fullweaponlower,		compatflags2, COMPATF2_FULL_WEAPON_LOWER);
+CVAR (Flag, compat_limited_airmovement, zacompatflags, ZACOMPATF_LIMITED_AIRMOVEMENT);
+CVAR (Flag, compat_plasmabump,	zacompatflags, ZACOMPATF_PLASMA_BUMP_BUG);
+CVAR (Flag, compat_instantrespawn,	zacompatflags, ZACOMPATF_INSTANTRESPAWN);
+CVAR (Flag, compat_disabletaunts,	zacompatflags, ZACOMPATF_DISABLETAUNTS);
+CVAR (Flag, compat_originalsoundcurve,	zacompatflags, ZACOMPATF_ORIGINALSOUNDCURVE);
+CVAR (Flag, compat_oldintermission,	zacompatflags, ZACOMPATF_OLDINTERMISSION);
+CVAR (Flag, compat_disablestealthmonsters,	zacompatflags, ZACOMPATF_DISABLESTEALTHMONSTERS);
+CVAR (Flag, compat_oldradiusdmg,	zacompatflags, ZACOMPATF_OLDRADIUSDMG);
+CVAR (Flag, compat_nocrosshair,		zacompatflags, ZACOMPATF_NO_CROSSHAIR);
+CVAR (Flag, compat_oldweaponswitch,		zacompatflags, ZACOMPATF_OLD_WEAPON_SWITCH);
+CVAR (Flag, compat_netscriptsareclientside,		zacompatflags, ZACOMPATF_NETSCRIPTS_ARE_CLIENTSIDE);
+CVAR (Flag, compat_clientssendfullbuttoninfo,		zacompatflags, ZACOMPATF_CLIENTS_SEND_FULL_BUTTON_INFO);
+CVAR (Flag, compat_noland,		zacompatflags, ZACOMPATF_NO_LAND);
+CVAR (Flag, compat_oldrandom,		zacompatflags, ZACOMPATF_OLD_RANDOM_GENERATOR);
+CVAR (Flag, compat_nogravity_spheres,		zacompatflags, ZACOMPATF_NOGRAVITY_SPHERES);
+CVAR (Flag, compat_dont_stop_player_scripts_on_disconnect,		zacompatflags, ZACOMPATF_DONT_STOP_PLAYER_SCRIPTS_ON_DISCONNECT);
+CVAR (Flag, compat_explosionthrust,		zacompatflags, ZACOMPATF_OLD_EXPLOSION_THRUST);
+CVAR (Flag, compat_bridgedrops,		zacompatflags, ZACOMPATF_OLD_BRIDGE_DROPS);
+CVAR (Flag, compat_oldzdoomzmovement, zacompatflags, ZACOMPATF_OLD_ZDOOM_ZMOVEMENT);
+CVAR (Flag, compat_fullweaponlower,		zacompatflags, ZACOMPATF_FULL_WEAPON_LOWER);
+CVAR (Flag, compat_silentwestspawns,	zacompatflags, ZACOMPATF_SILENT_WEST_SPAWNS);
+CVAR (Flag, compat_maxbloodscalar,		zacompatflags, ZACOMPATF_MAX_BLOOD_SCALAR);
 
 //==========================================================================
 //
@@ -692,7 +765,7 @@ void D_Display ()
 			// Refresh the console.
 			C_NewModeAdjust ();
 			// Reload crosshair if transitioned to a different size
-			crosshair.Callback ();
+			ST_LoadCrosshair (true);
 			AM_NewResolution ();
 		}
 	}
@@ -752,6 +825,7 @@ void D_Display ()
 		switch (gamestate)
 		{
 		case GS_FULLCONSOLE:
+			R_UpdateAnimations(I_FPSTime());
 			screen->SetBlendingRect(0,0,0,0);
 			hw2d = screen->Begin2D(false);
 			C_DrawConsole (false);
@@ -791,6 +865,8 @@ void D_Display ()
 				SB_state = screen->GetPageCount();
 				BorderNeedRefresh = screen->GetPageCount();
 			}
+			screen->DrawRemainingPlayerSprites();
+			screen->DrawBlendingRect();
 			if (automapactive)
 			{
 				int saved_ST_Y = ST_Y;
@@ -852,6 +928,7 @@ void D_Display ()
 			break;
 
 		case GS_INTERMISSION:
+			R_UpdateAnimations(I_FPSTime());
 			screen->SetBlendingRect(0,0,0,0);
 			hw2d = screen->Begin2D(false);
 			WI_Drawer ();
@@ -880,12 +957,14 @@ void D_Display ()
 			break;
 
 		case GS_FINALE:
+			R_UpdateAnimations(I_FPSTime());
 			screen->SetBlendingRect(0,0,0,0);
 			hw2d = screen->Begin2D(false);
 			F_Drawer ();
 			break;
 
 		case GS_DEMOSCREEN:
+			R_UpdateAnimations(I_FPSTime());
 			screen->SetBlendingRect(0,0,0,0);
 			hw2d = screen->Begin2D(false);
 			D_PageDrawer ();
@@ -1057,7 +1136,10 @@ void D_ErrorCleanup ()
 	playeringame[0] = 1;
 	players[0].playerstate = PST_LIVE;
 	gameaction = ga_fullconsole;
-	menuactive = MENU_Off;
+	if (gamestate == GS_DEMOSCREEN)
+	{
+		menuactive = MENU_Off;
+	}
 	insave = false;
 	fakeActive = 0;
 	fake3D = 0;
@@ -1087,6 +1169,9 @@ void D_ErrorCleanup ()
 void D_DoomLoop ()
 {
 	int lasttic = 0;
+
+	// Clamp the timer to TICRATE until the playloop has been entered.
+	r_NoInterpolate = true;
 
 	for (;;)
 	{
@@ -1206,8 +1291,7 @@ void D_PageDrawer (void)
 	if (Page != NULL)
 	{
 		screen->DrawTexture (Page, 0, 0,
-			DTA_VirtualWidth, Page->GetWidth(),
-			DTA_VirtualHeight, Page->GetHeight(),
+			DTA_Fullscreen, true,
 			DTA_Masked, false,
 			DTA_BilinearFilter, true,
 			TAG_DONE);
@@ -1297,7 +1381,10 @@ void D_DoStrifeAdvanceDemo ()
 		pagetic = 7 * TICRATE;
 		pagename = "PANEL1";
 		S_Sound (CHAN_VOICE | CHAN_UI, voices[0], 1, ATTN_NORM);
-		S_StartMusic ("d_intro");
+		// The new Strife teaser has D_FMINTR.
+		// The full retail Strife has D_INTRO.
+		// And the old Strife teaser has both. (I do not know which one it actually uses, nor do I care.)
+		S_StartMusic (gameinfo.flags & GI_TEASER2 ? "d_fmintr" : "d_intro");
 		break;
 
 	case 4:
@@ -1443,8 +1530,11 @@ void D_DoAdvanceDemo (void)
 	case 2:
 		pagetic = (int)(gameinfo.pageTime * TICRATE);
 		gamestate = GS_DEMOSCREEN;
-		pagename = gameinfo.creditPages[pagecount];
-		pagecount = (pagecount+1) % gameinfo.creditPages.Size();
+		if (gameinfo.creditPages.Size() > 0)
+		{
+			pagename = gameinfo.creditPages[pagecount];
+			pagecount = (pagecount+1) % gameinfo.creditPages.Size();
+		}
 		demosequence = 1;
 		break;
 	}
@@ -1501,35 +1591,32 @@ CCMD (endgame)
 //
 // D_AddFile
 //
-// [BC] Added the "bLoadedAutomatically" parameter.
-//
 //==========================================================================
 
-void D_AddFile (const char *file, bool bLoadedAutomatically)
+bool D_AddFile (TArray<FString> &wadfiles, const char *file, bool check, int position)
 {
 	if (file == NULL)
 	{
-		return;
+		return false;
 	}
 
-	if (!FileExists (file))
+	if (check && !DirEntryExists (file))
 	{
 		const char *f = BaseFileSearch (file, ".wad");
 		if (f == NULL)
 		{
 			Printf ("Can't find '%s'\n", file);
-			return;
+			return false;
 		}
 		file = f;
 	}
-	wadlist_t *wad = (wadlist_t *)M_Malloc (sizeof(*wad) + strlen(file));
 
-	*wadtail = wad;
-	wad->next = NULL;
-	strcpy (wad->name, file);
-	// [BC] Mark whether or not this wad was added automatically.
-	wad->bLoadedAutomatically = bLoadedAutomatically;
-	wadtail = &wad->next;
+	FString f = file;
+	FixPathSeperator(f);
+	if (position == -1) wadfiles.Push(f);
+	else wadfiles.Insert(position, f);
+	return true;
+
 }
 
 //==========================================================================
@@ -1538,13 +1625,13 @@ void D_AddFile (const char *file, bool bLoadedAutomatically)
 //
 //==========================================================================
 
-void D_AddWildFile (const char *value)
+void D_AddWildFile (TArray<FString> &wadfiles, const char *value)
 {
 	const char *wadfile = BaseFileSearch (value, ".wad");
 
 	if (wadfile != NULL)
 	{
-		D_AddFile (wadfile, false);	// [BC]
+		D_AddFile (wadfiles, wadfile);
 	}
 	else
 	{ // Try pattern matching
@@ -1574,12 +1661,12 @@ void D_AddWildFile (const char *value)
 				{
 					if (sep == NULL)
 					{
-						D_AddFile (I_FindName (&findstate), false);	// [BC]
+						D_AddFile (wadfiles, I_FindName (&findstate));
 					}
 					else
 					{
 						strcpy (sep+1, I_FindName (&findstate));
-						D_AddFile (path, false);	// [BC]
+						D_AddFile (wadfiles, path);
 					}
 				}
 			} while (I_FindNext (handle, &findstate) == 0);
@@ -1596,7 +1683,7 @@ void D_AddWildFile (const char *value)
 //
 //==========================================================================
 
-void D_AddConfigWads (const char *section)
+void D_AddConfigWads (TArray<FString> &wadfiles, const char *section)
 {
 	if (GameConfig->SetSection (section))
 	{
@@ -1610,7 +1697,7 @@ void D_AddConfigWads (const char *section)
 			{
 				// D_AddWildFile resets GameConfig's position, so remember it
 				GameConfig->GetPosition (pos);
-				D_AddWildFile (value);
+				D_AddWildFile (wadfiles, value);
 				// Reset GameConfig's position to get next wad
 				GameConfig->SetPosition (pos);
 			}
@@ -1639,14 +1726,17 @@ void D_AddDirectoryHelper( const char* FileMask, char skindir[PATH_MAX], size_t 
 			if (!(I_FindAttr (&findstate) & FA_DIREC))
 			{
 				strcpy (skindir + stuffstart, I_FindName (&findstate));
-				D_AddFile (skindir, true);	// [BC]
+				// [BB] We consider this file as loaded automatically.
+				if ( D_AddFile (allwads, skindir) )
+					autoloadedwads.Push ( allwads[ allwads.Size() - 1 ] );
 			}
 		} while (I_FindNext (handle, &findstate) == 0);
 		I_FindClose (handle);
 	}
 }
 
-static void D_AddDirectory (const char *dir)
+// [BB] Removed wadfiles
+static void D_AddDirectory (/*TArray<FString> &wadfiles,*/ const char *dir)
 {
 	char curdir[PATH_MAX];
 
@@ -1736,13 +1826,13 @@ static const char *BaseFileSearch (const char *file, const char *ext, bool lookf
 	if (lookfirstinprogdir)
 	{
 		mysnprintf (wad, countof(wad), "%s%s%s", progdir.GetChars(), progdir[progdir.Len() - 1] != '/' ? "/" : "", file);
-		if (FileExists (wad))
+		if (DirEntryExists (wad))
 		{
 			return wad;
 		}
 	}
 
-	if (FileExists (file))
+	if (DirEntryExists (file))
 	{
 		mysnprintf (wad, countof(wad), "%s", file);
 		return wad;
@@ -1763,7 +1853,7 @@ static const char *BaseFileSearch (const char *file, const char *ext, bool lookf
 				if (dir.IsNotEmpty())
 				{
 					mysnprintf (wad, countof(wad), "%s%s%s", dir.GetChars(), dir[dir.Len() - 1] != '/' ? "/" : "", file);
-					if (FileExists (wad))
+					if (DirEntryExists (wad))
 					{
 						return wad;
 					}
@@ -1790,27 +1880,22 @@ static const char *BaseFileSearch (const char *file, const char *ext, bool lookf
 //
 //==========================================================================
 
-bool ConsiderPatches (const char *arg, const char *ext)
+bool ConsiderPatches (const char *arg)
 {
-	bool noDef = false;
-	DArgs *files = Args->GatherFiles (arg, ext, false);
+	int i, argc;
+	FString *args;
+	const char *f;
 
-	if (files->NumArgs() > 0)
+	argc = Args->CheckParmList(arg, &args);
+	for (i = 0; i < argc; ++i)
 	{
-		int i;
-		const char *f;
-
-		for (i = 0; i < files->NumArgs(); ++i)
+		if ( (f = BaseFileSearch(args[i], ".deh")) ||
+			 (f = BaseFileSearch(args[i], ".bex")) )
 		{
-			if ( (f = BaseFileSearch (files->GetArg (i), ".deh")) )
-				DoDehPatch (f, false);
-			else if ( (f = BaseFileSearch (files->GetArg (i), ".bex")) )
-				DoDehPatch (f, false);
+			D_LoadDehFile(f);
 		}
-		noDef = true;
 	}
-	files->Destroy();
-	return noDef;
+	return argc > 0;
 }
 
 //==========================================================================
@@ -1901,6 +1986,148 @@ void D_MultiExec (DArgs *list, bool usePullin)
 	}
 }
 
+static void GetCmdLineFiles(TArray<FString> &wadfiles)
+{
+	FString *args;
+	int i, argc;
+
+	argc = Args->CheckParmList("-file", &args);
+	if ((gameinfo.flags & GI_SHAREWARE) && argc > 0)
+	{
+		I_FatalError ("You cannot -file with the shareware version. Register!");
+	}
+	for (i = 0; i < argc; ++i)
+	{
+		D_AddWildFile(wadfiles, args[i]);
+	}
+}
+
+static void CopyFiles(TArray<FString> &to, TArray<FString> &from)
+{
+	unsigned int ndx = to.Reserve(from.Size());
+	for(unsigned i=0;i<from.Size(); i++)
+	{
+		to[ndx+i] = from[i];
+	}
+}
+
+static FString ParseGameInfo(TArray<FString> &pwads, const char *fn, const char *data, int size)
+{
+	FScanner sc;
+	FString iwad;
+	int pos = 0;
+
+	const char *lastSlash = strrchr (fn, '/');
+
+	sc.OpenMem("GAMEINFO", data, size);
+	while(sc.GetToken())
+	{
+		sc.TokenMustBe(TK_Identifier);
+		FString nextKey = sc.String;
+		sc.MustGetToken('=');
+		if (!nextKey.CompareNoCase("IWAD"))
+		{
+			sc.MustGetString();
+			iwad = sc.String;
+		}
+		else if (!nextKey.CompareNoCase("LOAD"))
+		{
+			do
+			{
+				sc.MustGetString();
+
+				// Try looking for the wad in the same directory as the .wad
+				// before looking for it in the current directory.
+
+				if (lastSlash != NULL)
+				{
+					FString checkpath(fn, (lastSlash - fn) + 1);
+					checkpath += sc.String;
+
+					if (!FileExists (checkpath))
+					{
+						pos += D_AddFile(pwads, sc.String, true, pos);
+					}
+					else
+					{
+						pos += D_AddFile(pwads, checkpath, true, pos);
+					}
+				}
+			}
+			while (sc.CheckToken(','));
+		}
+		else
+		{
+			// Silently ignore unknown properties
+			do
+			{
+				sc.MustGetAnyToken();
+			}
+			while(sc.CheckToken(','));
+		}
+	}
+	return iwad;
+}
+
+static FString CheckGameInfo(TArray<FString> & pwads)
+{
+	DWORD t = I_FPSTime();
+	// scan the list of WADs backwards to find the last one that contains a GAMEINFO lump
+	for(int i=pwads.Size()-1; i>=0; i--)
+	{
+		bool isdir = false;
+		FileReader *wadinfo;
+		FResourceFile *resfile;
+		const char *filename = pwads[i];
+
+		// Does this exist? If so, is it a directory?
+		struct stat info;
+		if (stat(pwads[i], &info) != 0)
+		{
+			Printf(TEXTCOLOR_RED "Could not stat %s\n", filename);
+			continue;
+		}
+		isdir = (info.st_mode & S_IFDIR) != 0;
+
+		if (!isdir)
+		{
+			try
+			{
+				wadinfo = new FileReader(filename);
+			}
+			catch (CRecoverableError &)
+			{ 
+				// Didn't find file
+				continue;
+			}
+			resfile = FResourceFile::OpenResourceFile(filename, wadinfo, true);
+		}
+		else
+			resfile = FResourceFile::OpenDirectory(filename, true);
+
+		if (resfile != NULL)
+		{
+			DWORD cnt = resfile->LumpCount();
+			for(int i=cnt-1; i>=0; i--)
+			{
+				FResourceLump *lmp = resfile->GetLump(i);
+
+				if (lmp->Namespace == ns_global && !stricmp(lmp->Name, "GAMEINFO"))
+				{
+					// Found one!
+					FString iwad = ParseGameInfo(pwads, resfile->Filename, (const char*)lmp->CacheLump(), lmp->LumpSize);
+					delete resfile;
+					return iwad;
+				}
+			}
+			delete resfile;
+		}
+	}
+	t = I_FPSTime() - t;
+	Printf("Gameinfo scan took %d ms\n", t);
+	return "";
+}
+
 //==========================================================================
 //
 // D_DoomMain
@@ -1910,17 +2137,18 @@ void D_MultiExec (DArgs *list, bool usePullin)
 #ifndef	WIN32
 extern int do_stdin;
 #endif
-extern bool gl_disabled;
 
 void D_DoomMain (void)
 {
 	int p, flags;
-	char *v;
+	const char *v;
 	const char *wad;
 	DArgs *execFiles;
+	TArray<FString> pwads;
+	FString *args;
+	int argcount;
 	LONG		lIdx;
 
-	srand(I_MSTime());
 
 	// Set the FPU precision to 53 significant bits. This is the default
 	// for Visual C++, but not for GCC, so some slight math variances
@@ -1938,6 +2166,16 @@ void D_DoomMain (void)
 	int cfp = _control87(_PC_53, _MCW_PC);
 #endif
 #endif
+
+	// Check response files before coalescing file parameters.
+	M_FindResponseFile ();
+
+	// Combine different file parameters with their pre-switch bits.
+	Args->CollectFiles("-deh", ".deh");
+	Args->CollectFiles("-bex", ".bex");
+	Args->CollectFiles("-exec", ".cfg");
+	Args->CollectFiles("-playdemo", ".lmp");
+	Args->CollectFiles("-file", NULL);	// anything left goes after -file
 
 	PClass::StaticInit ();
 	atterm (C_DeinitConsole);
@@ -1973,7 +2211,6 @@ void D_DoomMain (void)
 	CALLVOTE_Construct( );
 
 	FRandom::StaticClearRandom ();
-	M_FindResponseFile ();
 
 	Printf ("M_LoadDefaults: Load system defaults.\n");
 	M_LoadDefaults ();			// load before initing other systems
@@ -1986,11 +2223,15 @@ void D_DoomMain (void)
 	{
 		I_FatalError ("Cannot find " BASEWAD);
 	}
+	FString basewad = wad;
 
 	// Load zdoom.pk3 alone so that we can get access to the internal gameinfos before 
 	// the IWAD is known.
 
-	const IWADInfo *iwad_info = D_FindIWAD(wad);
+	GetCmdLineFiles(pwads);
+	FString iwad = CheckGameInfo(pwads);
+
+	const IWADInfo *iwad_info = D_FindIWAD(allwads, iwad, basewad);
 	gameinfo.gametype = iwad_info->gametype;
 	gameinfo.flags = iwad_info->flags;
 
@@ -2008,7 +2249,7 @@ void D_DoomMain (void)
 		// [BB] Loading zvox with Skulltag introduces a bag of problems and does't do any good.
 		//wad = BaseFileSearch ("zvox.wad", NULL);
 		//if (wad)
-		//	D_AddFile (wad, false);	// [BC]
+		//	D_AddFile (wad, true, false);	// [BC]
 
 		// [RH] Add any .wad files in the skins directory
 		// [BB] Also add pk3 files and add the files from
@@ -2020,19 +2261,19 @@ void D_DoomMain (void)
 		D_AddSubdirectory ( "bots" );
 
 		// Add common (global) wads
-		D_AddConfigWads ("Global.Autoload");
+		D_AddConfigWads (allwads, "Global.Autoload");
 
 		// Add game-specific wads
 		file = GameNames[gameinfo.gametype];
 		file += ".Autoload";
-		D_AddConfigWads (file);
+		D_AddConfigWads (allwads, file);
 
 		// Add IWAD-specific wads
 		if (iwad_info->Autoname != NULL)
 		{
 			file = iwad_info->Autoname;
 			file += ".Autoload";
-			D_AddConfigWads(file);
+			D_AddConfigWads(allwads, file);
 		}
 	}
 
@@ -2040,52 +2281,23 @@ void D_DoomMain (void)
 	execFiles = new DArgs;
 	GameConfig->AddAutoexec (execFiles, GameNames[gameinfo.gametype]);
 	D_MultiExec (execFiles, true);
-	execFiles->Destroy();
 
 	// Run .cfg files at the start of the command line.
-	execFiles = Args->GatherFiles (NULL, ".cfg", false);
+	execFiles = Args->GatherFiles ("-exec");
 	D_MultiExec (execFiles, true);
-	execFiles->Destroy();
 
 	C_ExecCmdLineParams ();		// [RH] do all +set commands on the command line
 
-	DArgs *files = Args->GatherFiles ("-file", ".wad", true);
-	DArgs *files1 = Args->GatherFiles (NULL, ".zip", false);
-	DArgs *files2 = Args->GatherFiles (NULL, ".pk3", false);
-	DArgs *files3 = Args->GatherFiles (NULL, ".txt", false);
-	if (files->NumArgs() > 0 || files1->NumArgs() > 0 || files2->NumArgs() > 0 || files3->NumArgs() > 0)
-	{
-		// Check for -file in shareware
-		if (gameinfo.flags & GI_SHAREWARE)
-		{
-			I_FatalError ("You cannot -file with the shareware version. Register!");
-		}
+	CopyFiles(allwads, pwads);
 
-		// the files gathered are wadfile/lump names
-		for (int i = 0; i < files->NumArgs(); i++)
-		{
-			D_AddWildFile (files->GetArg (i));
-		}
-		for (int i = 0; i < files1->NumArgs(); i++)
-		{
-			D_AddWildFile (files1->GetArg (i));
-		}
-		for (int i = 0; i < files2->NumArgs(); i++)
-		{
-			D_AddWildFile (files2->GetArg (i));
-		}
-		for (int i = 0; i < files3->NumArgs(); i++)
-		{
-			D_AddWildFile (files3->GetArg (i));
-		}
-	}
-	files->Destroy();
-	files1->Destroy();
-	files2->Destroy();
-	files3->Destroy();
+	// Since this function will never leave we must delete this array here manually.
+	pwads.Clear();
+	pwads.ShrinkToFit();
 
 	Printf ("W_Init: Init WADfiles.\n");
-	Wads.InitMultipleFiles (&wadfiles);
+	Wads.InitMultipleFiles (/*allwads*/); // [BB] Removed argument.
+	allwads.Clear();
+	allwads.ShrinkToFit();
 
 	// Initialize the chat module.
 	CHAT_Construct( );
@@ -2166,7 +2378,6 @@ void D_DoomMain (void)
 	if (Args->CheckParm ("-nomonsters"))	flags |= DF_NO_MONSTERS;
 	if (Args->CheckParm ("-respawn"))		flags |= DF_MONSTERS_RESPAWN;
 	if (Args->CheckParm ("-fast"))			flags |= DF_FAST_MONSTERS;
-	if (Args->CheckParm("-ulp"))	sv_unlimited_pickup = true;
 
 	devparm = !!Args->CheckParm ("-devparm");
 
@@ -2285,21 +2496,23 @@ void D_DoomMain (void)
 		autostart = true;
 	}
 
-	// [RH] Hack to handle +map
-	p = Args->CheckParm ("+map");
-	if (p && p < Args->NumArgs()-1)
+	// [RH] Hack to handle +map. The standard console command line handler
+	// won't be able to handle it, so we take it out of the command line and set
+	// it up like -warp.
+	FString mapvalue = Args->TakeValue("+map");
+	if (mapvalue.IsNotEmpty())
 	{
-		if (!P_CheckMapData(Args->GetArg (p+1)))
+		if (!P_CheckMapData(mapvalue))
 		{
-			Printf ("Can't find map %s\n", Args->GetArg (p+1));
+			Printf ("Can't find map %s\n", mapvalue.GetChars());
 		}
 		else
 		{
-			startmap = Args->GetArg (p + 1);
-			Args->GetArg (p)[0] = '-';
+			startmap = mapvalue;
 			autostart = true;
 		}
 	}
+
 	if (devparm)
 	{
 		Printf ("%s", GStrings("D_DEVSTR"));
@@ -2317,17 +2530,12 @@ void D_DoomMain (void)
 #endif
 
 	// turbo option  // [RH] (now a cvar)
+	v = Args->CheckValue("-turbo");
+	if (v != NULL)
 	{
-		UCVarValue value;
-		static char one_hundred[] = "100";
-
-		value.String = Args->CheckValue ("-turbo");
-		if (value.String == NULL)
-			value.String = one_hundred;
-		else
-			Printf ("turbo scale: %s%%\n", value.String);
-
-		turbo.SetGenericRepDefault (value, CVAR_String);
+		double amt = atof(v);
+		Printf ("turbo scale: %.0f%%\n", amt);
+		turbo = (float)amt;
 	}
 
 	v = Args->CheckValue ("-timer");
@@ -2378,9 +2586,6 @@ void D_DoomMain (void)
 	Printf ("Texman.Init: Init texture manager.\n");
 	TexMan.Init();
 
-	// Now that all textues have been loaded the crosshair can be initialized.
-	crosshair.Callback ();
-
 	// [CW] Parse any TEAMINFO lumps.
 	Printf ("ParseTeamInfo: Load team definitions.\n");
 	//TeamLibrary.ParseTeamInfo ();
@@ -2411,32 +2616,32 @@ void D_DoomMain (void)
 	DecalLibrary.Clear ();
 	DecalLibrary.ReadAllDecals ();
 
-	// [RH] Try adding .deh and .bex files on the command line.
+	// [RH] Add any .deh and .bex files on the command line.
 	// If there are none, try adding any in the config file.
+	// Note that the command line overrides defaults from the config.
 
-	//if (gameinfo.gametype == GAME_Doom)
+	if ((ConsiderPatches("-deh") | ConsiderPatches("-bex")) == 0 &&
+		gameinfo.gametype == GAME_Doom && GameConfig->SetSection ("Doom.DefaultDehacked"))
 	{
-		if (!ConsiderPatches ("-deh", ".deh") &&
-			!ConsiderPatches ("-bex", ".bex") &&
-			(gameinfo.gametype == GAME_Doom) &&
-			GameConfig->SetSection ("Doom.DefaultDehacked"))
-		{
-			const char *key;
-			const char *value;
+		const char *key;
+		const char *value;
 
-			while (GameConfig->NextInSection (key, value))
+		while (GameConfig->NextInSection (key, value))
+		{
+			if (stricmp (key, "Path") == 0 && FileExists (value))
 			{
-				if (stricmp (key, "Path") == 0 && FileExists (value))
-				{
-					Printf ("Applying patch %s\n", value);
-					DoDehPatch (value, true);
-				}
+				Printf ("Applying patch %s\n", value);
+				D_LoadDehFile(value);
 			}
 		}
-
-		DoDehPatch (NULL, true);	// See if there's a patch in a PWAD
-		FinishDehPatch ();			// Create replacements for dehacked pickups
 	}
+
+	// Load embedded Dehacked patches
+	D_LoadDehLumps();
+
+	// Create replacements for dehacked pickups
+	FinishDehPatch();
+
 	FActorInfo::StaticSetActorNums ();
 
 	// [ZZ] Added PWO lump loading here
@@ -2531,14 +2736,13 @@ void D_DoomMain (void)
 
 		V_Init2();
 
-		files = Args->GatherFiles ("-playdemo", ".lmp", false);
-		if (files->NumArgs() > 0)
+		v = Args->CheckValue("-playdemo");
+		if (v != NULL)
 		{
 			singledemo = true;				// quit after one demo
-			G_DeferedPlayDemo (files->GetArg (0));
+			G_DeferedPlayDemo (v);
 			D_DoomLoop ();	// never returns
 		}
-		files->Destroy();
 
 		v = Args->CheckValue ("-timedemo");
 		if (v)
@@ -2561,10 +2765,6 @@ void D_DoomMain (void)
 	{
 		delete ( StartScreen );
 		StartScreen = NULL;
-
-		// [BB] Since the server doesn't execute I_InitGraphics, we have to set gl_disabled here.
-		// The gl nodes code relies on the proper setting of this.
-		gl_disabled = true;
 	}
 
 	if (gameaction != ga_loadgame)
@@ -2592,7 +2792,10 @@ void D_DoomMain (void)
 			if (autostart)// || ( NETWORK_GetState( ) != NETSTATE_SINGLE ))
 			{
 				// Do not do any screenwipes when autostarting a game.
-				NoWipe = 35;
+				if (!Args->CheckParm("-warpwipe"))
+				{
+					NoWipe = TICRATE;
+				}
 				CheckWarpTransMap (startmap, true);
 				if (demorecording)
 					G_BeginRecording (startmap);
