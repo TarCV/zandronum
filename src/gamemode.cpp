@@ -461,8 +461,43 @@ bool GAMEMODE_IsGameInProgressOrResultSequence( void )
 
 //*****************************************************************************
 //
+bool GAMEMODE_IsLobbyMap( void )
+{
+	return level.flags2 & LEVEL2_ISLOBBY || stricmp(level.mapname, lobby) == 0;
+}
+
+//*****************************************************************************
+//
+bool GAMEMODE_IsLobbyMap( const char* mapname )
+{
+	// [BB] The level is not loaded yet, so we can't use level.flags2 directly.
+	const level_info_t *levelinfo = FindLevelInfo( mapname );
+
+	if (levelinfo == NULL)
+	{
+		return false;
+	}
+
+	return levelinfo->flags2 & LEVEL2_ISLOBBY || stricmp( levelinfo->mapname, lobby ) == 0;
+}
+
+//*****************************************************************************
+//
+bool GAMEMODE_IsNextMapCvarLobby( void )
+{
+	// If we're using a CVAR lobby and we're not on the lobby map, the next map
+	// should always be the lobby.
+	return strcmp(lobby, "") != 0 && stricmp(lobby, level.mapname) != 0;
+}
+
+//*****************************************************************************
+//
 bool GAMEMODE_IsTimelimitActive( void )
 {
+	// [AM] If the map is a lobby, ignore the timelimit.
+	if ( GAMEMODE_IsLobbyMap( ) )
+		return false;
+
 	// [BB] In gamemodes that reset the time during a map reset, the timelimit doesn't make sense when the game is not in progress.
 	if ( ( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode( )) & GMF_MAPRESET_RESETS_MAPTIME ) && ( GAMEMODE_IsGameInProgress( ) == false ) )
 		return false;
@@ -611,7 +646,7 @@ void GAMEMODE_ResetPlayersKillCount( const bool bInformClients )
 	{
 		players[ulIdx].killcount = 0;
 		players[ulIdx].ulRailgunShots = 0;
-		// [BB] Also reset the things for DF2_AWARD_DAMAGE_INSTEAD_KILLS.
+		// [BB] Also reset the things for ZADF_AWARD_DAMAGE_INSTEAD_KILLS.
 		players[ulIdx].lPointCount = 0;
 		players[ulIdx].ulUnrewardedDamageDealt = 0;
 
@@ -653,7 +688,7 @@ bool GAMEMODE_AreSpectatorsFordiddenToChatToPlayers( void )
 		if (( teamlms || lastmanstanding ) && ( LASTMANSTANDING_GetState( ) == LMSS_INPROGRESS ))
 			return true;
 
-		if ( ( dmflags3 & DF3_ALWAYS_APPLY_LMS_SPECTATORSETTINGS ) && GAMEMODE_IsGameInProgress() )
+		if ( ( zadmflags & ZADF_ALWAYS_APPLY_LMS_SPECTATORSETTINGS ) && GAMEMODE_IsGameInProgress() )
 			return true;
 	}
 
@@ -725,7 +760,7 @@ void GAMEMODE_AdjustActorSpawnFlags ( AActor *pActor )
 		return;
 
 	// [BB] Since several Skulltag versions added NOGRAVITY to some spheres on default, allow the user to restore this behavior.
-	if ( compatflags2 & COMPATF2_NOGRAVITY_SPHERES )
+	if ( zacompatflags & ZACOMPATF_NOGRAVITY_SPHERES )
 	{
 		if ( ( stricmp ( pActor->GetClass()->TypeName.GetChars(), "InvulnerabilitySphere" ) == 0 )
 			|| ( stricmp ( pActor->GetClass()->TypeName.GetChars(), "Soulsphere" ) == 0 )
