@@ -113,6 +113,8 @@
 #include "domination.h"
 #include "a_movingcamera.h"
 #include "cl_main.h"
+#include "d_netinf.h"
+#include "po_man.h"
 #include "network/cl_auth.h"
 #include "network/sv_auth.h"
 
@@ -362,8 +364,8 @@ CUSTOM_CVAR( Int, sv_maxpacketsize, 1024, CVAR_ARCHIVE )
 
 void SERVER_Construct( void )
 {
-    char		*pszPort;
-	char		*pszMaxClients;
+	const char	*pszPort;
+	const char	*pszMaxClients;
 	ULONG		ulIdx;
 	USHORT		usPort;
 
@@ -594,7 +596,18 @@ void SERVER_Tick( void )
 			{
 				char	szString[128];
 
-				sprintf( szString, "map %s", level.mapname );
+				if ( GAMEMODE_IsNextMapCvarLobby( ) )
+				{
+					// [AM] If we're using a lobby map, reset to the lobby.
+					//      In theory, there can be many MAPINFO-lobbies, but there is only
+					//      one lobby cvar setting, so we only need to bother with the cvar.
+					sprintf(szString, "map %s", *lobby);
+				}
+				else
+				{
+					sprintf(szString, "map %s", level.mapname);
+				}
+
 				AddCommandString( szString );
 			}
 		}
@@ -1329,7 +1342,7 @@ void SERVER_ConnectNewPlayer( BYTESTREAM_s *pByteStream )
 	if ( lastmanstanding || teamlms )
 		SERVERCOMMANDS_SetLMSAllowedWeapons( g_lCurrentClient, SVCF_ONLYTHISCLIENT );
 
-	// [BB] Due to DF3_ALWAYS_APPLY_LMS_SPECTATORSETTINGS, this is necessary in all game modes.
+	// [BB] Due to ZADF_ALWAYS_APPLY_LMS_SPECTATORSETTINGS, this is necessary in all game modes.
 	SERVERCOMMANDS_SetLMSSpectatorSettings( g_lCurrentClient, SVCF_ONLYTHISCLIENT );
 
 	// If this is CTF or ST, tell the client whether or not we're in simple mode.
@@ -2242,12 +2255,17 @@ void SERVER_ClientError( ULONG ulClient, ULONG ulErrorCode )
 		NETWORK_WriteString( &g_aClients[ulClient].PacketBuffer.ByteStream, DOTVERSIONSTR );
 		break;
 	case NETWORK_ERRORCODE_BANNED:
+		{
+			FString banReason = SERVERBAN_GetBanList( )->getEntryComment( g_aClients[ulClient].Address );
+			if ( banReason.IsNotEmpty() )
+				Printf( "Client banned (reason: %s)\n", banReason.GetChars() );
+			else
+				Printf( "Client banned.\n" );
 
-		Printf( "Client banned.\n" );
-
-		// Tell the client why he was banned, and when his ban expires.
-		NETWORK_WriteString( &g_aClients[ulClient].PacketBuffer.ByteStream, SERVERBAN_GetBanList( )->getEntryComment( g_aClients[ulClient].Address ));
-		NETWORK_WriteLong( &g_aClients[ulClient].PacketBuffer.ByteStream, (LONG) SERVERBAN_GetBanList( )->getEntryExpiration( g_aClients[ulClient].Address ));
+			// Tell the client why he was banned, and when his ban expires.
+			NETWORK_WriteString( &g_aClients[ulClient].PacketBuffer.ByteStream, banReason );
+			NETWORK_WriteLong( &g_aClients[ulClient].PacketBuffer.ByteStream, (LONG) SERVERBAN_GetBanList( )->getEntryExpiration( g_aClients[ulClient].Address ));
+		}
 		break;
 	case NETWORK_ERRORCODE_AUTHENTICATIONFAILED:
 	case NETWORK_ERRORCODE_PROTECTED_LUMP_AUTHENTICATIONFAILED:
@@ -2514,13 +2532,13 @@ void SERVER_SendFullUpdate( ULONG ulClient )
 				// [WS/BB] Always inform client of the actor's lastX/Y/Z.
 				ULONG ulBits = CM_LAST_X|CM_LAST_Y|CM_LAST_Z;
 
-				if ( pActor->momx != 0 )
+				if ( pActor->velx != 0 )
 					ulBits |= CM_MOMX;
 
-				if ( pActor->momy != 0 )
+				if ( pActor->vely != 0 )
 					ulBits |= CM_MOMY;
 
-				if ( pActor->momz != 0 )
+				if ( pActor->velz != 0 )
 					ulBits |= CM_MOMZ;
 
 				if ( pActor->movedir != 0 )
@@ -2861,7 +2879,7 @@ void SERVER_DisconnectClient( ULONG ulClient, bool bBroadcast, bool bSaveInfo )
 	if ( players[ulClient].mo )
 	{
 		// [BB] Stop all scripts of the player that are still running.
-		if ( !( compatflags2 & COMPATF2_DONT_STOP_PLAYER_SCRIPTS_ON_DISCONNECT ) )
+		if ( !( zacompatflags & ZACOMPATF_DONT_STOP_PLAYER_SCRIPTS_ON_DISCONNECT ) )
 			FBehavior::StaticStopMyScripts ( players[ulClient].mo );
 		// If he's disconnecting while carrying an important item like a flag, etc., make sure he, 
 		// drops it before he leaves.
@@ -2935,6 +2953,14 @@ void SERVER_DisconnectClient( ULONG ulClient, bool bBroadcast, bool bSaveInfo )
 		// If playing Domination reset ownership
 		if ( domination )
 			DOMINATION_Reset();
+	}
+
+	// If no one is left on the server and we're using a cvar lobby map,
+	// reset to it after 30 seconds.
+	if ( GAMEMODE_IsNextMapCvarLobby( ) &&
+		 SERVER_CalcNumPlayers( ) == 0 )
+	{
+		g_lMapRestartTimer = TICRATE * 30;
 	}
 }
 
@@ -3920,7 +3946,7 @@ void SERVER_ErrorCleanup( void )
 //
 void SERVER_SyncSharedKeys( int playerToSync, bool withmessage )
 {
-	if ((( dmflags3 & DF3_SHARE_KEYS ) == 0 ) || ( NETWORK_GetState() != NETSTATE_SERVER ))
+	if ((( zadmflags & ZADF_SHARE_KEYS ) == 0 ) || ( NETWORK_GetState() != NETSTATE_SERVER ))
 		return;
 
 	FString keylist;
@@ -4466,11 +4492,11 @@ void SERVER_SetThingNonZeroAngleAndMomentum( AActor *pActor )
 
 	if ( pActor->angle != 0 )
 		ulBits |= CM_ANGLE;
-	if ( pActor->momx != 0 )
+	if ( pActor->velx != 0 )
 		ulBits |= CM_MOMX;
-	if ( pActor->momy != 0 )
+	if ( pActor->vely != 0 )
 		ulBits |= CM_MOMY;
-	if ( pActor->momz != 0 )
+	if ( pActor->velz != 0 )
 		ulBits |= CM_MOMZ;
 
 	if ( ulBits )
@@ -5073,7 +5099,7 @@ static bool server_Taunt( BYTESTREAM_s *pByteStream )
 	if (( players[g_lCurrentClient].bSpectating ) ||
 		( players[g_lCurrentClient].health <= 0 ) ||
 		( players[g_lCurrentClient].mo == NULL ) ||
-		( i_compatflags & COMPATF_DISABLETAUNTS ))
+		( zacompatflags & ZACOMPATF_DISABLETAUNTS ))
 	{
 		return ( false );
 	}
@@ -5724,7 +5750,7 @@ static bool server_AuthenticateLevel( BYTESTREAM_s *pByteStream )
 	if ( lastmanstanding || teamlms )
 		SERVERCOMMANDS_SetLMSAllowedWeapons( g_lCurrentClient, SVCF_ONLYTHISCLIENT );
 
-	// [BB] Due to DF3_ALWAYS_APPLY_LMS_SPECTATORSETTINGS, this is necessary in all game modes.
+	// [BB] Due to ZADF_ALWAYS_APPLY_LMS_SPECTATORSETTINGS, this is necessary in all game modes.
 	SERVERCOMMANDS_SetLMSSpectatorSettings( g_lCurrentClient, SVCF_ONLYTHISCLIENT );
 
 	// If this is CTF or ST, tell the client whether or not we're in simple mode.

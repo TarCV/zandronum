@@ -109,18 +109,18 @@
 #include "p_3dmidtex.h"
 #include "a_lightning.h"
 #include "a_movingcamera.h"
+#include "d_netinf.h"
+#include "po_man.h"
 #include "network/cl_auth.h"
 
 //*****************************************************************************
 //	MISC CRAP THAT SHOULDN'T BE HERE BUT HAS TO BE BECAUSE OF SLOPPY CODING
 
 //void	ChangeSpy (bool forward);
-FPolyObj *GetPolyobj (int polyNum);
 int		D_PlayerClassToInt (const char *classname);
 bool	P_OldAdjustFloorCeil (AActor *thing);
 void	ClientObituary (AActor *self, AActor *inflictor, AActor *attacker, FName MeansOfDeath);
 void	P_CrouchMove(player_t * player, int direction);
-bool	DoThingRaise( AActor *thing, bool bIgnorePositionCheck );
 extern	bool	SpawningMapThing;
 extern FILE *Logfile;
 bool	ClassOwnsState( const PClass *pClass, const FState *pState );
@@ -137,7 +137,6 @@ EXTERN_CVAR( String, playerclass )
 EXTERN_CVAR( Int, am_cheat )
 EXTERN_CVAR( Bool, cl_oldfreelooklimit )
 EXTERN_CVAR( Float, turbo )
-EXTERN_CVAR( Int, gl_nearclip )
 EXTERN_CVAR( Float, sv_gravity )
 EXTERN_CVAR( Float, sv_aircontrol )
 
@@ -548,17 +547,15 @@ void CLIENT_LimitProtectedCVARs( void )
 {
 	if ( turbo > 100.f )
 		turbo = 100.f;
-	if ( gl_nearclip != 5 )
-		gl_nearclip = 5;
 }
 
 //*****************************************************************************
 //
 void CLIENT_Construct( void )
 {
-    char		*pszPort;
-	char		*pszIPAddress;
-	char		*pszDemoName;
+	const char	*pszPort;
+	const char	*pszIPAddress;
+	const char	*pszDemoName;
 	USHORT		usPort;
 	UCVarValue	Val;
 
@@ -3084,9 +3081,9 @@ AActor *CLIENT_SpawnThing( const PClass *pType, fixed_t X, fixed_t Y, fixed_t Z,
 		pActor->lastY = Y;
 		pActor->lastZ = Z;
 
-		// Whenever blood spawns, its momz is always 2 * FRACUNIT.
+		// Whenever blood spawns, its velz is always 2 * FRACUNIT.
 		if ( stricmp( pType->TypeName.GetChars( ), "blood" ) == 0 )
-			pActor->momz = FRACUNIT*2;
+			pActor->velz = FRACUNIT*2;
 
 		// Allow for client-side body removal in invasion mode.
 		if ( invasion )
@@ -3140,9 +3137,9 @@ void CLIENT_SpawnMissile( const PClass *pType, fixed_t X, fixed_t Y, fixed_t Z, 
 	}
 
 	// Set the thing's momentum.
-	pActor->momx = MomX;
-	pActor->momy = MomY;
-	pActor->momz = MomZ;
+	pActor->velx = MomX;
+	pActor->vely = MomY;
+	pActor->velz = MomZ;
 
 	// Derive the thing's angle from its momentum.
 	pActor->angle = R_PointToAngle2( 0, 0, MomX, MomY );
@@ -3206,7 +3203,7 @@ bool CLIENT_CanClipMovement( AActor *pActor )
 		return true;
 
 	// [WS] Non-bouncing client missiles do not get their movement clipped.
-	if ( pActor->flags & MF_MISSILE && !pActor->bouncetype )
+	if ( pActor->flags & MF_MISSILE && !pActor->BounceFlags )
 		return false;
 
 	return true;
@@ -3426,8 +3423,8 @@ void PLAYER_ResetPlayerData( player_t *pPlayer )
 	pPlayer->viewheight = 0;
 	pPlayer->deltaviewheight = 0;
 	pPlayer->bob = 0;
-	pPlayer->momx = 0;
-	pPlayer->momy = 0;
+	pPlayer->velx = 0;
+	pPlayer->vely = 0;
 	pPlayer->centering = 0;
 	pPlayer->turnticks = 0;
 	pPlayer->oldbuttons = 0;
@@ -3502,7 +3499,11 @@ void PLAYER_ResetPlayerData( player_t *pPlayer )
 
 	memset( &pPlayer->cmd, 0, sizeof( pPlayer->cmd ));
 	if (( pPlayer - players ) != consoleplayer )
+	{
 		memset( &pPlayer->userinfo, 0, sizeof( pPlayer->userinfo ));
+		// [BB] For now Zandronum doesn't let the player use the color sets.
+		pPlayer->userinfo.colorset = -1;
+	}
 	memset( pPlayer->psprites, 0, sizeof( pPlayer->psprites ));
 
 	memset( &pPlayer->ulMedalCount, 0, sizeof( ULONG ) * NUM_MEDALS );
@@ -3628,7 +3629,7 @@ void CLIENT_SetActorToLastDeathStateFrame ( AActor *pActor )
 		pBaseState = pDeadState;
 		if ( pBaseState != NULL )
 		{
-			pActor->SetStateNF( pBaseState );
+			pActor->SetState( pBaseState, true );
 			pDeadState = pBaseState->GetNextState( );
 		}
 	} while (( pDeadState != NULL ) && ( pDeadState == pBaseState + 1 ) && ( pBaseState->GetTics() != -1 ) );
@@ -3994,7 +3995,7 @@ static void client_SpawnPlayer( BYTESTREAM_s *pByteStream, bool bMorph )
 	pActor->angle = Angle;
 	pActor->pitch = pActor->roll = 0;
 	pActor->health = pPlayer->health;
-	pActor->lFixedColormap = 0;
+	pActor->lFixedColormap = NOFIXEDCOLORMAP;
 
 	//Added by MC: Identification (number in the players[MAXPLAYERS] array)
 	pActor->id = ulPlayer;
@@ -4045,7 +4046,8 @@ static void client_SpawnPlayer( BYTESTREAM_s *pByteStream, bool bMorph )
 	const bool bPlayerWasMorphed = ( pPlayer->morphTics != 0 );
 	pPlayer->morphTics = 0;
 	pPlayer->extralight = 0;
-	pPlayer->fixedcolormap = 0;
+	pPlayer->fixedcolormap = NOFIXEDCOLORMAP;
+	pPlayer->fixedlightlevel = -1;
 	pPlayer->viewheight = pPlayer->mo->ViewHeight;
 
 	pPlayer->attacker = NULL;
@@ -4054,8 +4056,8 @@ static void client_SpawnPlayer( BYTESTREAM_s *pByteStream, bool bMorph )
 	pPlayer->Uncrouch( );
 
 	// killough 10/98: initialize bobbing to 0.
-	pPlayer->momx = 0;
-	pPlayer->momy = 0;
+	pPlayer->velx = 0;
+	pPlayer->vely = 0;
 /*
 	// If the console player is being respawned, place the camera back in his own body.
 	if ( ulPlayer == consoleplayer )
@@ -4092,9 +4094,10 @@ static void client_SpawnPlayer( BYTESTREAM_s *pByteStream, bool bMorph )
 	{
 		// Spawn the respawn fog.
 		unsigned an = pActor->angle >> ANGLETOFINESHIFT;
-		Spawn( "TeleportFog", pActor->x + 20 * finecosine[an],
-			pActor->y + 20 * finesine[an],
-			pActor->z + TELEFOGHEIGHT, ALLOW_REPLACE );
+		if (!(pActor->angle == ANGLE_180 && (zacompatflags & ZACOMPATF_SILENT_WEST_SPAWNS)))
+			Spawn( "TeleportFog", pActor->x + 20 * finecosine[an],
+				pActor->y + 20 * finesine[an],
+				pActor->z + TELEFOGHEIGHT, ALLOW_REPLACE );
 	}
 
 	pPlayer->playerstate = PST_LIVE;
@@ -4245,9 +4248,9 @@ static void client_MovePlayer( BYTESTREAM_s *pByteStream )
 	players[ulPlayer].mo->angle = Angle;
 
 	// Set the player's XYZ momentum.
-	players[ulPlayer].mo->momx = MomX;
-	players[ulPlayer].mo->momy = MomY;
-	players[ulPlayer].mo->momz = MomZ;
+	players[ulPlayer].mo->velx = MomX;
+	players[ulPlayer].mo->vely = MomY;
+	players[ulPlayer].mo->velz = MomZ;
 
 	// Is the player crouching?
 	players[ulPlayer].crouchdir = ( bCrouching ) ? 1 : -1;
@@ -5371,8 +5374,8 @@ static void client_UpdatePlayerExtraData( BYTESTREAM_s *pByteStream )
 	// [BB] The attack buttons are now already set in *_MovePlayer, so additionally setting
 	// them here is obsolete. I don't want to change this before 97D2 final though.
 	players[ulPlayer].cmd.ucmd.buttons = ulButtons;
-//	players[ulPlayer].momx = lMomX;
-//	players[ulPlayer].momy = lMomY;
+//	players[ulPlayer].velx = lMomX;
+//	players[ulPlayer].vely = lMomY;
 	players[ulPlayer].viewz = lViewZ;
 	players[ulPlayer].bob = lBob;
 }
@@ -5461,9 +5464,9 @@ static void client_MoveLocalPlayer( BYTESTREAM_s *pByteStream )
 		// sure that the spectator body doesn't get stuck.
 		CLIENT_MoveThing ( pPlayer->mo, X, Y, Z );
 
-		pPlayer->mo->momx = MomX;
-		pPlayer->mo->momy = MomY;
-		pPlayer->mo->momz = MomZ;
+		pPlayer->mo->velx = MomX;
+		pPlayer->mo->vely = MomY;
+		pPlayer->mo->velz = MomZ;
 	}
 }
 
@@ -5493,7 +5496,7 @@ void client_DisconnectPlayer( BYTESTREAM_s *pByteStream )
 		P_DisconnectEffect( players[ulPlayer].mo );
 
 		// [BB] Stop all CLIENTSIDE scripts of the player that are still running.
-		if ( !( compatflags2 & COMPATF2_DONT_STOP_PLAYER_SCRIPTS_ON_DISCONNECT ) )
+		if ( !( zacompatflags & ZACOMPATF_DONT_STOP_PLAYER_SCRIPTS_ON_DISCONNECT ) )
 			FBehavior::StaticStopMyScripts ( players[ulPlayer].mo );
 	}
 
@@ -5664,7 +5667,7 @@ static void client_PlayerTaunt( BYTESTREAM_s *pByteStream )
 	if (( players[ulPlayer].bSpectating ) ||
 		( players[ulPlayer].health <= 0 ) ||
 		( players[ulPlayer].mo == NULL ) ||
-		( i_compatflags & COMPATF_DISABLETAUNTS ))
+		( zacompatflags & ZACOMPATF_DISABLETAUNTS ))
 	{
 		return;
 	}
@@ -6002,18 +6005,18 @@ static void client_MoveThing( BYTESTREAM_s *pByteStream )
 
 	// Read in the momentum data.
 	if ( lBits & CM_MOMX )
-		pActor->momx = NETWORK_ReadShort( pByteStream ) << FRACBITS;
+		pActor->velx = NETWORK_ReadShort( pByteStream ) << FRACBITS;
 	if ( lBits & CM_MOMY )
-		pActor->momy = NETWORK_ReadShort( pByteStream ) << FRACBITS;
+		pActor->vely = NETWORK_ReadShort( pByteStream ) << FRACBITS;
 	if ( lBits & CM_MOMZ )
-		pActor->momz = NETWORK_ReadShort( pByteStream ) << FRACBITS;
+		pActor->velz = NETWORK_ReadShort( pByteStream ) << FRACBITS;
 
 	// [Dusk] if the actor that's being moved is a player and his momentum
 	// is being zeroed (i.e. we're stopping him), we need to stop his bobbing
 	// as well.
-	if ((pActor->player != NULL) && (pActor->momx == 0) && (pActor->momy == 0)) {
-		pActor->player->momx = 0;
-		pActor->player->momy = 0;
+	if ((pActor->player != NULL) && (pActor->velx == 0) && (pActor->vely == 0)) {
+		pActor->player->velx = 0;
+		pActor->player->vely = 0;
 	}
 
 	// Read in the pitch data.
@@ -6123,18 +6126,18 @@ static void client_MoveThingExact( BYTESTREAM_s *pByteStream )
 
 	// Read in the momentum data.
 	if ( lBits & CM_MOMX )
-		pActor->momx = NETWORK_ReadLong( pByteStream );
+		pActor->velx = NETWORK_ReadLong( pByteStream );
 	if ( lBits & CM_MOMY )
-		pActor->momy = NETWORK_ReadLong( pByteStream );
+		pActor->vely = NETWORK_ReadLong( pByteStream );
 	if ( lBits & CM_MOMZ )
-		pActor->momz = NETWORK_ReadLong( pByteStream );
+		pActor->velz = NETWORK_ReadLong( pByteStream );
 
 	// [Dusk] if the actor that's being moved is a player and his momentum
 	// is being zeroed (i.e. we're stopping him), we need to stop his bobbing
 	// as well.
-	if ((pActor->player != NULL) && (pActor->momx == 0) && (pActor->momy == 0)) {
-		pActor->player->momx = 0;
-		pActor->player->momy = 0;
+	if ((pActor->player != NULL) && (pActor->velx == 0) && (pActor->vely == 0)) {
+		pActor->player->velx = 0;
+		pActor->player->vely = 0;
 	}
 
 	// Read in the pitch data.
@@ -6299,7 +6302,7 @@ static void client_SetThingState( BYTESTREAM_s *pByteStream )
 	case STATE_RAISE:
 
 		// When an actor raises, we need to do a whole bunch of other stuff.
-		DoThingRaise( pActor, true );
+		P_Thing_Raise( pActor, true );
 		return;
 	case STATE_HEAL:
 
@@ -6415,7 +6418,7 @@ static void client_DestroyThing( BYTESTREAM_s *pByteStream )
 	{
 		// [BB] We also have to stop all its associated CLIENTSIDE scripts. Otherwise 
 		// they would get disassociated and continue to run even if the player disconnects later.
-		if ( !( compatflags2 & COMPATF2_DONT_STOP_PLAYER_SCRIPTS_ON_DISCONNECT ) )
+		if ( !( zacompatflags & ZACOMPATF_DONT_STOP_PLAYER_SCRIPTS_ON_DISCONNECT ) )
 			FBehavior::StaticStopMyScripts ( pActor->player->mo );
 
 		pActor->player->mo = NULL;
@@ -7043,7 +7046,7 @@ static void client_SetThingFrame( BYTESTREAM_s *pByteStream, bool bCallStateFunc
 			if ( bCallStateFunction )
 				pActor->SetState( pBaseState + lOffset );
 			else
-				pActor->SetStateNF( pBaseState + lOffset );
+				pActor->SetState( pBaseState + lOffset, true );
 		}
 		return;
 	}
@@ -7068,7 +7071,7 @@ static void client_SetThingFrame( BYTESTREAM_s *pByteStream, bool bCallStateFunc
 		if ( bCallStateFunction )
 			pActor->SetState( pNewState );
 		else
-			pActor->SetStateNF( pNewState );
+			pActor->SetState( pNewState, true );
 	}
 }
 
@@ -7254,15 +7257,15 @@ static void client_TeleportThing( BYTESTREAM_s *pByteStream )
 	}
 
 	// Set the thing's new momentum.
-	pActor->momx = NewMomX;
-	pActor->momy = NewMomY;
-	pActor->momz = NewMomZ;
+	pActor->velx = NewMomX;
+	pActor->vely = NewMomY;
+	pActor->velz = NewMomZ;
 
 	// Also, if this is a player, set his bobbing appropriately.
 	if ( pActor->player )
 	{
-		pActor->player->momx = NewMomX;
-		pActor->player->momy = NewMomY;
+		pActor->player->velx = NewMomX;
+		pActor->player->vely = NewMomY;
 
 		// [BB] If the server is teleporting us, don't let our prediction get messed up.
 		if ( pActor == players[consoleplayer].mo )
@@ -7926,13 +7929,13 @@ static void client_SetGameDMFlags( BYTESTREAM_s *pByteStream )
 	Value.Int = NETWORK_ReadLong( pByteStream );
 	compatflags.ForceSet( Value, CVAR_Int );
 
-	// [BB] ... and compatflags2.
+	// [BB] ... and zacompatflags.
 	Value.Int = NETWORK_ReadLong( pByteStream );
-	compatflags2.ForceSet( Value, CVAR_Int );
+	zacompatflags.ForceSet( Value, CVAR_Int );
 
-	// [BB] ... and dmflags3.
+	// [BB] ... and zadmflags.
 	Value.Int = NETWORK_ReadLong( pByteStream );
-	dmflags3.ForceSet( Value, CVAR_Int );
+	zadmflags.ForceSet( Value, CVAR_Int );
 }
 
 //*****************************************************************************
@@ -7998,6 +8001,10 @@ static void client_SetGameModeLimits( BYTESTREAM_s *pByteStream )
 	// [WS] Read in, and set the value for alwaysapplydmflags.
 	Value.Bool = !!NETWORK_ReadByte( pByteStream );
 	alwaysapplydmflags.ForceSet( Value, CVAR_Bool );
+
+	// [AM] Read in, and set the value for lobby.
+	Value.String = const_cast<char*>(NETWORK_ReadString( pByteStream ));
+	lobby.ForceSet( Value, CVAR_String );
 }
 
 //*****************************************************************************
@@ -9268,7 +9275,7 @@ static void client_DestroyAllSectorMovers( BYTESTREAM_s *pByteStream )
 		if ( sectors[ulIdx].ceilingdata )
 		{
 			// Stop the sound sequence (if any) associated with this sector.
-			SN_StopSequence( &sectors[ulIdx] );
+			SN_StopSequence( &sectors[ulIdx], CHAN_CEILING );
 
 			sectors[ulIdx].ceilingdata->Destroy( );
 			sectors[ulIdx].ceilingdata = NULL;
@@ -9277,7 +9284,7 @@ static void client_DestroyAllSectorMovers( BYTESTREAM_s *pByteStream )
 		if ( sectors[ulIdx].floordata )
 		{
 			// Stop the sound sequence (if any) associated with this sector.
-			SN_StopSequence( &sectors[ulIdx] );
+			SN_StopSequence( &sectors[ulIdx], CHAN_FLOOR );
 
 			sectors[ulIdx].floordata->Destroy( );
 			sectors[ulIdx].floordata = NULL;
@@ -9602,10 +9609,10 @@ static void client_SetLineTextureHelper ( ULONG ulLineIdx, ULONG ulSide, ULONG u
 		return;
 	}
 
-	if ( pLine->sidenum[ulSide] == NO_SIDE )
+	if ( pLine->sidedef[ulSide] == NULL )
 		return;
 
-	side_t *pSide = &sides[pLine->sidenum[ulSide]];
+	side_t *pSide = pLine->sidedef[ulSide];
 
 	switch ( ulPosition )
 	{
@@ -9932,7 +9939,9 @@ static void client_StopSectorSequence( BYTESTREAM_s *pByteStream )
 		return;
 
 	// Finally, stop the sound sequence for this sector.
-	SN_StopSequence( pSector );
+	// [BB] We don't know which channel is supposed to stop, so just stop floor and ceiling for now.
+	SN_StopSequence( pSector, CHAN_CEILING );
+	SN_StopSequence( pSector, CHAN_FLOOR );
 }
 
 //*****************************************************************************
@@ -10723,7 +10732,7 @@ static void client_DestroyFloor( BYTESTREAM_s *pByteStream )
 		return;
 	}
 
-	SN_StopSequence( pFloor->GetSector( ));
+	SN_StopSequence( pFloor->GetSector( ), CHAN_FLOOR );
 	pFloor->Destroy( );
 }
 
@@ -10916,7 +10925,7 @@ static void client_DestroyCeiling( BYTESTREAM_s *pByteStream )
 		return;
 	}
 
-	SN_StopSequence( pCeiling->GetSector( ));
+	SN_StopSequence( pCeiling->GetSector( ), CHAN_CEILING );
 	pCeiling->Destroy( );
 }
 
@@ -11134,7 +11143,7 @@ static void client_PlayPlatSound( BYTESTREAM_s *pByteStream )
 	{
 	case 0:
 
-		SN_StopSequence( pPlat->GetSector( ));
+		SN_StopSequence( pPlat->GetSector( ), CHAN_FLOOR );
 		break;
 	case 1:
 
@@ -11464,7 +11473,7 @@ static void client_DoRotatePoly( BYTESTREAM_s *pByteStream )
 	lPolyNum = NETWORK_ReadShort( pByteStream );
 
 	// Make sure the polyobj exists before we try to work with it.
-	pPoly = GetPolyobj( lPolyNum );
+	pPoly = PO_GetPolyobj( lPolyNum );
 	if ( pPoly == NULL )
 	{
 #ifdef CLIENT_WARNING_MESSAGES
@@ -11529,7 +11538,7 @@ static void client_DoMovePoly( BYTESTREAM_s *pByteStream )
 	lPolyNum = NETWORK_ReadShort( pByteStream );
 
 	// Make sure the polyobj exists before we try to work with it.
-	pPoly = GetPolyobj( lPolyNum );
+	pPoly = PO_GetPolyobj( lPolyNum );
 	if ( pPoly == NULL )
 	{
 #ifdef CLIENT_WARNING_MESSAGES
@@ -11601,7 +11610,7 @@ static void client_DoPolyDoor( BYTESTREAM_s *pByteStream )
 	lPolyNum = NETWORK_ReadShort( pByteStream );
 
 	// Make sure the polyobj exists before we try to work with it.
-	pPoly = GetPolyobj( lPolyNum );
+	pPoly = PO_GetPolyobj( lPolyNum );
 	if ( pPoly == NULL )
 	{
 #ifdef CLIENT_WARNING_MESSAGES
@@ -11671,14 +11680,14 @@ static void client_SetPolyDoorSpeedPosition( BYTESTREAM_s *pByteStream )
 	lX = NETWORK_ReadLong( pByteStream );
 	lY = NETWORK_ReadLong( pByteStream );
 
-	pPoly = GetPolyobj( lPolyID );
+	pPoly = PO_GetPolyobj( lPolyID );
 	if ( pPoly == NULL )
 		return;
 
-	lDeltaX = lX - pPoly->startSpot[0];
-	lDeltaY = lY - pPoly->startSpot[1];
+	lDeltaX = lX - pPoly->StartSpot.x;
+	lDeltaY = lY - pPoly->StartSpot.y;
 
-	PO_MovePolyobj( lPolyID, lDeltaX, lDeltaY );
+	pPoly->MovePolyobj( lDeltaX, lDeltaY );
 	
 	if ( pPoly->specialdata == NULL )
 		return;
@@ -11706,13 +11715,13 @@ static void client_SetPolyDoorSpeedRotation( BYTESTREAM_s *pByteStream )
 	// Read in the polyobject angle.
 	lAngle = NETWORK_ReadLong( pByteStream );
 
-	pPoly = GetPolyobj( lPolyID );
+	pPoly = PO_GetPolyobj( lPolyID );
 	if ( pPoly == NULL )
 		return;
 
 	lDeltaAngle = lAngle - pPoly->angle;
 
-	PO_RotatePolyobj( lPolyID, lDeltaAngle );
+	pPoly->RotatePolyobj( lDeltaAngle );
 
 	if ( pPoly->specialdata == NULL )
 		return;
@@ -11734,7 +11743,7 @@ static void client_PlayPolyobjSound( BYTESTREAM_s *pByteStream )
 	// Read in the sound to be played.
 	Sound = (NETWORK_POLYOBJSOUND_e)NETWORK_ReadByte( pByteStream );
 
-	pPoly = GetPolyobj( lID );
+	pPoly = PO_GetPolyobj( lID );
 	if ( pPoly == NULL )
 		return;
 
@@ -11772,7 +11781,7 @@ static void client_SetPolyobjPosition( BYTESTREAM_s *pByteStream )
 	lY = NETWORK_ReadLong( pByteStream );
 
 	// Get the polyobject from the index given.
-	pPoly = GetPolyobj( lPolyNum );
+	pPoly = PO_GetPolyobj( lPolyNum );
 	if ( pPoly == NULL )
 	{
 #ifdef CLIENT_WARNING_MESSAGES
@@ -11781,13 +11790,13 @@ static void client_SetPolyobjPosition( BYTESTREAM_s *pByteStream )
 		return;
 	}
 
-	lDeltaX = lX - pPoly->startSpot[0];
-	lDeltaY = lY - pPoly->startSpot[1];
+	lDeltaX = lX - pPoly->StartSpot.x;
+	lDeltaY = lY - pPoly->StartSpot.y;
 
 //	Printf( "DeltaX: %d\nDeltaY: %d\n", lDeltaX, lDeltaY );
 
 	// Finally, set the polyobject action.
-	PO_MovePolyobj( lPolyNum, lDeltaX, lDeltaY );
+	pPoly->MovePolyobj( lDeltaX, lDeltaY );
 }
 
 //*****************************************************************************
@@ -11806,7 +11815,7 @@ static void client_SetPolyobjRotation( BYTESTREAM_s *pByteStream )
 	lAngle = NETWORK_ReadLong( pByteStream );
 
 	// Make sure the polyobj exists before we try to work with it.
-	pPoly = GetPolyobj( lPolyNum );
+	pPoly = PO_GetPolyobj( lPolyNum );
 	if ( pPoly == NULL )
 	{
 #ifdef CLIENT_WARNING_MESSAGES
@@ -11818,7 +11827,7 @@ static void client_SetPolyobjRotation( BYTESTREAM_s *pByteStream )
 	lDeltaAngle = lAngle - pPoly->angle;
 
 	// Finally, set the polyobject action.
-	PO_RotatePolyobj( lPolyNum, lDeltaAngle );
+	pPoly->RotatePolyobj( lDeltaAngle );
 }
 
 //*****************************************************************************
@@ -11838,10 +11847,13 @@ static void client_EarthQuake( BYTESTREAM_s *pByteStream )
 	lIntensity = NETWORK_ReadByte( pByteStream );
 
 	// Read in the duration of the quake.
-	lDuration = NETWORK_ReadByte( pByteStream );
+	lDuration = NETWORK_ReadShort( pByteStream );
 
 	// Read in the tremor radius of the quake.
-	lTremorRadius = NETWORK_ReadByte( pByteStream );
+	lTremorRadius = NETWORK_ReadShort( pByteStream );
+
+	// [BB] Read in the quake sound.
+	FSoundID quakesound = NETWORK_ReadString( pByteStream );
 
 	// Find the actor that represents the center of the quake based on the network
 	// ID sent. If we can't find the actor, then the quake has no center.
@@ -11850,7 +11862,7 @@ static void client_EarthQuake( BYTESTREAM_s *pByteStream )
 		return;
 
 	// Create the earthquake. Since this is client-side, damage is always 0.
-	new DEarthquake( pCenter, lIntensity, lDuration, 0, lTremorRadius );
+	new DEarthquake( pCenter, lIntensity, lDuration, 0, lTremorRadius, quakesound );
 }
 
 //*****************************************************************************
@@ -12240,7 +12252,7 @@ void APathFollower::InitFromStream ( BYTESTREAM_s *pByteStream )
 
 CCMD( connect )
 {
-	char		*pszDemoName;
+	const char	*pszDemoName;
 	UCVarValue	Val;
 
 	// Servers can't connect to other servers!
@@ -12477,7 +12489,7 @@ ADD_STAT( momentum )
 {
 	FString	Out;
 
-	Out.Format( "X: %3d     Y: %3d", players[consoleplayer].momx, players[consoleplayer].momy );
+	Out.Format( "X: %3d     Y: %3d", players[consoleplayer].velx, players[consoleplayer].vely );
 
 	return ( Out );
 }
