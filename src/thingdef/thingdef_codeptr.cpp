@@ -66,6 +66,7 @@
 #include "v_font.h"
 #include "doomstat.h"
 #include "v_palette.h"
+#include "g_shared/a_specialspot.h"
 // [BB] new #includes.
 #include "deathmatch.h"
 #include "cl_main.h"
@@ -88,6 +89,7 @@ static FRandom pr_spawndebris ("SpawnDebris");
 static FRandom pr_spawnitemex ("SpawnItemEx");
 static FRandom pr_burst ("Burst");
 static FRandom pr_monsterrefire ("MonsterRefire");
+static FRandom pr_teleport("A_Teleport");
 
 
 // [BC] Blah.
@@ -382,7 +384,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_PlaySoundEx)
 			return;
 	}
 
-	int attenuation;
+	float attenuation;
 	switch (attenuation_raw)
 	{
 		case -1: attenuation = ATTN_STATIC;	break; // drop off rapidly
@@ -434,13 +436,26 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_StopSoundEx)
 // Generic seeker missile function
 //
 //==========================================================================
+static FRandom pr_seekermissile ("SeekerMissile");
+enum
+{
+	SMF_LOOK = 1,
+	SMF_PRECISE = 2,
+};
 DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_SeekerMissile)
 {
-	ACTION_PARAM_START(2);
+	ACTION_PARAM_START(5);
 	ACTION_PARAM_INT(ang1, 0);
 	ACTION_PARAM_INT(ang2, 1);
+	ACTION_PARAM_INT(flags, 2);
+	ACTION_PARAM_INT(chance, 3);
+	ACTION_PARAM_INT(distance, 4);
 
-	P_SeekerMissile(self, clamp<int>(ang1, 0, 90) * ANGLE_1, clamp<int>(ang2, 0, 90) * ANGLE_1);
+	if ((flags & SMF_LOOK) && (self->tracer == 0) && (pr_seekermissile()<chance))
+	{
+		self->tracer = P_RoughMonsterSearch (self, distance);
+	}
+	P_SeekerMissile(self, clamp<int>(ang1, 0, 90) * ANGLE_1, clamp<int>(ang2, 0, 90) * ANGLE_1, !!(flags & SMF_PRECISE));
 }
 
 //==========================================================================
@@ -606,12 +621,27 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_JumpIfHealthLower)
 // State jump function
 //
 //==========================================================================
-DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_JumpIfCloser)
+void DoJumpIfCloser(AActor *target, DECLARE_PARAMINFO)
 {
 	ACTION_PARAM_START(2);
 	ACTION_PARAM_FIXED(dist, 0);
 	ACTION_PARAM_STATE(jump, 1);
 
+	ACTION_SET_RESULT(false);	// Jumps should never set the result for inventory state chains!
+
+	// No target - no jump
+	if (target != NULL && P_AproxDistance(self->x-target->x, self->y-target->y) < dist &&
+		( (self->z > target->z && self->z - (target->z + target->height) < dist) || 
+		  (self->z <=target->z && target->z - (self->z + self->height) < dist) 
+		)
+	   )
+	{
+		ACTION_JUMP(jump,CLIENTUPDATE_FRAME|CLIENTUPDATE_POSITION);	// [BC] Since monsters don't have targets on the client end, we need to send an update.
+	}
+}
+
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_JumpIfCloser)
+{
 	AActor *target;
 
 	// [BC] Don't jump here in client mode.
@@ -624,27 +654,28 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_JumpIfCloser)
 
 	if (!self->player)
 	{
-		target=self->target;
+		target = self->target;
 	}
 	else
 	{
 		// Does the player aim at something that can be shot?
 		P_BulletSlope(self, &target);
 	}
+	DoJumpIfCloser(target, PUSH_PARAMINFO);
+}
 
-	ACTION_SET_RESULT(false);	// Jumps should never set the result for inventory state chains!
-
-	// No target - no jump
-	if (target==NULL) return;
-
-	if (P_AproxDistance(self->x-target->x, self->y-target->y) < dist &&
-		( (self->z > target->z && self->z - (target->z + target->height) < dist) || 
-		  (self->z <=target->z && target->z - (self->z + self->height) < dist) 
-		)
-	   )
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_JumpIfTracerCloser)
+{
+	// Is there really any reason to limit this to seeker missiles?
+	if (self->flags2 & MF2_SEEKERMISSILE)
 	{
-		ACTION_JUMP(jump,CLIENTUPDATE_FRAME|CLIENTUPDATE_POSITION);	// [BC] Since monsters don't have targets on the client end, we need to send an update.
+		DoJumpIfCloser(self->tracer, PUSH_PARAMINFO);
 	}
+}
+
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_JumpIfMasterCloser)
+{
+	DoJumpIfCloser(self->master, PUSH_PARAMINFO);
 }
 
 //==========================================================================
@@ -691,12 +722,19 @@ void DoJumpIfInventory(AActor * owner, DECLARE_PARAMINFO)
 
 	if (!Type || owner == NULL) return;
 
-	AInventory * Item=owner->FindInventory(Type);
+	AInventory *Item = owner->FindInventory(Type);
 
 	if (Item)
 	{
-		if (ItemAmount>0 && Item->Amount>=ItemAmount) ACTION_JUMP(JumpOffset, ulClientUpdateFlags);	// [BC] Clients don't necessarily have inventory information.
-		else if (Item->Amount>=Item->MaxAmount) ACTION_JUMP(JumpOffset, ulClientUpdateFlags);	// [BC] Clients don't necessarily have inventory information.
+		if (ItemAmount > 0)
+		{
+			if (Item->Amount >= ItemAmount)
+				ACTION_JUMP(JumpOffset, ulClientUpdateFlags);	// [BC] Clients don't necessarily have inventory information.
+		}
+		else if (Item->Amount >= Item->MaxAmount)
+		{
+			ACTION_JUMP(JumpOffset, ulClientUpdateFlags);	// [BC] Clients don't necessarily have inventory information.
+		}
 	}
 }
 
@@ -745,11 +783,14 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_Explode)
 		return;
 	}
 
-	ACTION_PARAM_START(4);
+	ACTION_PARAM_START(7);
 	ACTION_PARAM_INT(damage, 0);
 	ACTION_PARAM_INT(distance, 1);
 	ACTION_PARAM_BOOL(hurtSource, 2);
 	ACTION_PARAM_BOOL(alert, 3);
+	ACTION_PARAM_INT(fulldmgdistance, 4);
+	ACTION_PARAM_INT(nails, 5);
+	ACTION_PARAM_INT(naildamage, 6);
 
 	if (damage < 0)	// get parameters from metadata
 	{
@@ -762,12 +803,24 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_Explode)
 	{
 		if (distance <= 0) distance = damage;
 	}
+	// NailBomb effect, from SMMU but not from its source code: instead it was implemented and
+	// generalized from the documentation at http://www.doomworld.com/eternity/engine/codeptrs.html
 
-	P_RadiusAttack (self, self->target, damage, distance, self->DamageType, hurtSource);
-	if (self->z <= self->floorz + (distance<<FRACBITS))
+	if (nails)
 	{
-		P_HitFloor (self);
+		angle_t ang;
+		for (int i = 0; i < nails; i++)
+		{
+			ang = i*(ANGLE_MAX/nails);
+			// Comparing the results of a test wad with Eternity, it seems A_NailBomb does not aim
+			P_LineAttack (self, ang, MISSILERANGE, 0,
+				//P_AimLineAttack (self, ang, MISSILERANGE), 
+				naildamage, NAME_None, NAME_BulletPuff);
+		}
 	}
+
+	P_RadiusAttack (self, self->target, damage, distance, self->DamageType, hurtSource, true, fulldmgdistance);
+	P_CheckSplash(self, distance<<FRACBITS);
 	if (alert && self->target != NULL && self->target->player != NULL)
 	{
 		validcount++;
@@ -799,10 +852,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_RadiusThrust)
 	if (distance <= 0) distance = force;
 
 	P_RadiusAttack (self, self->target, force, distance, self->DamageType, affectSource, false);
-	if (self->z <= self->floorz + (distance<<FRACBITS))
-	{
-		P_HitFloor (self);
-	}
+	P_CheckSplash(self, distance<<FRACBITS);
 }
 
 //==========================================================================
@@ -915,17 +965,17 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomMissile)
 				self->y-=y;
 
 				// It is not necessary to use the correct angle here.
-				// The only important thing is that the horizontal momentum is correct.
+				// The only important thing is that the horizontal velocity is correct.
 				// Therefore use 0 as the missile's angle and simplify the calculations accordingly.
-				// The actual momentum vector is set below.
+				// The actual velocity vector is set below.
 				if (missile)
 				{
 					fixed_t vx = finecosine[pitch>>ANGLETOFINESHIFT];
 					fixed_t vz = finesine[pitch>>ANGLETOFINESHIFT];
 
-					missile->momx = FixedMul (vx, missile->Speed);
-					missile->momy = 0;
-					missile->momz = FixedMul (vz, missile->Speed);
+					missile->velx = FixedMul (vx, missile->Speed);
+					missile->vely = 0;
+					missile->velz = FixedMul (vz, missile->Speed);
 				}
 
 				break;
@@ -933,17 +983,17 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomMissile)
 
 			if (missile)
 			{
-				// Use the actual momentum instead of the missile's Speed property
+				// Use the actual velocity instead of the missile's Speed property
 				// so that this can handle missiles with a high vertical velocity 
 				// component properly.
-				FVector3 velocity (missile->momx, missile->momy, 0);
+				FVector3 velocity (missile->velx, missile->vely, 0);
 
 				fixed_t missilespeed = (fixed_t)velocity.Length();
 
 				missile->angle += Angle;
 				ang = missile->angle >> ANGLETOFINESHIFT;
-				missile->momx = FixedMul (missilespeed, finecosine[ang]);
-				missile->momy = FixedMul (missilespeed, finesine[ang]);
+				missile->velx = FixedMul (missilespeed, finecosine[ang]);
+				missile->vely = FixedMul (missilespeed, finesine[ang]);
 	
 				// handle projectile shooting projectiles - track the
 				// links back to a real owner
@@ -1003,6 +1053,7 @@ enum CBA_Flags
 {
 	CBAF_AIMFACING = 1,
 	CBAF_NORANDOM = 2,
+	CBAF_EXPLICITANGLE = 4,
 };
 
 DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomBulletAttack)
@@ -1039,14 +1090,26 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomBulletAttack)
 
 		for (i=0 ; i<NumBullets ; i++)
 		{
-			int angle = bangle + pr_cabullet.Random2() * (Spread_XY / 255);
-			int slope = bslope + pr_cabullet.Random2() * (Spread_Z / 255);
+			int angle = bangle;
+			int slope = bslope;
+
+			if (Flags & CBAF_EXPLICITANGLE)
+			{
+				angle += Spread_XY;
+				slope += Spread_Z;
+			}
+			else
+			{
+				angle += pr_cwbullet.Random2() * (Spread_XY / 255);
+				slope += pr_cwbullet.Random2() * (Spread_Z / 255);
+			}
+
 			int damage = DamagePerBullet;
 
 			if (!(Flags & CBAF_NORANDOM))
 				damage *= ((pr_cabullet()%3)+1);
 
-			P_LineAttack(self, angle, Range, slope, damage, GetDefaultByType(pufftype)->DamageType, pufftype);
+			P_LineAttack(self, angle, Range, slope, damage, NAME_None, pufftype);
 		}
     }
 }
@@ -1202,6 +1265,7 @@ enum FB_Flags
 {
 	FBF_USEAMMO = 1,
 	FBF_NORANDOM = 2,
+	FBF_EXPLICITANGLE = 4,
 };
 
 // [BB] This functions is needed to keep code duplication at a minimum while applying the spread power.
@@ -1224,21 +1288,32 @@ void A_FireBulletsHelper ( AActor *self,
 		if (!(Flags & FBF_NORANDOM))
 			damage *= ((pr_cwbullet()%3)+1);
 
-		P_LineAttack(self, bangle, Range, bslope, damage, GetDefaultByType(PuffType)->DamageType, PuffType);
+		P_LineAttack(self, bangle, Range, bslope, damage, NAME_None, PuffType);
 	}
 	else 
 	{
 		if (NumberOfBullets == -1) NumberOfBullets = 1;
 		for (int i=0 ; i<NumberOfBullets ; i++)
 		{
-			int angle = bangle + pr_cwbullet.Random2() * (Spread_XY / 255);
-			int slope = bslope + pr_cwbullet.Random2() * (Spread_Z / 255);
+			int angle = bangle;
+			int slope = bslope;
+
+			if (Flags & FBF_EXPLICITANGLE)
+			{
+				angle += Spread_XY;
+				slope += Spread_Z;
+			}
+			else
+			{
+				angle += pr_cwbullet.Random2() * (Spread_XY / 255);
+				slope += pr_cwbullet.Random2() * (Spread_Z / 255);
+			}
 			int damage = DamagePerBullet;
 
 			if (!(Flags & FBF_NORANDOM))
 				damage *= ((pr_cwbullet()%3)+1);
 
-			P_LineAttack(self, angle, Range, slope, damage, GetDefaultByType(PuffType)->DamageType, PuffType);
+			P_LineAttack(self, angle, Range, slope, damage, NAME_None, PuffType);
 		}
 	}
 }
@@ -1408,12 +1483,12 @@ void A_FireCustomMissileHelper ( AActor * self,
 		{
 			// This original implementation is to aim straight ahead and then offset
 			// the angle from the resulting direction. 
-			FVector3 velocity(misl->momx, misl->momy, 0);
+			FVector3 velocity(misl->velx, misl->vely, 0);
 			fixed_t missilespeed = (fixed_t)velocity.Length();
 			misl->angle += Angle;
 			angle_t an = misl->angle >> ANGLETOFINESHIFT;
-			misl->momx = FixedMul (missilespeed, finecosine[an]);
-			misl->momy = FixedMul (missilespeed, finesine[an]);
+			misl->velx = FixedMul (missilespeed, finecosine[an]);
+			misl->vely = FixedMul (missilespeed, finesine[an]);
 		}
 		if (misl->flags4&MF4_SPECTRAL) misl->health=-1;
 
@@ -1485,12 +1560,12 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FireCustomMissile)
 			{
 				// This original implementation is to aim straight ahead and then offset
 				// the angle from the resulting direction. 
-				FVector3 velocity(misl->momx, misl->momy, 0);
+				FVector3 velocity(misl->velx, misl->vely, 0);
 				fixed_t missilespeed = (fixed_t)velocity.Length();
 				misl->angle += Angle;
 				angle_t an = misl->angle >> ANGLETOFINESHIFT;
-				misl->momx = FixedMul (missilespeed, finecosine[an]);
-				misl->momy = FixedMul (missilespeed, finesine[an]);
+				misl->velx = FixedMul (missilespeed, finecosine[an]);
+				misl->vely = FixedMul (missilespeed, finesine[an]);
 			}
 
 			// [BC] If we're the server, tell clients to spawn this missile.
@@ -1509,14 +1584,23 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FireCustomMissile)
 // Berserk is not handled here. That can be done with A_CheckIfInventory
 //
 //==========================================================================
+
+enum
+{
+	CPF_USEAMMO = 1,
+	CPF_DAGGER = 2,
+	CPF_PULLIN = 4,
+};
+
 DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomPunch)
 {
 	ACTION_PARAM_START(5);
 	ACTION_PARAM_INT(Damage, 0);
 	ACTION_PARAM_BOOL(norandom, 1);
-	ACTION_PARAM_BOOL(UseAmmo, 2);
+	ACTION_PARAM_INT(flags, 2);
 	ACTION_PARAM_CLASS(PuffType, 3);
 	ACTION_PARAM_FIXED(Range, 4);
+	ACTION_PARAM_FIXED(LifeSteal, 5);
 
 	if (!self->player) return;
 
@@ -1543,7 +1627,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomPunch)
 	pitch = P_AimLineAttack (self, angle, Range, &linetarget);
 
 	// only use ammo when actually hitting something!
-	if (UseAmmo && linetarget && weapon)
+	if ((flags & CPF_USEAMMO) && linetarget && weapon)
 	{
 		if (!weapon->DepleteAmmo(weapon->bAltFire, true)) return;	// out of ammo
 
@@ -1559,17 +1643,23 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomPunch)
 
 	if (!PuffType) PuffType = PClass::FindClass(NAME_BulletPuff);
 
-	P_LineAttack (self, angle, Range, pitch, Damage, GetDefaultByType(PuffType)->DamageType, PuffType, true);
+	P_LineAttack (self, angle, Range, pitch, Damage, NAME_None, PuffType, true, &linetarget);
 
 	// turn to face target
 	if (linetarget)
 	{
+		if (LifeSteal)
+			P_GiveBody (self, (Damage * LifeSteal) >> FRACBITS);
+
 		S_Sound (self, CHAN_WEAPON, weapon->AttackSound, 1, ATTN_NORM);
 
 		self->angle = R_PointToAngle2 (self->x,
 										self->y,
 										linetarget->x,
 										linetarget->y);
+
+		if (flags & CPF_PULLIN) self->flags |= MF_JUSTATTACKED;
+		if (flags & CPF_DAGGER) P_DaggerAlert (self, linetarget);
 
 		// [BC] Play the hit sound to clients.
 		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
@@ -1581,6 +1671,13 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomPunch)
 }
 
 
+enum
+{	
+	RAF_SILENT = 1,
+	RAF_NOPIERCE = 2,
+	RAF_EXPLICITANGLE = 4,
+};
+
 //==========================================================================
 //
 // customizable railgun attack function
@@ -1588,15 +1685,17 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomPunch)
 //==========================================================================
 DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_RailAttack)
 {
-	ACTION_PARAM_START(8);
+	ACTION_PARAM_START(10);
 	ACTION_PARAM_INT(Damage, 0);
 	ACTION_PARAM_INT(Spawnofs_XY, 1);
 	ACTION_PARAM_BOOL(UseAmmo, 2);
 	ACTION_PARAM_COLOR(Color1, 3);
 	ACTION_PARAM_COLOR(Color2, 4);
-	ACTION_PARAM_BOOL(Silent, 5);
+	ACTION_PARAM_INT(Flags, 5);
 	ACTION_PARAM_FLOAT(MaxDiff, 6);
 	ACTION_PARAM_CLASS(PuffType, 7);
+	ACTION_PARAM_ANGLE(Spread_XY, 8);
+	ACTION_PARAM_ANGLE(Spread_Z, 9);
 
 	if (!self->player) return;
 
@@ -1617,7 +1716,21 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_RailAttack)
 			return;
 	}
 
-	P_RailAttackWithPossibleSpread (self, Damage, Spawnofs_XY, Color1, Color2, MaxDiff, Silent, PuffType);
+	angle_t angle;
+	angle_t slope;
+
+	if (Flags & RAF_EXPLICITANGLE)
+	{
+		angle = Spread_XY;
+		slope = Spread_Z;
+	}
+	else
+	{
+		angle = pr_crailgun.Random2() * (Spread_XY / 255);
+		slope = pr_crailgun.Random2() * (Spread_Z / 255);
+	}
+
+	P_RailAttackWithPossibleSpread (self, Damage, Spawnofs_XY, Color1, Color2, MaxDiff, (Flags & RAF_SILENT), PuffType, (!(Flags & RAF_NOPIERCE))), angle, slope;
 }
 
 //==========================================================================
@@ -1629,24 +1742,30 @@ enum
 {
 	CRF_DONTAIM = 0,
 	CRF_AIMPARALLEL = 1,
-	CRF_AIMDIRECT = 2
+	CRF_AIMDIRECT = 2,
+	CRF_EXPLICITANGLE = 4,
 };
 
 DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomRailgun)
 {
-	ACTION_PARAM_START(8);
+	ACTION_PARAM_START(10);
 	ACTION_PARAM_INT(Damage, 0);
 	ACTION_PARAM_INT(Spawnofs_XY, 1);
 	ACTION_PARAM_COLOR(Color1, 2);
 	ACTION_PARAM_COLOR(Color2, 3);
-	ACTION_PARAM_BOOL(Silent, 4);
+	ACTION_PARAM_INT(Flags, 4);
 	ACTION_PARAM_INT(aim, 5);
 	ACTION_PARAM_FLOAT(MaxDiff, 6);
 	ACTION_PARAM_CLASS(PuffType, 7);
+	ACTION_PARAM_ANGLE(Spread_XY, 8);
+	ACTION_PARAM_ANGLE(Spread_Z, 9);
+
+	AActor *linetarget;
 
 	fixed_t saved_x = self->x;
 	fixed_t saved_y = self->y;
 	angle_t saved_angle = self->angle;
+	fixed_t saved_pitch = self->pitch;
 
 	if (aim && self->target == NULL)
 	{
@@ -1663,22 +1782,26 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomRailgun)
 
 	if (aim)
 	{
-
 		self->angle = R_PointToAngle2 (self->x,
 										self->y,
 										self->target->x,
 										self->target->y);
-
 	}
-
-	self->pitch = P_AimLineAttack (self, self->angle, MISSILERANGE);
-
+	self->pitch = P_AimLineAttack (self, self->angle, MISSILERANGE, &linetarget, ANGLE_1*60, 0, aim ? self->target : NULL);
+	if (linetarget == NULL && aim)
+	{
+		// We probably won't hit the target, but aim at it anyway so we don't look stupid.
+		FVector2 xydiff(self->target->x - self->x, self->target->y - self->y);
+		double zdiff = (self->target->z + (self->target->height>>1)) -
+						(self->z + (self->height>>1) - self->floorclip);
+		self->pitch = int(atan2(zdiff, xydiff.Length()) * ANGLE_180 / -M_PI);
+	}
 	// Let the aim trail behind the player
 	if (aim)
 	{
 		saved_angle = self->angle = R_PointToAngle2 (self->x, self->y,
-										self->target->x - self->target->momx * 3,
-										self->target->y - self->target->momy * 3);
+										self->target->x - self->target->velx * 3,
+										self->target->y - self->target->vely * 3);
 
 		if (aim == CRF_AIMDIRECT)
 		{
@@ -1688,8 +1811,8 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomRailgun)
 			self->y += Spawnofs_XY * finesine[self->angle];
 			Spawnofs_XY = 0;
 			self->angle = R_PointToAngle2 (self->x, self->y,
-											self->target->x - self->target->momx * 3,
-											self->target->y - self->target->momy * 3);
+											self->target->x - self->target->velx * 3,
+											self->target->y - self->target->vely * 3);
 		}
 
 		if (self->target->flags & MF_SHADOW)
@@ -1702,11 +1825,26 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomRailgun)
 
 	angle_t angle = (self->angle - ANG90) >> ANGLETOFINESHIFT;
 
-	P_RailAttackWithPossibleSpread (self, Damage, Spawnofs_XY, Color1, Color2, MaxDiff, Silent, PuffType);
+	angle_t angleoffset;
+	angle_t slopeoffset;
+
+	if (Flags & CRF_EXPLICITANGLE)
+	{
+		angleoffset = Spread_XY;
+		slopeoffset = Spread_Z;
+	}
+	else
+	{
+		angleoffset = pr_crailgun.Random2() * (Spread_XY / 255);
+		slopeoffset = pr_crailgun.Random2() * (Spread_Z / 255);
+	}
+
+	P_RailAttackWithPossibleSpread (self, Damage, Spawnofs_XY, Color1, Color2, MaxDiff, (Flags & RAF_SILENT), PuffType, (!(Flags & RAF_NOPIERCE)), angleoffset, slopeoffset);
 
 	self->x = saved_x;
 	self->y = saved_y;
 	self->angle = saved_angle;
+	self->pitch = saved_pitch;
 }
 
 //===========================================================================
@@ -1795,11 +1933,17 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_GiveToTarget)
 //
 //===========================================================================
 
+enum
+{
+	TIF_NOTAKEINFINITE = 1,
+};
+
 void DoTakeInventory(AActor * receiver, DECLARE_PARAMINFO)
 {
-	ACTION_PARAM_START(2);
+	ACTION_PARAM_START(3);
 	ACTION_PARAM_CLASS(item, 0);
 	ACTION_PARAM_INT(amount, 1);
+	ACTION_PARAM_INT(flags, 2);
 	bool	bNeedClientUpdate;
 
 	
@@ -1832,7 +1976,15 @@ void DoTakeInventory(AActor * receiver, DECLARE_PARAMINFO)
 		{
 			res = true;
 		}
-		if (!amount || amount>=inv->Amount) 
+		// Do not take ammo if the "no take infinite/take as ammo depletion" flag is set
+		// and infinite ammo is on
+		if (flags & TIF_NOTAKEINFINITE &&
+			((dmflags & DF_INFINITE_AMMO) || (receiver->player->cheats & CF_INFINITEAMMO)) &&
+			inv->IsKindOf(RUNTIME_CLASS(AAmmo)))
+		{
+			// Nothing to do here, except maybe res = false;? Would it make sense?
+		}
+		else if (!amount || amount>=inv->Amount) 
 		{
 			// [BC] Take the player's inventory.
 			if (( NETWORK_GetState( ) == NETSTATE_SERVER ) &&
@@ -1882,7 +2034,7 @@ enum SIX_Flags
 	SIXF_TRANSFERTRANSLATION=1,
 	SIXF_ABSOLUTEPOSITION=2,
 	SIXF_ABSOLUTEANGLE=4,
-	SIXF_ABSOLUTEMOMENTUM=8,
+	SIXF_ABSOLUTEVELOCITY=8,
 	SIXF_SETMASTER=16,
 	SIXF_NOCHECKPOSITION=32,
 	SIXF_TELEFRAG=64,
@@ -1890,6 +2042,7 @@ enum SIX_Flags
 	SIXF_CLIENTSIDESPAWN=128,
 	SIXF_TRANSFERAMBUSHFLAG=256,
 	SIXF_TRANSFERPITCH=512,
+	SIXF_TRANSFERPOINTERS=1024,
 };
 
 
@@ -1903,6 +2056,12 @@ static bool InitSpawnedItem(AActor *self, AActor *mo, int flags)
 		if ((flags & SIXF_TRANSFERTRANSLATION) && !(mo->flags2 & MF2_DONTTRANSLATE))
 		{
 			mo->Translation = self->Translation;
+		}
+		if (flags & SIXF_TRANSFERPOINTERS)
+		{
+			mo->target = self->target;
+			mo->master = self->master; // This will be overridden later if SIXF_SETMASTER is set
+			mo->tracer = self->tracer;
 		}
 
 		mo->angle=self->angle;
@@ -1943,7 +2102,7 @@ static bool InitSpawnedItem(AActor *self, AActor *mo, int flags)
 				{
 					// A player always spawns a monster friendly to him
 					mo->flags|=MF_FRIENDLY;
-					mo->FriendPlayer = originator->player-players+1;
+					mo->FriendPlayer = int(originator->player-players+1);
 
 					AActor * attacker=originator->player->attacker;
 					if (attacker)
@@ -1958,7 +2117,7 @@ static bool InitSpawnedItem(AActor *self, AActor *mo, int flags)
 				}
 			}
 		}
-		else 
+		else if (!(flags & SIXF_TRANSFERPOINTERS))
 		{
 			// If this is a missile or something else set the target to the originator
 			mo->target=originator? originator : self;
@@ -2053,9 +2212,9 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_SpawnItemEx)
 	ACTION_PARAM_FIXED(xofs, 1);
 	ACTION_PARAM_FIXED(yofs, 2);
 	ACTION_PARAM_FIXED(zofs, 3);
-	ACTION_PARAM_FIXED(xmom, 4);
-	ACTION_PARAM_FIXED(ymom, 5);
-	ACTION_PARAM_FIXED(zmom, 6);
+	ACTION_PARAM_FIXED(xvel, 4);
+	ACTION_PARAM_FIXED(yvel, 5);
+	ACTION_PARAM_FIXED(zvel, 6);
 	ACTION_PARAM_ANGLE(Angle, 7);
 	ACTION_PARAM_INT(flags, 8);
 	ACTION_PARAM_INT(chance, 9);
@@ -2093,28 +2252,29 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_SpawnItemEx)
 		y = self->y + FixedMul(xofs, finesine[ang]) - FixedMul(yofs, finecosine[ang]);
 	}
 
-	if (!(flags & SIXF_ABSOLUTEMOMENTUM))
+	if (!(flags & SIXF_ABSOLUTEVELOCITY))
 	{
 		// Same orientation issue here!
-		fixed_t newxmom = FixedMul(xmom, finecosine[ang]) + FixedMul(ymom, finesine[ang]);
-		ymom = FixedMul(xmom, finesine[ang]) - FixedMul(ymom, finecosine[ang]);
-		xmom = newxmom;
+		fixed_t newxvel = FixedMul(xvel, finecosine[ang]) + FixedMul(yvel, finesine[ang]);
+		yvel = FixedMul(xvel, finesine[ang]) - FixedMul(yvel, finecosine[ang]);
+		xvel = newxvel;
 	}
 
 	// [BB] Should the actor not be spawned, taking in account client side only actors?
 	if ( shouldActorNotBeSpawned ( self, missile, !!( flags & SIXF_CLIENTSIDESPAWN ) ) )
 		return;
 
-	AActor * mo = Spawn( missile, x, y, self->z - self->floorclip + zofs, ALLOW_REPLACE);
+	AActor * mo = Spawn(missile, x, y, self->z - self->floorclip + zofs, ALLOW_REPLACE);
 	bool res = InitSpawnedItem(self, mo, flags);
 	ACTION_SET_RESULT(res);	// for an inventory item's use state
 	if (mo)
 	{
-		mo->momx=xmom;
-		mo->momy=ymom;
-		mo->momz=zmom;
-		mo->angle=Angle;
-		if (flags & SIXF_TRANSFERAMBUSHFLAG) mo->flags = (mo->flags&~MF_AMBUSH) | (self->flags & MF_AMBUSH);
+		mo->velx = xvel;
+		mo->vely = yvel;
+		mo->velz = zvel;
+		mo->angle = Angle;
+		if (flags & SIXF_TRANSFERAMBUSHFLAG)
+			mo->flags = (mo->flags&~MF_AMBUSH) | (self->flags & MF_AMBUSH);
 
 		// [BB] If we're the server and the spawn was not blocked, tell clients to spawn the item
 		if ( res && (NETWORK_GetState( ) == NETSTATE_SERVER) )
@@ -2149,16 +2309,16 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_ThrowGrenade)
 	ACTION_PARAM_START(5);
 	ACTION_PARAM_CLASS(missile, 0);
 	ACTION_PARAM_FIXED(zheight, 1);
-	ACTION_PARAM_FIXED(xymom, 2);
-	ACTION_PARAM_FIXED(zmom, 3);
+	ACTION_PARAM_FIXED(xyvel, 2);
+	ACTION_PARAM_FIXED(zvel, 3);
 	ACTION_PARAM_BOOL(useammo, 4);
 
 	if (missile == NULL) return;
 
 	if (ACTION_CALL_FROM_WEAPON())
 	{
-		// Used from a weapon so use some ammo
-		AWeapon * weapon=self->player->ReadyWeapon;
+		// Used from a weapon, so use some ammo
+		AWeapon *weapon = self->player->ReadyWeapon;
 
 		if (!weapon) return;
 		if (useammo && !weapon->DepleteAmmo(weapon->bAltFire)) return;
@@ -2179,22 +2339,34 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_ThrowGrenade)
 			ALLOW_REPLACE);
 	if (bo)
 	{
-		int pitch = self->pitch;
-
 		P_PlaySpawnSound(bo, self);
-		if (xymom) bo->Speed=xymom;
-		bo->angle = self->angle+(((pr_grenade()&7)-4)<<24);
-		bo->momz = zmom + 2*finesine[pitch>>ANGLETOFINESHIFT];
-		bo->z += 2 * finesine[pitch>>ANGLETOFINESHIFT];
-		P_ThrustMobj(bo, bo->angle, bo->Speed);
-		bo->momx += self->momx>>1;
-		bo->momy += self->momy>>1;
+		if (xyvel != 0)
+			bo->Speed = xyvel;
+		bo->angle = self->angle + (((pr_grenade()&7) - 4) << 24);
+
+		angle_t pitch = angle_t(-self->pitch) >> ANGLETOFINESHIFT;
+		angle_t angle = bo->angle >> ANGLETOFINESHIFT;
+
+		// There are two vectors we are concerned about here: xy and z. We rotate
+		// them separately according to the shooter's pitch and then sum them to
+		// get the final velocity vector to shoot with.
+
+		fixed_t xy_xyscale = FixedMul(bo->Speed, finecosine[pitch]);
+		fixed_t xy_velz = FixedMul(bo->Speed, finesine[pitch]);
+		fixed_t xy_velx = FixedMul(xy_xyscale, finecosine[angle]);
+		fixed_t xy_vely = FixedMul(xy_xyscale, finesine[angle]);
+
+		pitch = angle_t(self->pitch) >> ANGLETOFINESHIFT;
+		fixed_t z_xyscale = FixedMul(zvel, finesine[pitch]);
+		fixed_t z_velz = FixedMul(zvel, finecosine[pitch]);
+		fixed_t z_velx = FixedMul(z_xyscale, finecosine[angle]);
+		fixed_t z_vely = FixedMul(z_xyscale, finesine[angle]);
+
+		bo->velx = xy_velx + z_velx + (self->velx >> 1);
+		bo->vely = xy_vely + z_vely + (self->vely >> 1);
+		bo->velz = xy_velz + z_velz;
+
 		bo->target= self;
-		if (bo->flags4&MF4_RANDOMIZE) 
-		{
-			bo->tics -= pr_grenade()&3;
-			if (bo->tics<1) bo->tics=1;
-		}
 
 		// [BC] Tell clients to spawn this missile.
 		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
@@ -2214,7 +2386,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_ThrowGrenade)
 DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_Recoil)
 {
 	ACTION_PARAM_START(1);
-	ACTION_PARAM_FIXED(xymom, 0);
+	ACTION_PARAM_FIXED(xyvel, 0);
 
 	// [BB] For non-player non-clientsideonly actors, this is server side.
 	// Note: I'm not sure whether this should be server side also for players.
@@ -2227,8 +2399,8 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_Recoil)
 
 	angle_t angle = self->angle + ANG180;
 	angle >>= ANGLETOFINESHIFT;
-	self->momx += FixedMul (xymom, finecosine[angle]);
-	self->momy += FixedMul (xymom, finesine[angle]);
+	self->velx += FixedMul (xyvel, finecosine[angle]);
+	self->vely += FixedMul (xyvel, finesine[angle]);
 
 	// [BB] Set the thing's momentum, also resync the position.
 	if ( ( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( self->player == NULL ) )
@@ -2297,7 +2469,8 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_Print)
 			con_midtime = time;
 		}
 		
-		C_MidPrint(font != NULL ? font : SmallFont, text);
+		FString formatted = strbin1(text);
+		C_MidPrint(font != NULL ? font : SmallFont, formatted.GetChars());
 		// [BB] The server sends out the message and doesn't have a screen.
 		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
 		{
@@ -2316,8 +2489,67 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_Print)
 
 		con_midtime = saved;
 	}
+	ACTION_SET_RESULT(false);	// Prints should never set the result for inventory state chains!
 }
 
+//===========================================================================
+//
+// A_PrintBold
+//
+//===========================================================================
+
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_PrintBold)
+{
+	ACTION_PARAM_START(3);
+	ACTION_PARAM_STRING(text, 0);
+	ACTION_PARAM_FLOAT(time, 1);
+	ACTION_PARAM_NAME(fontname, 2);
+
+	float saved = con_midtime;
+	FFont *font = NULL;
+	
+	if (fontname != NAME_None)
+	{
+		font = V_GetFont(fontname);
+	}
+	if (time > 0)
+	{
+		con_midtime = time;
+	}
+	
+	FString formatted = strbin1(text);
+	C_MidPrintBold(font != NULL ? font : SmallFont, formatted.GetChars());
+	con_midtime = saved;
+	ACTION_SET_RESULT(false);	// Prints should never set the result for inventory state chains!
+}
+
+//===========================================================================
+//
+// A_Log
+//
+//===========================================================================
+
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_Log)
+{
+	ACTION_PARAM_START(1);
+	ACTION_PARAM_STRING(text, 0);
+	Printf("%s\n", text);
+	ACTION_SET_RESULT(false);	// Prints should never set the result for inventory state chains!
+}
+
+//===========================================================================
+//
+// A_LogInt
+//
+//===========================================================================
+
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_LogInt)
+{
+	ACTION_PARAM_START(1);
+	ACTION_PARAM_INT(num, 0);
+	Printf("%d\n", num);
+	ACTION_SET_RESULT(false);	// Prints should never set the result for inventory state chains!
+}
 
 //===========================================================================
 //
@@ -2357,13 +2589,17 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FadeIn)
 			return;
 	}
 
-	if (reduce == 0) reduce = FRACUNIT/10;
+	if (reduce == 0)
+	{
+		reduce = FRACUNIT/10;
+	}
 
 	// [BB] If the RenderStyle is changed, we have to inform the clients.
 	const bool renderStyleChanged = !!( self->RenderStyle.Flags & STYLEF_Alpha1 );
 
 	self->RenderStyle.Flags &= ~STYLEF_Alpha1;
 	self->alpha += reduce;
+	// Should this clamp alpha to 1.0?
 
 	// [BB] Inform the clients about the alpha change and possibly about RenderStyle.
 	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
@@ -2373,7 +2609,6 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FadeIn)
 		SERVERCOMMANDS_SetThingProperty( self, APROP_Alpha );
 	}
 
-	//if (self->alpha<=0) self->Destroy();
 }
 
 //===========================================================================
@@ -2385,9 +2620,10 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FadeIn)
 //===========================================================================
 DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FadeOut)
 {
-	ACTION_PARAM_START(1);
+	ACTION_PARAM_START(2);
 	ACTION_PARAM_FIXED(reduce, 0);
-	
+	ACTION_PARAM_BOOL(remove, 1);
+
 	// [BB] This is handled server-side.
 	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
 		( CLIENTDEMO_IsPlaying( )))
@@ -2396,8 +2632,10 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FadeOut)
 			return;
 	}
 
-	if (reduce == 0) reduce = FRACUNIT/10;
-
+	if (reduce == 0)
+	{
+		reduce = FRACUNIT/10;
+	}
 	// [BB] If the RenderStyle is changed, we have to inform the clients.
 	const bool renderStyleChanged = !!( self->RenderStyle.Flags & STYLEF_Alpha1 );
 
@@ -2413,7 +2651,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FadeOut)
 	}
 
 	// [BB] Only destroy the actor if it's not needed for a map reset. Otherwise just hide it.
-	if (self->alpha<=0)
+	if (self->alpha <= 0 && remove)
 	{
 		// [BB] Deleting player bodies is a very bad idea.
 		if ( self->player && ( self->player->mo == self ) )
@@ -2427,6 +2665,47 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FadeOut)
 			SERVERCOMMANDS_DestroyThing( self );
 
 		self->HideOrDestroyIfSafe ();
+	}
+}
+
+//===========================================================================
+//
+// A_FadeTo
+//
+// fades the actor to a specified transparency by a specified amount and
+// destroys it if so desired
+//
+//===========================================================================
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FadeTo)
+{
+	ACTION_PARAM_START(3);
+	ACTION_PARAM_FIXED(target, 0);
+	ACTION_PARAM_FIXED(amount, 1);
+	ACTION_PARAM_BOOL(remove, 2);
+
+	self->RenderStyle.Flags &= ~STYLEF_Alpha1;
+
+	if (self->alpha > target)
+	{
+		self->alpha -= amount;
+
+		if (self->alpha < target)
+		{
+			self->alpha = target;
+		}
+	}
+	else if (self->alpha < target)
+	{
+		self->alpha += amount;
+
+		if (self->alpha > target)
+		{
+			self->alpha = target;
+		}
+	}
+	if (self->alpha == target && remove)
+	{
+		self->Destroy();
 	}
 }
 
@@ -2464,9 +2743,9 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_SpawnDebris)
 		if (mo && i < mo->GetClass()->ActorInfo->NumOwnedStates)
 		{
 			mo->SetState (mo->GetClass()->ActorInfo->OwnedStates + i);
-			mo->momz = FixedMul(mult_v, ((pr_spawndebris()&7)+5)*FRACUNIT);
-			mo->momx = FixedMul(mult_h, pr_spawndebris.Random2()<<(FRACBITS-6));
-			mo->momy = FixedMul(mult_h, pr_spawndebris.Random2()<<(FRACBITS-6));
+			mo->velz = FixedMul(mult_v, ((pr_spawndebris()&7)+5)*FRACUNIT);
+			mo->velx = FixedMul(mult_h, pr_spawndebris.Random2()<<(FRACBITS-6));
+			mo->vely = FixedMul(mult_h, pr_spawndebris.Random2()<<(FRACBITS-6));
 		}
 	}
 }
@@ -2490,43 +2769,74 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CheckSight)
 	if ( NETWORK_InClientMode( ) )
 	{
 		if ( !( self->ulNetworkFlags & NETFL_CLIENTSIDEONLY ) ||
-			P_CheckSight( players[consoleplayer].camera, self, true ) )
+			P_CheckSight( players[consoleplayer].camera, self, SF_IGNOREVISIBILITY ) )
 		{
 			return;
 		}
 	}
 	else
 	{
-		for (int i=0;i<MAXPLAYERS;i++) 
+		for (int i = 0; i < MAXPLAYERS; i++) 
 		{
-			if (playeringame[i] && P_CheckSight(players[i].camera,self,true)) return;
+			if (playeringame[i] && P_CheckSight(players[i].camera, self, SF_IGNOREVISIBILITY)) return;
 		}
 	}
 
 	ACTION_JUMP(jump, false);	// [BC] This is hopefully okay.
-
 }
 
-
 //===========================================================================
 //
-// A_JumpIfTargetInSight
-// jumps if monster can see its target
+// A_CheckSightOrRange
+// Jumps if this actor is out of range of all players *and* out of sight.
+// Useful for maps with many multi-actor special effects.
 //
 //===========================================================================
-DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_JumpIfTargetInSight)
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CheckSightOrRange)
 {
-	ACTION_PARAM_START(1);
-	ACTION_PARAM_STATE(jump, 0);
-
-	// [BB] This is handled by the server.
-	if ( NETWORK_InClientModeAndActorNotClientHandled( self ) )
-		return;
+	ACTION_PARAM_START(2);
+	double range = EvalExpressionF(ParameterIndex+0, self);
+	ACTION_PARAM_STATE(jump, 1);
 
 	ACTION_SET_RESULT(false);	// Jumps should never set the result for inventory state chains!
-	if (self->target == NULL || !P_CheckSight(self, self->target,4)) return; 
-	ACTION_JUMP(jump,CLIENTUPDATE_FRAME);	// [BB] Since monsters don't have targets on the client end, we need to send an update.
 
+	range = range * range * (double(FRACUNIT) * FRACUNIT);		// no need for square roots
+	for (int i = 0; i < MAXPLAYERS; ++i)
+	{
+		if (playeringame[i])
+		{
+			AActor *camera = players[i].camera;
+
+			// Check distance first, since it's cheaper than checking sight.
+			double dx = self->x - camera->x;
+			double dy = self->y - camera->y;
+			double dz;
+			fixed_t eyez = (camera->z + camera->height - (camera->height>>2));	// same eye height as P_CheckSight
+			if (eyez > self->z + self->height)
+			{
+				dz = self->z + self->height - eyez;
+			}
+			else if (eyez < self->z)
+			{
+				dz = self->z - eyez;
+			}
+			else
+			{
+				dz = 0;
+			}
+			if ((dx*dx) + (dy*dy) + (dz*dz) <= range)
+			{ // Within range
+				return;
+			}
+
+			// Now check LOS.
+			if (P_CheckSight(camera, self, SF_IGNOREVISIBILITY))
+			{ // Visible
+				return;
+			}
+		}
+	}
+	ACTION_JUMP(jump, false);	// [BB] This is hopefully okay.
 }
 
 
@@ -2611,11 +2921,14 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_JumpIf)
 // A_KillMaster
 //
 //===========================================================================
-DEFINE_ACTION_FUNCTION(AActor, A_KillMaster)
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_KillMaster)
 {
+	ACTION_PARAM_START(1);
+	ACTION_PARAM_NAME(damagetype, 0);
+
 	if (self->master != NULL)
 	{
-		P_DamageMobj(self->master, self, self, self->master->health, NAME_None, DMG_NO_ARMOR);
+		P_DamageMobj(self->master, self, self, self->master->health, damagetype, DMG_NO_ARMOR | DMG_NO_FACTOR);
 	}
 }
 
@@ -2624,16 +2937,19 @@ DEFINE_ACTION_FUNCTION(AActor, A_KillMaster)
 // A_KillChildren
 //
 //===========================================================================
-DEFINE_ACTION_FUNCTION(AActor, A_KillChildren)
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_KillChildren)
 {
+	ACTION_PARAM_START(1);
+	ACTION_PARAM_NAME(damagetype, 0);
+
 	TThinkerIterator<AActor> it;
-	AActor * mo;
+	AActor *mo;
 
 	while ( (mo = it.Next()) )
 	{
 		if (mo->master == self)
 		{
-			P_DamageMobj(mo, self, self, mo->health, NAME_None, DMG_NO_ARMOR);
+			P_DamageMobj(mo, self, self, mo->health, damagetype, DMG_NO_ARMOR | DMG_NO_FACTOR);
 		}
 	}
 }
@@ -2643,10 +2959,13 @@ DEFINE_ACTION_FUNCTION(AActor, A_KillChildren)
 // A_KillSiblings
 //
 //===========================================================================
-DEFINE_ACTION_FUNCTION(AActor, A_KillSiblings)
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_KillSiblings)
 {
+	ACTION_PARAM_START(1);
+	ACTION_PARAM_NAME(damagetype, 0);
+
 	TThinkerIterator<AActor> it;
-	AActor * mo;
+	AActor *mo;
 
 	// [BB] This is handled server-side.
 	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
@@ -2660,7 +2979,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_KillSiblings)
 	{
 		if (mo->master == self->master && mo != self)
 		{
-			P_DamageMobj(mo, self, self, mo->health, NAME_None, DMG_NO_ARMOR);
+			P_DamageMobj(mo, self, self, mo->health, damagetype, DMG_NO_ARMOR | DMG_NO_FACTOR);
 		}
 	}
 }
@@ -2672,8 +2991,9 @@ DEFINE_ACTION_FUNCTION(AActor, A_KillSiblings)
 //===========================================================================
 DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CountdownArg)
 {
-	ACTION_PARAM_START(1);
+	ACTION_PARAM_START(2);
 	ACTION_PARAM_INT(cnt, 0);
+	ACTION_PARAM_STATE(state, 1);
 
 	if (cnt<0 || cnt>=5) return;
 	if (!self->args[cnt]--)
@@ -2688,7 +3008,9 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CountdownArg)
 		}
 		else
 		{
-			self->SetState(self->FindState(NAME_Death));
+			// can't use "Death" as default parameter with current DECORATE parser.
+			if (state == NULL) state = self->FindState(NAME_Death);
+			self->SetState(state);
 		}
 	}
 
@@ -2705,47 +3027,47 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_Burst)
 	ACTION_PARAM_START(1);
 	ACTION_PARAM_CLASS(chunk, 0);
 
-   int i, numChunks;
-   AActor * mo;
+	int i, numChunks;
+	AActor * mo;
 
-   if (chunk == NULL) return;
+	if (chunk == NULL) return;
 
-   self->momx = self->momy = self->momz = 0;
-   self->height = self->GetDefault()->height;
+	self->velx = self->vely = self->velz = 0;
+	self->height = self->GetDefault()->height;
 
-   // [RH] In Hexen, this creates a random number of shards (range [24,56])
-   // with no relation to the size of the self shattering. I think it should
-   // base the number of shards on the size of the dead thing, so bigger
-   // things break up into more shards than smaller things.
-   // An self with radius 20 and height 64 creates ~40 chunks.
-   numChunks = MAX<int> (4, (self->radius>>FRACBITS)*(self->height>>FRACBITS)/32);
-   i = (pr_burst.Random2()) % (numChunks/4);
-   for (i = MAX (24, numChunks + i); i >= 0; i--)
-   {
-      mo = Spawn(chunk,
-         self->x + (((pr_burst()-128)*self->radius)>>7),
-         self->y + (((pr_burst()-128)*self->radius)>>7),
-         self->z + (pr_burst()*self->height/255), ALLOW_REPLACE);
+	// [RH] In Hexen, this creates a random number of shards (range [24,56])
+	// with no relation to the size of the self shattering. I think it should
+	// base the number of shards on the size of the dead thing, so bigger
+	// things break up into more shards than smaller things.
+	// An self with radius 20 and height 64 creates ~40 chunks.
+	numChunks = MAX<int> (4, (self->radius>>FRACBITS)*(self->height>>FRACBITS)/32);
+	i = (pr_burst.Random2()) % (numChunks/4);
+	for (i = MAX (24, numChunks + i); i >= 0; i--)
+	{
+		mo = Spawn(chunk,
+			self->x + (((pr_burst()-128)*self->radius)>>7),
+			self->y + (((pr_burst()-128)*self->radius)>>7),
+			self->z + (pr_burst()*self->height/255), ALLOW_REPLACE);
 
-	  if (mo)
-      {
-         mo->momz = FixedDiv(mo->z-self->z, self->height)<<2;
-         mo->momx = pr_burst.Random2 () << (FRACBITS-7);
-         mo->momy = pr_burst.Random2 () << (FRACBITS-7);
-         mo->RenderStyle = self->RenderStyle;
-         mo->alpha = self->alpha;
-		 mo->CopyFriendliness(self, true);
-      }
-   }
+		if (mo)
+		{
+			mo->velz = FixedDiv(mo->z - self->z, self->height)<<2;
+			mo->velx = pr_burst.Random2 () << (FRACBITS-7);
+			mo->vely = pr_burst.Random2 () << (FRACBITS-7);
+			mo->RenderStyle = self->RenderStyle;
+			mo->alpha = self->alpha;
+			mo->CopyFriendliness(self, true);
+		}
+	}
 
-   // [RH] Do some stuff to make this more useful outside Hexen
-   if (self->flags4 & MF4_BOSSDEATH)
-   {
+	// [RH] Do some stuff to make this more useful outside Hexen
+	if (self->flags4 & MF4_BOSSDEATH)
+	{
 		CALL_ACTION(A_BossDeath, self);
-   }
-   CALL_ACTION(A_NoBlocking, self);
+	}
+	A_Unblock(self, true);
 
-   self->Destroy ();
+	self->Destroy ();
 }
 
 //===========================================================================
@@ -2769,19 +3091,50 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CheckFloor)
 
 //===========================================================================
 //
+// A_CheckCeiling
+// [GZ] Totally copied on A_CheckFloor, jumps if actor touches ceiling
+//
+//===========================================================================
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CheckCeiling)
+{
+	ACTION_PARAM_START(1);
+	ACTION_PARAM_STATE(jump, 0);
+
+	ACTION_SET_RESULT(false);
+	if (self->z+self->height >= self->ceilingz) // Height needs to be counted
+	{
+		ACTION_JUMP(jump, false);	// [BB] Clients have ceiling information.
+	}
+
+}
+
+//===========================================================================
+//
 // A_Stop
-// resets all momentum of the actor to 0
+// resets all velocity of the actor to 0
 //
 //===========================================================================
 DEFINE_ACTION_FUNCTION(AActor, A_Stop)
 {
-	self->momx = self->momy = self->momz = 0;
+	self->velx = self->vely = self->velz = 0;
 	if (self->player && self->player->mo == self /*&& !(self->player->cheats & CF_PREDICTING)*/)
 	{
-		self->player->mo->PlayIdle ();
-		self->player->momx = self->player->momy = 0;
+		self->player->mo->PlayIdle();
+		self->player->velx = self->player->vely = 0;
 	}
-	
+}
+
+static void CheckStopped(AActor *self)
+{
+	if (self->player != NULL &&
+		self->player->mo == self &&
+		// [BB] Zandronum handles prediction differently.
+		//!(self->player->cheats & CF_PREDICTING) &&
+		!(self->velx | self->vely | self->velz))
+	{
+		self->player->mo->PlayIdle();
+		self->player->velx = self->player->vely = 0;
+	}
 }
 
 //===========================================================================
@@ -2789,23 +3142,58 @@ DEFINE_ACTION_FUNCTION(AActor, A_Stop)
 // A_Respawn
 //
 //===========================================================================
+
+enum RS_Flags
+{
+	RSF_FOG=1,
+	RSF_KEEPTARGET=2,
+	RSF_TELEFRAG=4,
+};
+
 DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_Respawn)
 {
 	ACTION_PARAM_START(1);
-	ACTION_PARAM_BOOL(fog, 0);
+	ACTION_PARAM_INT(flags, 0);
 
 	fixed_t x = self->SpawnPoint[0];
 	fixed_t y = self->SpawnPoint[1];
+	bool oktorespawn = false;
 	sector_t *sec;
 
 	self->flags |= MF_SOLID;
 	sec = P_PointInSector (x, y);
-	self->SetOrigin (x, y, sec->floorplane.ZatPoint (x, y));
 	self->height = self->GetDefault()->height;
-	if (P_TestMobjLocation (self))
+
+	if (flags & RSF_TELEFRAG)
+	{
+		// [KS] DIE DIE DIE DIE erm *ahem* =)
+		if (P_TeleportMove (self, x, y, sec->floorplane.ZatPoint (x, y), true)) oktorespawn = true;
+	}
+	else
+	{
+		self->SetOrigin (x, y, sec->floorplane.ZatPoint (x, y));
+		if (P_TestMobjLocation (self)) oktorespawn = true;
+	}
+
+	if (oktorespawn)
 	{
 		AActor *defs = self->GetDefault();
 		self->health = defs->health;
+
+		// [KS] Don't keep target, because it could be self if the monster committed suicide
+		//      ...Actually it's better off an option, so you have better control over monster behavior.
+		if (!(flags & RSF_KEEPTARGET))
+		{
+			self->target = NULL;
+			self->LastHeard = NULL;
+			self->lastenemy = NULL;
+		}
+		else
+		{
+			// Don't attack yourself (Re: "Marine targets itself after suicide")
+			if (self->target == self) self->target = NULL;
+			if (self->lastenemy == self) self->lastenemy = NULL;
+		}
 
 		self->flags  = (defs->flags & ~MF_FRIENDLY) | (self->flags & MF_FRIENDLY);
 		self->flags2 = defs->flags2;
@@ -2825,7 +3213,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_Respawn)
 			self ->ulNetworkFlags &= ~NETFL_DESTROYED_ON_CLIENT;
 		}
 
-		if (fog)
+		if (flags & RSF_FOG)
 		{
 			AActor *pFog = Spawn<ATeleportFog> (x, y, self->z + TELEFOGHEIGHT, ALLOW_REPLACE);
 
@@ -2892,23 +3280,38 @@ DEFINE_ACTION_FUNCTION(AActor, A_ClearTarget)
 
 //==========================================================================
 //
-// A_JumpIfTargetInLOS (state label, optional fixed fov, optional bool
-// projectiletarget)
+// A_JumpIfTargetInLOS (state label, optional fixed fov, optional int flags,
+// optional fixed dist_max, optional fixed dist_close)
 //
 // Jumps if the actor can see its target, or if the player has a linetarget.
 // ProjectileTarget affects how projectiles are treated. If set, it will use
 // the target of the projectile for seekers, and ignore the target for
 // normal projectiles. If not set, it will use the missile's owner instead
-// (the default).
+// (the default). ProjectileTarget is now flag JLOSF_PROJECTILE. dist_max
+// sets the maximum distance that actor can see, 0 means forever. dist_close
+// uses special behavior if certain flags are set, 0 means no checks.
 //
 //==========================================================================
 
+enum JLOS_flags
+{
+	JLOSF_PROJECTILE=1,
+	JLOSF_NOSIGHT=2,
+	JLOSF_CLOSENOFOV=4,
+	JLOSF_CLOSENOSIGHT=8,
+	JLOSF_CLOSENOJUMP=16,
+	JLOSF_DEADNOJUMP=32,
+	JLOSF_CHECKMASTER=64,
+};
+
 DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_JumpIfTargetInLOS)
 {
-	ACTION_PARAM_START(3);
+	ACTION_PARAM_START(5);
 	ACTION_PARAM_STATE(jump, 0);
 	ACTION_PARAM_ANGLE(fov, 1);
-	ACTION_PARAM_BOOL(projtarg, 2);
+	ACTION_PARAM_INT(flags, 2);
+	ACTION_PARAM_FIXED(dist_max, 3);
+	ACTION_PARAM_FIXED(dist_close, 4);
 
 	angle_t an;
 	AActor *target;
@@ -2917,7 +3320,11 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_JumpIfTargetInLOS)
 
 	if (!self->player)
 	{
-		if (self->flags & MF_MISSILE && projtarg)
+		if (flags & JLOSF_CHECKMASTER)
+		{
+			target = self->master;
+		}
+		else if (self->flags & MF_MISSILE && (flags & JLOSF_PROJECTILE))
 		{
 			if (self->flags2 & MF2_SEEKERMISSILE)
 				target = self->tracer;
@@ -2931,7 +3338,28 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_JumpIfTargetInLOS)
 
 		if (!target) return; // [KS] Let's not call P_CheckSight unnecessarily in this case.
 
-		if (!P_CheckSight (self, target, 1))
+		if ((flags & JLOSF_DEADNOJUMP) && (target->health <= 0)) return;
+
+		fixed_t distance = P_AproxDistance(target->x - self->x, target->y - self->y);
+		distance = P_AproxDistance(distance, target->z - self->z);
+
+		if (dist_max && (distance > dist_max)) return;
+
+		bool doCheckSight = !(flags & JLOSF_NOSIGHT);
+
+		if (dist_close && (distance < dist_close))
+		{
+			if (flags & JLOSF_CLOSENOJUMP)
+				return;
+
+			if (flags & JLOSF_CLOSENOFOV)
+				fov = 0;
+
+			if (flags & JLOSF_CLOSENOSIGHT)
+				doCheckSight = false;
+		}
+
+		if (doCheckSight && !P_CheckSight (self, target, SF_IGNOREVISIBILITY))
 			return;
 
 		if (fov && (fov < ANGLE_MAX))
@@ -2953,9 +3381,20 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_JumpIfTargetInLOS)
 	{
 		// Does the player aim at something that can be shot?
 		P_BulletSlope(self, &target);
-	}
 
-	if (!target) return;
+		if (!target) return;
+
+		fixed_t distance = P_AproxDistance(target->x - self->x, target->y - self->y);
+		distance = P_AproxDistance(distance, target->z - self->z);
+
+		if (dist_max && (distance > dist_max)) return;
+
+		if (dist_close && (distance < dist_close))
+		{
+			if (flags & JLOSF_CLOSENOJUMP)
+				return;
+		}
+	}
 
 	// [BB] Since monsters don't have targets on the client end, we need to send an update.
 	// If it's not a player, also update the position. Since the client locally ignores the
@@ -2963,6 +3402,93 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_JumpIfTargetInLOS)
 	// movement prediction.
 	ACTION_JUMP(jump, CLIENTUPDATE_FRAME|( !self->player ? CLIENTUPDATE_POSITION : 0 ));
 }
+
+
+//==========================================================================
+//
+// A_JumpIfInTargetLOS (state label, optional fixed fov, optional int flags
+// optional fixed dist_max, optional fixed dist_close)
+//
+//==========================================================================
+
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_JumpIfInTargetLOS)
+{
+	ACTION_PARAM_START(5);
+	ACTION_PARAM_STATE(jump, 0);
+	ACTION_PARAM_ANGLE(fov, 1);
+	ACTION_PARAM_INT(flags, 2);
+	ACTION_PARAM_FIXED(dist_max, 3);
+	ACTION_PARAM_FIXED(dist_close, 4);
+
+	angle_t an;
+	AActor *target;
+
+	// [BB] This is handled by the server.
+	if ( NETWORK_InClientModeAndActorNotClientHandled( self ) )
+		return;
+
+	ACTION_SET_RESULT(false);	// Jumps should never set the result for inventory state chains!
+
+	if (flags & JLOSF_CHECKMASTER)
+	{
+		target = self->master;
+	}
+	else if (self->flags & MF_MISSILE && (flags & JLOSF_PROJECTILE))
+	{
+		if (self->flags2 & MF2_SEEKERMISSILE)
+			target = self->tracer;
+		else
+			target = NULL;
+	}
+	else
+	{
+		target = self->target;
+	}
+
+	if (!target) return; // [KS] Let's not call P_CheckSight unnecessarily in this case.
+
+	if ((flags & JLOSF_DEADNOJUMP) && (target->health <= 0)) return;
+
+	fixed_t distance = P_AproxDistance(target->x - self->x, target->y - self->y);
+	distance = P_AproxDistance(distance, target->z - self->z);
+
+	if (dist_max && (distance > dist_max)) return;
+
+	bool doCheckSight = !(flags & JLOSF_NOSIGHT);
+
+	if (dist_close && (distance < dist_close))
+	{
+		if (flags & JLOSF_CLOSENOJUMP)
+			return;
+
+		if (flags & JLOSF_CLOSENOFOV)
+			fov = 0;
+
+		if (flags & JLOSF_CLOSENOSIGHT)
+			doCheckSight = false;
+	}
+
+	if (doCheckSight && !P_CheckSight (target, self, SF_IGNOREVISIBILITY))
+		return;
+
+	if (fov && (fov < ANGLE_MAX))
+	{
+		an = R_PointToAngle2 (self->x,
+							  self->y,
+							  target->x,
+							  target->y)
+			- self->angle;
+
+		if (an > (fov / 2) && an < (ANGLE_MAX - (fov / 2)))
+		{
+			return; // [KS] Outside of FOV - return
+		}
+
+	}
+
+	ACTION_JUMP(jump,CLIENTUPDATE_FRAME);	// [BB] Since monsters don't have targets on the client end, we need to send an update.
+}
+
 
 //===========================================================================
 //
@@ -3268,6 +3794,78 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_RemoveChildren)
 
 //===========================================================================
 // 
+// A_RemoveSiblings
+//
+//===========================================================================
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_RemoveSiblings)
+{
+   TThinkerIterator<AActor> it;
+   AActor * mo;
+   ACTION_PARAM_START(1);
+   ACTION_PARAM_BOOL(removeall,0);
+
+   while ( (mo = it.Next()) )
+   {
+      if ( ( mo->master == self->master ) && ( mo != self ) && ( ( mo->health <= 0 ) || removeall) )
+      {
+		P_RemoveThing(mo);
+      }
+   }
+}
+
+//===========================================================================
+//
+// A_RaiseMaster
+//
+//===========================================================================
+DEFINE_ACTION_FUNCTION(AActor, A_RaiseMaster)
+{
+   if (self->master != NULL)
+   {
+      P_Thing_Raise(self->master);
+   }
+}
+
+//===========================================================================
+//
+// A_RaiseChildren
+//
+//===========================================================================
+DEFINE_ACTION_FUNCTION(AActor, A_RaiseChildren)
+{
+   TThinkerIterator<AActor> it;
+   AActor * mo;
+
+   while ((mo = it.Next()))
+   {
+      if ( mo->master == self )
+      {
+		P_Thing_Raise(mo);
+      }
+   }
+}
+
+//===========================================================================
+//
+// A_RaiseSiblings
+//
+//===========================================================================
+DEFINE_ACTION_FUNCTION(AActor, A_RaiseSiblings)
+{
+   TThinkerIterator<AActor> it;
+   AActor * mo;
+
+   while ( (mo = it.Next()) )
+   {
+      if ( ( mo->master == self->master ) && ( mo != self ) )
+      {
+		P_Thing_Raise(mo);
+      }
+   }
+}
+
+//===========================================================================
+// 
 // [Dusk] A_FaceConsolePlayer
 //
 //===========================================================================
@@ -3322,7 +3920,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_MonsterRefire)
 	if (!self->target
 		|| P_HitFriend (self)
 		|| self->target->health <= 0
-		|| !P_CheckSight (self, self->target, 0) )
+		|| !P_CheckSight (self, self->target, SF_SEEPASTBLOCKEVERYTHING|SF_SEEPASTSHOOTABLELINES) )
 	{
 		ACTION_JUMP(jump,CLIENTUPDATE_FRAME);	// [BB] Since monsters don't have targets on the client end, we need to send an update.
 	}
@@ -3371,23 +3969,17 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_ScaleVelocity)
 	ACTION_PARAM_START(1);
 	ACTION_PARAM_FIXED(scale, 0);
 
-	INTBOOL was_moving = self->momx | self->momy | self->momz;
+	INTBOOL was_moving = self->velx | self->vely | self->velz;
 
-	self->momx = FixedMul(self->momx, scale);
-	self->momy = FixedMul(self->momy, scale);
-	self->momz = FixedMul(self->momz, scale);
+	self->velx = FixedMul(self->velx, scale);
+	self->vely = FixedMul(self->vely, scale);
+	self->velz = FixedMul(self->velz, scale);
 
 	// If the actor was previously moving but now is not, and is a player,
 	// update its player variables. (See A_Stop.)
-	if (was_moving &&
-		self->player != NULL &&
-		self->player->mo == self &&
-		// [BB] Zandronum handles prediction differently.
-		//!(self->player->cheats & CF_PREDICTING) &&
-		!(self->momx | self->momy | self->momz))
+	if (was_moving)
 	{
-		self->player->mo->PlayIdle();
-		self->player->momx = self->player->momy = 0;
+		CheckStopped(self);
 	}
 }
 
@@ -3405,6 +3997,8 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_ChangeVelocity)
 	ACTION_PARAM_FIXED(z, 2);
 	ACTION_PARAM_INT(flags, 3);
 
+	INTBOOL was_moving = self->velx | self->vely | self->velz;
+
 	fixed_t vx = x, vy = y, vz = z;
 	fixed_t sina = finesine[self->angle >> ANGLETOFINESHIFT];
 	fixed_t cosa = finecosine[self->angle >> ANGLETOFINESHIFT];
@@ -3416,14 +4010,323 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_ChangeVelocity)
 	}
 	if (flags & 2)	// discard old velocity - replace old velocity with new velocity
 	{
-		self->momx = vx;
-		self->momy = vy;
-		self->momz = vz;
+		self->velx = vx;
+		self->vely = vy;
+		self->velz = vz;
 	}
 	else	// add new velocity to old velocity
 	{
-		self->momx += vx;
-		self->momy += vy;
-		self->momz += vz;
+		self->velx += vx;
+		self->vely += vy;
+		self->velz += vz;
 	}
+
+	if (was_moving)
+	{
+		CheckStopped(self);
+	}
+}
+
+//===========================================================================
+//
+// A_SetArg
+//
+//===========================================================================
+
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_SetArg)
+{
+	ACTION_PARAM_START(2);
+	ACTION_PARAM_INT(pos, 0);
+	ACTION_PARAM_INT(value, 1);	
+
+	// Set the value of the specified arg
+	if ((size_t)pos < countof(self->args))
+	{
+		self->args[pos] = value;
+	}
+}
+
+//===========================================================================
+//
+// A_SetSpecial
+//
+//===========================================================================
+
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_SetSpecial)
+{
+	ACTION_PARAM_START(6);
+	ACTION_PARAM_INT(spec, 0);
+	ACTION_PARAM_INT(arg0, 1);	
+	ACTION_PARAM_INT(arg1, 2);	
+	ACTION_PARAM_INT(arg2, 3);	
+	ACTION_PARAM_INT(arg3, 4);	
+	ACTION_PARAM_INT(arg4, 5);	
+	
+	self->special = spec;
+	self->args[0] = arg0;
+	self->args[1] = arg1;
+	self->args[2] = arg2;
+	self->args[3] = arg3;
+	self->args[4] = arg4;
+}
+
+//===========================================================================
+//
+// A_SetUserVar
+//
+//===========================================================================
+
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_SetUserVar)
+{
+	ACTION_PARAM_START(2);
+	ACTION_PARAM_NAME(varname, 0);
+	ACTION_PARAM_INT(value, 1);	
+
+	PSymbol *sym = self->GetClass()->Symbols.FindSymbol(varname, true);
+	PSymbolVariable *var;
+
+	if (sym == NULL || sym->SymbolType != SYM_Variable ||
+		!(var = static_cast<PSymbolVariable *>(sym))->bUserVar ||
+		var->ValueType.Type != VAL_Int)
+	{
+		Printf("%s is not a user variable in class %s\n", varname.GetChars(),
+			self->GetClass()->TypeName.GetChars());
+		return;
+	}
+	// Set the value of the specified user variable.
+	*(int *)(reinterpret_cast<BYTE *>(self) + var->offset) = value;
+}
+
+//===========================================================================
+//
+// A_SetUserArray
+//
+//===========================================================================
+
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_SetUserArray)
+{
+	ACTION_PARAM_START(3);
+	ACTION_PARAM_NAME(varname, 0);
+	ACTION_PARAM_INT(pos, 1);
+	ACTION_PARAM_INT(value, 2);
+
+	PSymbol *sym = self->GetClass()->Symbols.FindSymbol(varname, true);
+	PSymbolVariable *var;
+
+	if (sym == NULL || sym->SymbolType != SYM_Variable ||
+		!(var = static_cast<PSymbolVariable *>(sym))->bUserVar ||
+		var->ValueType.Type != VAL_Array || var->ValueType.BaseType != VAL_Int)
+	{
+		Printf("%s is not a user array in class %s\n", varname.GetChars(),
+			self->GetClass()->TypeName.GetChars());
+		return;
+	}
+	if (pos < 0 || pos >= var->ValueType.size)
+	{
+		Printf("%d is out of bounds in array %s in class %s\n", pos, varname.GetChars(),
+			self->GetClass()->TypeName.GetChars());
+		return;
+	}
+	// Set the value of the specified user array at index pos.
+	((int *)(reinterpret_cast<BYTE *>(self) + var->offset))[pos] = value;
+}
+
+//===========================================================================
+//
+// A_Teleport(optional state teleportstate, optional class targettype,
+// optional class fogtype, optional int flags, optional fixed mindist,
+// optional fixed maxdist)
+//
+// Attempts to teleport to a targettype at least mindist away and at most
+// maxdist away (0 means unlimited). If successful, spawn a fogtype at old
+// location and place calling actor in teleportstate. 
+//
+//===========================================================================
+enum T_Flags
+{
+	TF_TELEFRAG = 1, // Allow telefrag in order to teleport.
+	TF_RANDOMDECIDE = 2, // Randomly fail based on health. (A_Srcr2Decide)
+};
+
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_Teleport)
+{
+	ACTION_PARAM_START(6);
+	ACTION_PARAM_STATE(TeleportState, 0);
+	ACTION_PARAM_CLASS(TargetType, 1);
+	ACTION_PARAM_CLASS(FogType, 2);
+	ACTION_PARAM_INT(Flags, 3);
+	ACTION_PARAM_FIXED(MinDist, 4);
+	ACTION_PARAM_FIXED(MaxDist, 5);
+
+	// [BB] This is handled by the server.
+	if ( NETWORK_InClientMode( ) && ( ( self->ulNetworkFlags & NETFL_CLIENTSIDEONLY ) == false ) )
+		return;
+
+	// Randomly choose not to teleport like A_Srcr2Decide.
+	if (Flags & TF_RANDOMDECIDE)
+	{
+		static const int chance[] =
+		{
+			192, 120, 120, 120, 64, 64, 32, 16, 0
+		};
+
+		unsigned int chanceindex = self->health / ((self->SpawnHealth()/8 == 0) ? 1 : self->SpawnHealth()/8);
+
+		if (chanceindex >= countof(chance))
+		{
+			chanceindex = countof(chance) - 1;
+		}
+
+		if (pr_teleport() >= chance[chanceindex]) return;
+	}
+
+	if (TeleportState == NULL)
+	{
+		// Default to Teleport.
+		TeleportState = self->FindState("Teleport");
+		// If still nothing, then return.
+		if (!TeleportState) return;
+	}
+
+	DSpotState *state = DSpotState::GetSpotState();
+	if (state == NULL) return;
+
+	if (!TargetType) TargetType = PClass::FindClass("BossSpot");
+
+	AActor * spot = state->GetSpotWithMinMaxDistance(TargetType, self->x, self->y, MinDist, MaxDist);
+	if (spot == NULL) return;
+
+	fixed_t prevX = self->x;
+	fixed_t prevY = self->y;
+	fixed_t prevZ = self->z;
+	if (P_TeleportMove (self, spot->x, spot->y, spot->z, Flags & TF_TELEFRAG))
+	{
+		ACTION_SET_RESULT(false);	// Jumps should never set the result for inventory state chains!
+
+		if (FogType)
+		{
+			Spawn(FogType, prevX, prevY, prevZ, ALLOW_REPLACE);
+		}
+
+		ACTION_JUMP(TeleportState, CLIENTUPDATE_FRAME);	// [BB] This may involve randomness.
+
+		self->z = self->floorz;
+		self->angle = spot->angle;
+		self->velx = self->vely = self->velz = 0;
+	}
+}
+
+//===========================================================================
+//
+// A_Turn
+//
+//===========================================================================
+
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_Turn)
+{
+	ACTION_PARAM_START(1);
+	ACTION_PARAM_ANGLE(angle, 0);
+	self->angle += angle;
+}
+
+//===========================================================================
+//
+// A_Quake
+//
+//===========================================================================
+
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_Quake)
+{
+	ACTION_PARAM_START(5);
+	ACTION_PARAM_INT(intensity, 0);
+	ACTION_PARAM_INT(duration, 1);
+	ACTION_PARAM_INT(damrad, 2);
+	ACTION_PARAM_INT(tremrad, 3);
+	ACTION_PARAM_SOUND(sound, 4);
+	P_StartQuake(self, 0, intensity, duration, damrad, tremrad, sound);
+}
+
+//===========================================================================
+//
+// A_Weave
+//
+//===========================================================================
+
+void A_Weave(AActor *self, int xyspeed, int zspeed, fixed_t xydist, fixed_t zdist)
+{
+	fixed_t newX, newY;
+	int weaveXY, weaveZ;
+	int angle;
+	fixed_t dist;
+
+	weaveXY = self->WeaveIndexXY & 63;
+	weaveZ = self->WeaveIndexZ & 63;
+	angle = (self->angle + ANG90) >> ANGLETOFINESHIFT;
+
+	if (xydist != 0 && xyspeed != 0)
+	{
+		dist = FixedMul(FloatBobOffsets[weaveXY], xydist);
+		newX = self->x - FixedMul (finecosine[angle], dist);
+		newY = self->y - FixedMul (finesine[angle], dist);
+		weaveXY = (weaveXY + xyspeed) & 63;
+		dist = FixedMul(FloatBobOffsets[weaveXY], xydist);
+		newX += FixedMul (finecosine[angle], dist);
+		newY += FixedMul (finesine[angle], dist);
+		P_TryMove (self, newX, newY, true);
+		self->WeaveIndexXY = weaveXY;
+	}
+
+	if (zdist != 0 && zspeed != 0)
+	{
+		self->z -= FixedMul(FloatBobOffsets[weaveZ], zdist);
+		weaveZ = (weaveZ + zspeed) & 63;
+		self->z += FixedMul(FloatBobOffsets[weaveZ], zdist);
+		self->WeaveIndexZ = weaveZ;
+	}
+}
+
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_Weave)
+{
+	ACTION_PARAM_START(4);
+	ACTION_PARAM_INT(xspeed, 0);
+	ACTION_PARAM_INT(yspeed, 1);
+	ACTION_PARAM_FIXED(xdist, 2);
+	ACTION_PARAM_FIXED(ydist, 3);
+	A_Weave(self, xspeed, yspeed, xdist, ydist);
+}
+
+
+
+
+//===========================================================================
+//
+// A_LineEffect
+//
+// This allows linedef effects to be activated inside deh frames.
+//
+//===========================================================================
+
+
+void P_TranslateLineDef (line_t *ld, maplinedef_t *mld);
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_LineEffect)
+{
+	ACTION_PARAM_START(2);
+	ACTION_PARAM_INT(special, 0);
+	ACTION_PARAM_INT(tag, 1);
+
+	line_t junk; maplinedef_t oldjunk;
+	bool res = false;
+	if (!(self->flags6 & MF6_LINEDONE))						// Unless already used up
+	{
+		if ((oldjunk.special = special))					// Linedef type
+		{
+			oldjunk.tag = tag;								// Sector tag for linedef
+			P_TranslateLineDef(&junk, &oldjunk);			// Turn into native type
+			res = !!LineSpecials[junk.special](NULL, self, false, junk.args[0], 
+				junk.args[1], junk.args[2], junk.args[3], junk.args[4]); 
+			if (res && !(junk.flags & ML_REPEAT_SPECIAL))	// If only once,
+				self->flags6 |= MF6_LINEDONE;				// no more for this thing
+		}
+	}
+	ACTION_SET_RESULT(res);
 }
