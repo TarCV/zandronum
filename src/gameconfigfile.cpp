@@ -69,7 +69,6 @@ extern HWND Window;
 
 EXTERN_CVAR (Bool, con_centernotify)
 EXTERN_CVAR (Int, msg0color)
-EXTERN_CVAR (Color, dimcolor)
 EXTERN_CVAR (Color, color)
 EXTERN_CVAR (Float, dimamount)
 EXTERN_CVAR (Int, msgmidcolor)
@@ -166,6 +165,8 @@ FGameConfigFile::FGameConfigFile ()
 	// Create auto-load sections, so users know what's available.
 	// Note that this totem pole is the reverse of the order that
 	// they will appear in the file.
+	CreateSectionAtStart("Harmony.Autoload");
+	CreateSectionAtStart("UrbanBrawl.Autoload");
 	CreateSectionAtStart("Chex3.Autoload");
 	CreateSectionAtStart("Chex.Autoload");
 	CreateSectionAtStart("Strife.Autoload");
@@ -322,6 +323,15 @@ void FGameConfigFile::DoGlobalSetup ()
 					{
 						more = SetNextSection();
 					}
+				}
+			}
+			if (last < 209)
+			{
+				// menu dimming is now a gameinfo option so switch user override off
+				FBaseCVar *dim = FindCVar ("dimamount", NULL);
+				if (dim != NULL)
+				{
+					dim->ResetToDefault ();
 				}
 			}
 			if (last < 210)
@@ -556,13 +566,14 @@ void FGameConfigFile::ArchiveGlobalData ()
 
 FString FGameConfigFile::GetConfigPath (bool tryProg)
 {
-	char *pathval;
+	const char *pathval;
 	FString path;
 
 	pathval = Args->CheckValue ("-config");
 	if (pathval != NULL)
+	{
 		return FString(pathval);
-
+	}
 #ifdef _WIN32
 	path = NULL;
 	HRESULT hr;
@@ -722,7 +733,6 @@ void FGameConfigFile::SetRavenDefaults (bool isHexen)
 	{
 		con_centernotify.ResetToDefault ();
 		msg0color.ResetToDefault ();
-		dimcolor.ResetToDefault ();
 		color.ResetToDefault ();
 	}
 
@@ -733,8 +743,6 @@ void FGameConfigFile::SetRavenDefaults (bool isHexen)
 	snd_pitched.SetGenericRepDefault (val, CVAR_Bool);
 	val.Int = 9;
 	msg0color.SetGenericRepDefault (val, CVAR_Int);
-	val.Int = 0x0000ff;
-	dimcolor.SetGenericRepDefault (val, CVAR_Int);
 	val.Int = CR_WHITE;
 	msgmidcolor.SetGenericRepDefault (val, CVAR_Int);
 	val.Int = CR_YELLOW;
