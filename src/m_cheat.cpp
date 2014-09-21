@@ -58,17 +58,17 @@
 
 void cht_DoCheat (player_t *player, int cheat)
 {
-	static const PClass *BeholdPowers[9] =
+	static const char * BeholdPowers[9] =
 	{
-		RUNTIME_CLASS(APowerInvulnerable),
-		RUNTIME_CLASS(APowerStrength),
-		RUNTIME_CLASS(APowerInvisibility),
-		RUNTIME_CLASS(APowerIronFeet),
-		NULL, // MapRevealer
-		RUNTIME_CLASS(APowerLightAmp),
-		RUNTIME_CLASS(APowerShadow),
-		RUNTIME_CLASS(APowerMask),
-		RUNTIME_CLASS(APowerTargeter)
+		"PowerInvulnerable",
+		"PowerStrength",
+		"PowerInvisibility",
+		"PowerIronFeet",
+		"MapRevealer",
+		"PowerLightAmp",
+		"PowerShadow",
+		"PowerMask",
+		"PowerTargeter",
 	};
 	const PClass *type;
 	AInventory *item;
@@ -107,6 +107,14 @@ void cht_DoCheat (player_t *player, int cheat)
 			SB_state = screen->GetPageCount ();
 		break;
 
+	case CHT_BUDDHA:
+		player->cheats ^= CF_BUDDHA;
+		if (player->cheats & CF_BUDDHA)
+			msg = GStrings("TXT_BUDDHAON");
+		else
+			msg = GStrings("TXT_BUDDHAOFF");
+		break;
+
 	case CHT_NOCLIP:
 		player->cheats ^= CF_NOCLIP;
 		if (player->cheats & CF_NOCLIP)
@@ -115,9 +123,9 @@ void cht_DoCheat (player_t *player, int cheat)
 			msg = GStrings("STSTR_NCOFF");
 		break;
 
-	case CHT_NOMOMENTUM:
-		player->cheats ^= CF_NOMOMENTUM;
-		if (player->cheats & CF_NOMOMENTUM)
+	case CHT_NOVELOCITY:
+		player->cheats ^= CF_NOVELOCITY;
+		if (player->cheats & CF_NOVELOCITY)
 			msg = GStrings("TXT_LEADBOOTSON");
 		else
 			msg = GStrings("TXT_LEADBOOTSOFF");
@@ -252,7 +260,7 @@ void cht_DoCheat (player_t *player, int cheat)
 			{
 				if (i != 0)
 				{
-					player->mo->GiveInventoryType (BeholdPowers[i]);
+					cht_Give(player, BeholdPowers[i]);
 					if (cheat == CHT_BEHOLDS)
 					{
 						P_GiveBody (player->mo, -100);
@@ -261,7 +269,7 @@ void cht_DoCheat (player_t *player, int cheat)
 				else
 				{
 					// Let's give the item here so that the power doesn't need colormap information.
-					player->mo->GiveInventoryType(PClass::FindClass("InvulnerabilitySphere"));
+					cht_Give(player, "InvulnerabilitySphere");
 				}
 			}
 			else
@@ -401,20 +409,24 @@ void cht_DoCheat (player_t *player, int cheat)
 		{
 			return;
 		}
-		// Take away all weapons that are either non-wimpy or use ammo.
-		for (item = player->mo->Inventory; item != NULL; )
 		{
-			AInventory *next = item->Inventory;
-			if (item->IsKindOf (RUNTIME_CLASS(AWeapon)))
+			// Take away all weapons that are either non-wimpy or use ammo.
+			AInventory **invp = &player->mo->Inventory, **lastinvp;
+			for (item = *invp; item != NULL; item = *invp)
 			{
-				AWeapon *weap = static_cast<AWeapon *> (item);
-				if (!(weap->WeaponFlags & WIF_WIMPY_WEAPON) ||
-					weap->AmmoType1 != NULL)
+				lastinvp = invp;
+				invp = &(*invp)->Inventory;
+				if (item->IsKindOf (RUNTIME_CLASS(AWeapon)))
 				{
-					item->Destroy ();
+					AWeapon *weap = static_cast<AWeapon *> (item);
+					if (!(weap->WeaponFlags & WIF_WIMPY_WEAPON) ||
+						weap->AmmoType1 != NULL)
+					{
+						item->Destroy ();
+						invp = lastinvp;
+					}
 				}
 			}
-			item = next;
 		}
 		msg = GStrings("TXT_CHEATIDKFA");
 		break;
@@ -448,8 +460,8 @@ void cht_DoCheat (player_t *player, int cheat)
 			// a very very cheap kill.
 			// [Dusk] <jino> and summoning 5000 bfg balls isn't?
 			P_LineAttack (player->mo, player->mo->angle, PLAYERMISSILERANGE,
-				P_AimLineAttack (player->mo, player->mo->angle, PLAYERMISSILERANGE), 1000000,
-				NAME_None, NAME_BulletPuff);
+				P_AimLineAttack (player->mo, player->mo->angle, PLAYERMISSILERANGE), TELEFRAG_DAMAGE,
+				NAME_MDK, NAME_BulletPuff);
 		}
 		break;
 
@@ -620,7 +632,7 @@ void GiveSpawner (player_t *player, const PClass *type, int amount)
 
 void cht_Give (player_t *player, const char *name, int amount)
 {
-	bool giveall;
+	enum { ALL_NO, ALL_YES, ALL_YESYES } giveall;
 	int i;
 	const PClass *type;
 
@@ -634,9 +646,17 @@ void cht_Give (player_t *player, const char *name, int amount)
 		return;
 	}
 
-	giveall = (stricmp (name, "all") == 0);
+	giveall = ALL_NO;
+	if (stricmp (name, "all") == 0)
+	{
+		giveall = ALL_YES;
+	}
+	else if (stricmp (name, "everything") == 0)
+	{
+		giveall = ALL_YESYES;
+	}
 
-	if (giveall || stricmp (name, "health") == 0)
+	if (stricmp (name, "health") == 0)
 	{
 		if (amount > 0)
 		{
@@ -652,10 +672,14 @@ void cht_Give (player_t *player, const char *name, int amount)
 		}
 		else
 		{
-			if (player->mo)
-				player->mo->health = deh.GodHealth;
-	  
-			player->health = deh.GodHealth;
+			if (player->mo != NULL)
+			{
+				player->health = player->mo->health = player->mo->GetMaxHealth();
+			}
+			else
+			{
+				player->health = deh.GodHealth;
+			}
 		}
 		// [BB]: The server has to inform the clients that this player's health has changed.
 		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
@@ -663,9 +687,6 @@ void cht_Give (player_t *player, const char *name, int amount)
 			ULONG playerIdx = static_cast<ULONG> ( player - players );
 			SERVERCOMMANDS_SetPlayerHealth( playerIdx );
 		}
-
-		if (!giveall)
-			return;
 	}
 
 	if (giveall || stricmp (name, "backpack") == 0)
@@ -717,7 +738,7 @@ void cht_Give (player_t *player, const char *name, int amount)
 		{
 			ABasicArmorPickup *armor = Spawn<ABasicArmorPickup> (0,0,0, NO_REPLACE);
 			armor->SaveAmount = 100*deh.BlueAC;
-			armor->SavePercent = gameinfo.gametype != GAME_Heretic ? FRACUNIT/2 : FRACUNIT*3/4;
+			armor->SavePercent = gameinfo.Armor2Percent > 0? gameinfo.Armor2Percent : FRACUNIT/2;
 			if (!armor->CallTryPickup (player->mo))
 			{
 				armor->Destroy ();
@@ -815,7 +836,7 @@ void cht_Give (player_t *player, const char *name, int amount)
 				}
 
 					AWeapon *def = (AWeapon*)GetDefaultByType (type);
-					if (!(def->WeaponFlags & WIF_CHEATNOTWEAPON))
+					if (giveall == ALL_YESYES || !(def->WeaponFlags & WIF_CHEATNOTWEAPON))
 					{
 						GiveSpawner (player, type, 1);
 					}
@@ -862,7 +883,7 @@ void cht_Give (player_t *player, const char *name, int amount)
 					!type->IsDescendantOf (RUNTIME_CLASS(APowerup)) &&
 					!type->IsDescendantOf (RUNTIME_CLASS(AArmor)))
 				{
-					GiveSpawner (player, type, 1);
+					GiveSpawner (player, type, amount <= 0 ? def->MaxAmount : amount);
 				}
 			}
 		}
@@ -880,7 +901,7 @@ void cht_Give (player_t *player, const char *name, int amount)
 				AInventory *def = (AInventory*)GetDefaultByType (type);
 				if (def->Icon.isValid())
 				{
-					GiveSpawner (player, type, 1);
+					GiveSpawner (player, type, amount <= 0 ? def->MaxAmount : amount);
 				}
 			}
 		}
@@ -1133,12 +1154,11 @@ void cht_Suicide (player_t *plyr)
 	{
 		plyr->mo->flags |= MF_SHOOTABLE;
 		plyr->mo->flags2 &= ~MF2_INVULNERABLE;
-		P_DamageMobj (plyr->mo, plyr->mo, plyr->mo, 1000000, NAME_Suicide);
+		P_DamageMobj (plyr->mo, plyr->mo, plyr->mo, TELEFRAG_DAMAGE, NAME_Suicide);
 		if (plyr->mo->health <= 0) plyr->mo->flags &= ~MF_SHOOTABLE;
 	}
 }
 
-bool CheckCheatmode ();
 
 CCMD (mdk)
 {
