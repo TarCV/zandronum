@@ -177,6 +177,11 @@ enum
 	APROP_Dropped		= 18,
 	APROP_Notarget		= 19,
 	APROP_Species		= 20,
+	APROP_NameTag		= 21,
+	APROP_Score			= 22,
+	APROP_Notrigger		= 23,
+	APROP_DamageFactor	= 24,
+	APROP_MasterTID     = 25,
 };	
 
 // [Dusk] Enumeration for GetTeamProperty
@@ -725,16 +730,6 @@ public:
 		SCRIPT_DivideBy0,
 		SCRIPT_ModulusBy0,
 	};
-
-	enum 
-	{
-		CHANGELEVEL_KEEPFACING = 1,
-		CHANGELEVEL_RESETINVENTORY = 2,
-		CHANGELEVEL_NOMONSTERS = 4,
-		CHANGELEVEL_CHANGESKILL = 8,
-		CHANGELEVEL_NOINTERMISSION = 16
-	};
-
 
 	DLevelScript (AActor *who, line_t *where, int num, const ScriptPtr *code, FBehavior *module,
 		bool backSide, int arg0, int arg1, int arg2, int always);
