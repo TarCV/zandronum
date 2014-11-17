@@ -59,6 +59,7 @@
 #include "statnums.h"
 #include "g_level.h"
 #include "v_font.h"
+#include "a_sharedglobal.h"
 
 // State.
 #include "r_state.h"
@@ -86,6 +87,8 @@
 #include "unlagged.h"
 
 static FRandom pr_playerinspecialsector ("PlayerInSpecialSector");
+void P_SetupPortals();
+
 
 // [GrafZahl] Make this message changable by the user! ;)
 CVAR(String, secretmessage, "A Secret is revealed!", CVAR_ARCHIVE)
@@ -207,7 +210,7 @@ bool CheckIfExitIsGood (AActor *self, level_info_t *info)
 	     || (( survival ) && ( SURVIVAL_GetState( ) == SURVS_COUNTDOWN ))
 	   )
 	{
-		P_DamageMobj (self, self, self, 1000000, NAME_Exit);
+		P_DamageMobj (self, self, self, TELEFRAG_DAMAGE, NAME_Exit);
 		return false;
 	}
 	// Is this a singleplayer game and the next map is part of the same hub and we're dead?
@@ -335,7 +338,7 @@ bool P_ActivateLine (line_t *line, AActor *mo, int side, int activationType)
 	{
 		if (activationType == SPAC_Use || activationType == SPAC_Impact)
 		{
-			P_ChangeSwitchTexture (&sides[line->sidenum[0]], repeat, special);
+			P_ChangeSwitchTexture (line->sidedef[0], repeat, special);
 
 			// [BC] Tell the clients of the switch texture change.
 //			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
@@ -352,7 +355,7 @@ bool P_ActivateLine (line_t *line, AActor *mo, int side, int activationType)
 		line->args[0] &&										// only if there's a tag (which is stored in the first arg)
 		P_FindSectorFromTag (line->args[0], -1) == -1)			// only if no sector is tagged to this linedef
 	{
-		P_ChangeSwitchTexture (&sides[line->sidenum[0]], repeat, special);
+		P_ChangeSwitchTexture (line->sidedef[0], repeat, special);
 		line->special = 0;
 
 		// [BC] Tell the clients of the switch texture change.
@@ -400,9 +403,12 @@ bool P_TestActivateLine (line_t *line, AActor *mo, int side, int activationType)
 	{
 		lineActivation |= SPAC_Cross|SPAC_MCross;
 	}
-	if (activationType == SPAC_Use)
+	if (activationType ==SPAC_Use || activationType == SPAC_UseBack)
 	{
-		if (!P_CheckSwitchRange(mo, line, side)) return false;
+		if (!P_CheckSwitchRange(mo, line, side))
+		{
+			return false;
+		}
 	}
 
 	if ((lineActivation & activationType) == 0)
@@ -420,7 +426,10 @@ bool P_TestActivateLine (line_t *line, AActor *mo, int side, int activationType)
 			return false;
 		}
 	}
-
+	if (activationType == SPAC_AnyCross && (lineActivation & activationType))
+	{
+		return true;
+	}
 	if (mo && !mo->player &&
 		!(mo->flags & MF_MISSILE) &&
 		!(line->flags & ML_MONSTERSCANACTIVATE) &&
@@ -577,6 +586,11 @@ void P_PlayerInSpecialSector (player_t *player, sector_t * sector)
 		case sLight_Strobe_Hurt:
 			if (ironfeet == NULL && !(level.time&0x1f))
 				P_DamageMobj (player->mo, NULL, NULL, 5, NAME_Slime);
+			break;
+
+		case hDamage_Sludge:
+			if (ironfeet == NULL && !(level.time&0x1f))
+				P_DamageMobj (player->mo, NULL, NULL, 4, NAME_Slime);
 			break;
 
 		case dDamage_SuperHellslime:
@@ -877,17 +891,17 @@ CUSTOM_CVAR (Bool, forcewater, false, CVAR_ARCHIVE|CVAR_SERVERINFO)
 
 		for (i = 0; i < numsectors; i++)
 		{
-			if (sectors[i].heightsec &&
-				!(sectors[i].heightsec->MoreFlags & SECF_IGNOREHEIGHTSEC) &&
+			sector_t *hsec = sectors[i].GetHeightSec();
+			if (hsec &&
 				!(sectors[i].heightsec->MoreFlags & SECF_UNDERWATER))
 			{
 				if (self)
 				{
-					sectors[i].heightsec->MoreFlags |= SECF_FORCEDUNDERWATER;
+					hsec->MoreFlags |= SECF_FORCEDUNDERWATER;
 				}
 				else
 				{
-					sectors[i].heightsec->MoreFlags &= ~SECF_FORCEDUNDERWATER;
+					hsec->MoreFlags &= ~SECF_FORCEDUNDERWATER;
 				}
 			}
 		}
@@ -933,12 +947,12 @@ DLightTransfer::DLightTransfer (sector_t *srcSec, int target, bool copyFloor)
 	if (copyFloor)
 	{
 		for (secnum = -1; (secnum = P_FindSectorFromTag (target, secnum)) >= 0; )
-			sectors[secnum].ChangeFlags(sector_t::floor, 0, SECF_ABSLIGHTING);
+			sectors[secnum].ChangeFlags(sector_t::floor, 0, PLANEF_ABSLIGHTING);
 	}
 	else
 	{
 		for (secnum = -1; (secnum = P_FindSectorFromTag (target, secnum)) >= 0; )
-			sectors[secnum].ChangeFlags(sector_t::ceiling, 0, SECF_ABSLIGHTING);
+			sectors[secnum].ChangeFlags(sector_t::ceiling, 0, PLANEF_ABSLIGHTING);
 	}
 	ChangeStatNum (STAT_LIGHTTRANSFER);
 }
@@ -1019,14 +1033,14 @@ DWallLightTransfer::DWallLightTransfer (sector_t *srcSec, int target, BYTE flags
 
 	for (linenum = -1; (linenum = P_FindLineFromID (target, linenum)) >= 0; )
 	{
-		if (flags & WLF_SIDE1 && lines[linenum].sidenum[0]!=NO_SIDE)
+		if (flags & WLF_SIDE1 && lines[linenum].sidedef[0] != NULL)
 		{
-			sides[lines[linenum].sidenum[0]].Flags |= wallflags;
+			lines[linenum].sidedef[0]->Flags |= wallflags;
 		}
 
-		if (flags & WLF_SIDE2 && lines[linenum].sidenum[1]!=NO_SIDE)
+		if (flags & WLF_SIDE2 && lines[linenum].sidedef[1] != NULL)
 		{
-			sides[lines[linenum].sidenum[1]].Flags |= wallflags;
+			lines[linenum].sidedef[1]->Flags |= wallflags;
 		}
 	}
 	ChangeStatNum(STAT_LIGHTTRANSFER);
@@ -1051,14 +1065,170 @@ void DWallLightTransfer::DoTransfer (BYTE lightlevel, int target, BYTE flags)
 	{
 		line_t * line = &lines[linenum];
 
-		if (flags & WLF_SIDE1 && line->sidenum[0]!=NO_SIDE)
+		if (flags & WLF_SIDE1 && line->sidedef[0] != NULL)
 		{
-			sides[line->sidenum[0]].SetLight(lightlevel);
+			line->sidedef[0]->SetLight(lightlevel);
 		}
 
-		if (flags & WLF_SIDE2 && line->sidenum[1]!=NO_SIDE)
+		if (flags & WLF_SIDE2 && line->sidedef[1] != NULL)
 		{
-			sides[line->sidenum[1]].SetLight(lightlevel);
+			line->sidedef[1]->SetLight(lightlevel);
+		}
+	}
+}
+
+//-----------------------------------------------------------------------------
+//
+// Portals
+//
+//-----------------------------------------------------------------------------
+
+//---------------------------------------------------------------------------
+// Upper stacks go in the top sector. Lower stacks go in the bottom sector.
+
+static void SetupFloorPortal (AStackPoint *point)
+{
+	NActorIterator it (NAME_LowerStackLookOnly, point->tid);
+	sector_t *Sector = point->Sector;
+	Sector->FloorSkyBox = static_cast<ASkyViewpoint*>(it.Next());
+	if (Sector->FloorSkyBox != NULL)
+	{
+		Sector->FloorSkyBox->Mate = point;
+		Sector->FloorSkyBox->PlaneAlpha = Scale (point->args[0], OPAQUE, 255);
+	}
+}
+
+static void SetupCeilingPortal (AStackPoint *point)
+{
+	NActorIterator it (NAME_UpperStackLookOnly, point->tid);
+	sector_t *Sector = point->Sector;
+	Sector->CeilingSkyBox = static_cast<ASkyViewpoint*>(it.Next());
+	if (Sector->CeilingSkyBox != NULL)
+	{
+		Sector->CeilingSkyBox->Mate = point;
+		Sector->CeilingSkyBox->PlaneAlpha = Scale (point->args[0], OPAQUE, 255);
+	}
+}
+
+void P_SetupPortals()
+{
+	TThinkerIterator<AStackPoint> it;
+	AStackPoint *pt;
+	TArray<AStackPoint *> points;
+
+	while ((pt = it.Next()))
+	{
+		FName nm = pt->GetClass()->TypeName;
+		if (nm == NAME_UpperStackLookOnly)
+		{
+			SetupFloorPortal(pt);
+		}
+		else if (nm == NAME_LowerStackLookOnly)
+		{
+			SetupCeilingPortal(pt);
+		}
+		pt->special1 = 0;
+		points.Push(pt);
+	}
+
+	for(unsigned i=0;i<points.Size(); i++)
+	{
+		if (points[i]->special1 == 0 && points[i]->Mate != NULL)
+		{
+			for(unsigned j=1;j<points.Size(); j++)
+			{
+				if (points[j]->special1 == 0 && points[j]->Mate != NULL && points[i]->GetClass() == points[j]->GetClass())
+				{
+					fixed_t deltax1 = points[i]->Mate->x - points[i]->x;
+					fixed_t deltay1 = points[i]->Mate->y - points[i]->y;
+					fixed_t deltax2 = points[j]->Mate->x - points[j]->x;
+					fixed_t deltay2 = points[j]->Mate->y - points[j]->y;
+					if (deltax1 == deltax2 && deltay1 == deltay2)
+					{
+						if (points[j]->Sector->FloorSkyBox == points[j]->Mate)
+							points[j]->Sector->FloorSkyBox = points[i]->Mate;
+
+						if (points[j]->Sector->CeilingSkyBox == points[j]->Mate)
+							points[j]->Sector->CeilingSkyBox = points[i]->Mate;
+
+						points[j]->special1 = 1;
+					}
+				}
+			}
+		}
+	}
+}
+
+inline void SetPortal(sector_t *sector, int plane, AStackPoint *portal)
+{
+	// plane: 0=floor, 1=ceiling, 2=both
+	if (plane > 0)
+	{
+		if (sector->CeilingSkyBox == NULL) sector->CeilingSkyBox = portal;
+	}
+	if (plane == 2 || plane == 0)
+	{
+		if (sector->FloorSkyBox == NULL) sector->FloorSkyBox = portal;
+	}
+}
+
+void P_SpawnPortal(line_t *line, int sectortag, int plane, int alpha)
+{
+	for (int i=0;i<numlines;i++)
+	{
+		// We must look for the reference line with a linear search unless we want to waste the line ID for it
+		// which is not a good idea.
+		if (lines[i].special == Sector_SetPortal &&
+			lines[i].args[0] == sectortag &&
+			lines[i].args[1] == 0 &&
+			lines[i].args[2] == plane &&
+			lines[i].args[3] == 1)
+		{
+			fixed_t x1 = (line->v1->x + line->v2->x) >> 1;
+			fixed_t y1 = (line->v1->y + line->v2->y) >> 1;
+			fixed_t x2 = (lines[i].v1->x + lines[i].v2->x) >> 1;
+			fixed_t y2 = (lines[i].v1->y + lines[i].v2->y) >> 1;
+
+			AStackPoint *anchor = Spawn<AStackPoint>(x1, y1, 0, NO_REPLACE);
+			AStackPoint *reference = Spawn<AStackPoint>(x2, y2, 0, NO_REPLACE);
+
+			reference->Mate = anchor;
+			anchor->Mate = reference;
+
+			// This is so that the renderer can distinguish these portals from
+			// the ones spawned with the '*StackLookOnly' things.
+			reference->flags |= MF_JUSTATTACKED;
+			anchor->flags |= MF_JUSTATTACKED;
+
+		    for (int s=-1; (s = P_FindSectorFromTag(sectortag,s)) >= 0;)
+			{
+				SetPortal(&sectors[s], plane, reference);
+			}
+
+			for (int j=0;j<numlines;j++)
+			{
+				// Check if this portal needs to be copied to other sectors
+				// This must be done here to ensure that it gets done only after the portal is set up
+				if (lines[i].special == Sector_SetPortal &&
+					lines[i].args[1] == 1 &&
+					lines[i].args[2] == plane &&
+					lines[i].args[3] == sectortag)
+				{
+					if (lines[i].args[0] == 0)
+					{
+						SetPortal(lines[i].frontsector, plane, reference);
+					}
+					else
+					{
+						for (int s=-1; (s = P_FindSectorFromTag(lines[i].args[0],s)) >= 0;)
+						{
+							SetPortal(&sectors[s], plane, reference);
+						}
+					}
+				}
+			}
+
+			return;
 		}
 	}
 }
@@ -1074,6 +1244,8 @@ void P_SpawnSpecials (void)
 {
 	sector_t *sector;
 	int i;
+
+	P_SetupPortals();
 
 	//	Init special SECTORs.
 	sector = sectors;
@@ -1298,7 +1470,8 @@ void P_SpawnSpecials (void)
 	P_SpawnFriction();	// phares 3/12/98: New friction model using linedefs
 	P_SpawnPushers();	// phares 3/20/98: New pusher model using linedefs
 
-	for (i=0; i<numlines; i++)
+	for (i = 0; i < numlines; i++)
+	{
 		switch (lines[i].special)
 		{
 			int s;
@@ -1307,7 +1480,7 @@ void P_SpawnSpecials (void)
 		// killough 3/7/98:
 		// support for drawn heights coming from different sector
 		case Transfer_Heights:
-			sec = sides[lines[i].sidenum[0]].sector;
+			sec = lines[i].frontsector;
 			if (lines[i].args[1] & 2)
 			{
 				sec->MoreFlags |= SECF_FAKEFLOORONLY;
@@ -1336,25 +1509,26 @@ void P_SpawnSpecials (void)
 			{
 				sectors[s].heightsec = sec;
 				sec->e->FakeFloor.Sectors.Push(&sectors[s]);
+				sectors[s].AdjustFloorClip();
 			}
 			break;
 
 		// killough 3/16/98: Add support for setting
 		// floor lighting independently (e.g. lava)
 		case Transfer_FloorLight:
-			new DLightTransfer (sides[*lines[i].sidenum].sector, lines[i].args[0], true);
+			new DLightTransfer (lines[i].frontsector, lines[i].args[0], true);
 			break;
 
 		// killough 4/11/98: Add support for setting
 		// ceiling lighting independently
 		case Transfer_CeilingLight:
-			new DLightTransfer (sides[*lines[i].sidenum].sector, lines[i].args[0], false);
+			new DLightTransfer (lines[i].frontsector, lines[i].args[0], false);
 			break;
 
 		// [Graf Zahl] Add support for setting lighting
 		// per wall independently
 		case Transfer_WallLight:
-			new DWallLightTransfer (sides[*lines[i].sidenum].sector, lines[i].args[0], lines[i].args[1]);
+			new DWallLightTransfer (lines[i].frontsector, lines[i].args[0], lines[i].args[1]);
 			break;
 
 		case Sector_Attach3dMidtex:
@@ -1365,6 +1539,22 @@ void P_SpawnSpecials (void)
 			if (lines[i].args[0] == 0)
 			{
 				P_AddSectorLinks(lines[i].frontsector, lines[i].args[1], lines[i].args[2], lines[i].args[3]);
+			}
+			break;
+
+		case Sector_SetPortal:
+			// arg 0 = sector tag
+			// arg 1 = type
+			//	- 0: normal (handled here)
+			//	- 1: copy (handled by the portal they copy)
+			//	- 2: EE-style skybox (handled by the camera object)
+			//	other values reserved for later use
+			// arg 2 = 0:floor, 1:ceiling, 2:both
+			// arg 3 = 0: anchor, 1: reference line
+			// arg 4 = for the anchor only: alpha
+			if (lines[i].args[1] == 0 && lines[i].args[3] == 0)
+			{
+				P_SpawnPortal(&lines[i], lines[i].args[0], lines[i].args[2], lines[i].args[4]);
 			}
 			break;
 
@@ -1431,7 +1621,7 @@ void P_SpawnSpecials (void)
 			}
 			break;
 		}
-
+	}
 
 	// [BC] Save these values. If they change, and a client connects, send
 	// him the new values.
@@ -1533,8 +1723,8 @@ void DScroller::Tick ()
 				sides[m_Affectee].AddTextureXOffset(side_t::top, dx);
 				sides[m_Affectee].AddTextureYOffset(side_t::top, dy);
 			}
-			if (m_Parts & scw_mid && (lines[sides[m_Affectee].linenum].backsector == NULL ||
-				!(lines[sides[m_Affectee].linenum].flags&ML_3DMIDTEX)))
+			if (m_Parts & scw_mid && (sides[m_Affectee].linedef->backsector == NULL ||
+				!(sides[m_Affectee].linedef->flags&ML_3DMIDTEX)))
 			{
 				sides[m_Affectee].AddTextureXOffset(side_t::mid, dx);
 				sides[m_Affectee].AddTextureYOffset(side_t::mid, dy);
@@ -1630,8 +1820,8 @@ DScroller::DScroller (EScrollType type, fixed_t dx, fixed_t dy,
 		{
 			m_Interpolations[0] = sides[m_Affectee].SetInterpolation(side_t::top);
 		}
-		if (m_Parts & scw_mid && (lines[sides[m_Affectee].linenum].backsector == NULL ||
-			!(lines[sides[m_Affectee].linenum].flags&ML_3DMIDTEX)))
+		if (m_Parts & scw_mid && (sides[m_Affectee].linedef->backsector == NULL ||
+			!(sides[m_Affectee].linedef->flags&ML_3DMIDTEX)))
 		{
 			m_Interpolations[1] = sides[m_Affectee].SetInterpolation(side_t::mid);
 		}
@@ -1694,7 +1884,7 @@ DScroller::DScroller (fixed_t dx, fixed_t dy, const line_t *l,
 	m_Parts = scrollpos;
 	if ((m_Control = control) != -1)
 		m_LastHeight = sectors[control].CenterFloor() + sectors[control].CenterCeiling();
-	m_Affectee = *l->sidenum;
+	m_Affectee = int(l->sidedef[0] - sides);
 	sides[m_Affectee].Flags |= WALLF_NOAUTODECALS;
 	m_Interpolations[0] = m_Interpolations[1] = m_Interpolations[2] = NULL;
 
@@ -1702,8 +1892,8 @@ DScroller::DScroller (fixed_t dx, fixed_t dy, const line_t *l,
 	{
 		m_Interpolations[0] = sides[m_Affectee].SetInterpolation(side_t::top);
 	}
-	if (m_Parts & scw_mid && (lines[sides[m_Affectee].linenum].backsector == NULL ||
-		!(lines[sides[m_Affectee].linenum].flags&ML_3DMIDTEX)))
+	if (m_Parts & scw_mid && (sides[m_Affectee].linedef->backsector == NULL ||
+		!(sides[m_Affectee].linedef->flags&ML_3DMIDTEX)))
 	{
 		m_Interpolations[1] = sides[m_Affectee].SetInterpolation(side_t::mid);
 	}
@@ -1715,13 +1905,27 @@ DScroller::DScroller (fixed_t dx, fixed_t dy, const line_t *l,
 
 // Amount (dx,dy) vector linedef is shifted right to get scroll amount
 #define SCROLL_SHIFT 5
-#define SCROLLTYPE(i) ((i)<=0 ? 7:(i))
+#define SCROLLTYPE(i) (((i) <= 0) || ((i) & ~7) ? 7 : (i))
 
 // Initialize the scrollers
 static void P_SpawnScrollers(void)
 {
 	int i;
 	line_t *l = lines;
+	TArray<int> copyscrollers;
+
+	for (i = 0; i < numlines; i++)
+	{
+		if (lines[i].special == Sector_CopyScroller)
+		{
+			// don't allow copying the scroller if the sector has the same tag as it would just duplicate it.
+			if (lines[i].args[0] != lines[i].frontsector->tag)
+			{
+				copyscrollers.Push(i);
+			}
+			lines[i].special = 0;
+		}
+	}
 
 	for (i = 0; i < numlines; i++, l++)
 	{
@@ -1729,6 +1933,21 @@ static void P_SpawnScrollers(void)
 		fixed_t dy;
 		int control = -1, accel = 0;		// no control sector or acceleration
 		int special = l->special;
+
+		// Check for undefined parameters that are non-zero and output messages for them.
+		// We don't report for specials we don't understand.
+		if (special != 0)
+		{
+			int max = LineSpecialsInfo[special] != NULL ? LineSpecialsInfo[special]->map_args : countof(l->args);
+			for (unsigned arg = max; arg < countof(l->args); ++arg)
+			{
+				if (l->args[arg] != 0)
+				{
+					Printf("Line %d (type %d:%s), arg %u is %d (should be 0)\n",
+						i, special, LineSpecialsInfo[special]->name, arg+1, l->args[arg]);
+				}
+			}
+		}
 
 		// killough 3/7/98: Types 245-249 are same as 250-254 except that the
 		// first side's sector's heights cause scrolling when they change, and
@@ -1751,7 +1970,7 @@ static void P_SpawnScrollers(void)
 			{
 				// if 1, then displacement
 				// if 2, then accelerative (also if 3)
-				control = int(sides[*l->sidenum].sector - sectors);
+				control = int(l->sidedef[0]->sector - sectors);
 				if (l->args[1] & 2)
 					accel = 1;
 			}
@@ -1782,7 +2001,18 @@ static void P_SpawnScrollers(void)
 				break;
 
 			for (s=-1; (s = P_FindSectorFromTag (l->args[0],s)) >= 0;)
+			{
 				new DScroller (DScroller::sc_ceiling, -dx, dy, control, s, accel);
+			}
+			for(unsigned j = 0;j < copyscrollers.Size(); j++)
+			{
+				line_t *line = &lines[copyscrollers[j]];
+
+				if (line->args[0] == l->args[0] && (line->args[1] & 1))
+				{
+					new DScroller (DScroller::sc_ceiling, -dx, dy, control, int(line->frontsector-sectors), accel);
+				}
+			}
 			break;
 
 		case Scroll_Floor:
@@ -1794,13 +2024,35 @@ static void P_SpawnScrollers(void)
 			if (l->args[2] != 1)
 			{ // scroll the floor texture
 				for (s=-1; (s = P_FindSectorFromTag (l->args[0],s)) >= 0;)
+				{
 					new DScroller (DScroller::sc_floor, -dx, dy, control, s, accel);
+				}
+				for(unsigned j = 0;j < copyscrollers.Size(); j++)
+				{
+					line_t *line = &lines[copyscrollers[j]];
+
+					if (line->args[0] == l->args[0] && (line->args[1] & 2))
+					{
+						new DScroller (DScroller::sc_floor, -dx, dy, control, int(line->frontsector-sectors), accel);
+					}
+				}
 			}
 
 			if (l->args[2] > 0)
 			{ // carry objects on the floor
 				for (s=-1; (s = P_FindSectorFromTag (l->args[0],s)) >= 0;)
+				{
 					new DScroller (DScroller::sc_carry, dx, dy, control, s, accel);
+				}
+				for(unsigned j = 0;j < copyscrollers.Size(); j++)
+				{
+					line_t *line = &lines[copyscrollers[j]];
+
+					if (line->args[0] == l->args[0] && (line->args[1] & 4))
+					{
+						new DScroller (DScroller::sc_carry, dx, dy, control, int(line->frontsector-sectors), accel);
+					}
+				}
 			}
 			break;
 
@@ -1824,7 +2076,7 @@ static void P_SpawnScrollers(void)
 				break;
 
 			// killough 3/2/98: scroll according to sidedef offsets
-			s = lines[i].sidenum[0];
+			s = int(lines[i].sidedef[0] - sides);
 			new DScroller (DScroller::sc_side, -sides[s].GetTextureXOffset(side_t::mid),
 				sides[s].GetTextureYOffset(side_t::mid), -1, s, accel, SCROLLTYPE(l->args[0]));
 			break;
@@ -1835,8 +2087,9 @@ static void P_SpawnScrollers(void)
 			if ( NETWORK_InClientMode( ) )
 				break;
 
+			s = int(lines[i].sidedef[0] - sides);
 			new DScroller (DScroller::sc_side, l->args[0] * (FRACUNIT/64), 0,
-						   -1, lines[i].sidenum[0], accel, SCROLLTYPE(l->args[1]));
+						   -1, s, accel, SCROLLTYPE(l->args[1]));
 			break;
 
 		case Scroll_Texture_Right:
@@ -1845,8 +2098,9 @@ static void P_SpawnScrollers(void)
 			if ( NETWORK_InClientMode( ) )
 				break;
 
+			s = int(lines[i].sidedef[0] - sides);
 			new DScroller (DScroller::sc_side, l->args[0] * (-FRACUNIT/64), 0,
-						   -1, lines[i].sidenum[0], accel, SCROLLTYPE(l->args[1]));
+						   -1, s, accel, SCROLLTYPE(l->args[1]));
 			break;
 
 		case Scroll_Texture_Up:
@@ -1855,8 +2109,9 @@ static void P_SpawnScrollers(void)
 			if ( NETWORK_InClientMode( ) )
 				break;
 
+			s = int(lines[i].sidedef[0] - sides);
 			new DScroller (DScroller::sc_side, 0, l->args[0] * (FRACUNIT/64),
-						   -1, lines[i].sidenum[0], accel, SCROLLTYPE(l->args[1]));
+						   -1, s, accel, SCROLLTYPE(l->args[1]));
 			break;
 
 		case Scroll_Texture_Down:
@@ -1865,8 +2120,9 @@ static void P_SpawnScrollers(void)
 			if ( NETWORK_InClientMode( ) )
 				break;
 
+			s = int(lines[i].sidedef[0] - sides);
 			new DScroller (DScroller::sc_side, 0, l->args[0] * (-FRACUNIT/64),
-						   -1, lines[i].sidenum[0], accel, SCROLLTYPE(l->args[1]));
+						   -1, s, accel, SCROLLTYPE(l->args[1]));
 			break;
 
 		case Scroll_Texture_Both:
@@ -1875,10 +2131,11 @@ static void P_SpawnScrollers(void)
 			if ( NETWORK_InClientMode( ) )
 				break;
 
+			s = int(lines[i].sidedef[0] - sides);
 			if (l->args[0] == 0) {
 				dx = (l->args[1] - l->args[2]) * (FRACUNIT/64);
 				dy = (l->args[4] - l->args[3]) * (FRACUNIT/64);
-				new DScroller (DScroller::sc_side, dx, dy, -1, lines[i].sidenum[0], accel);
+				new DScroller (DScroller::sc_side, dx, dy, -1, s, accel);
 			}
 			break;
 
@@ -1899,7 +2156,7 @@ static void P_SpawnScrollers(void)
 // phares 3/12/98: Start of friction effects
 
 // As the player moves, friction is applied by decreasing the x and y
-// momentum values on each tic. By varying the percentage of decrease,
+// velocity values on each tic. By varying the percentage of decrease,
 // we can simulate muddy or icy conditions. In mud, the player slows
 // down faster. In ice, the player slows down more slowly.
 //
@@ -1998,7 +2255,7 @@ void P_SetSectorFriction (int tag, int amount, bool alterFlag)
 	// the move distance is multiplied by 'friction/0x10000', so a
 	// higher friction value actually means 'less friction'.
 
-	// [RH] Twiddled these values so that momentum on ice (with
+	// [RH] Twiddled these values so that velocity on ice (with
 	//		friction 0xf900) is the same as in Heretic/Hexen.
 	if (friction >= ORIG_FRICTION)	// ice
 //		movefactor = ((0x10092 - friction)*(0x70))/0x158;
@@ -2189,7 +2446,17 @@ void DPusher::Tick ()
 			if ( thing->player && thing->player->bSpectating )
 				continue;
 
-			if ((thing->flags2 & MF2_WINDTHRUST) && !(thing->flags & MF_NOCLIP))
+			// Normal ZDoom is based only on the WINDTHRUST flag, with the noclip cheat as an exemption.
+			bool pusharound = ((thing->flags2 & MF2_WINDTHRUST) && !(thing->flags & MF_NOCLIP));
+					
+			// MBF allows any sentient or shootable thing to be affected, but players with a fly cheat aren't.
+			if (compatflags & COMPATF_MBFMONSTERMOVE)
+			{
+				pusharound = ((pusharound || (thing->IsSentient()) || (thing->flags & MF_SHOOTABLE)) // Add categories here
+					&& (!(thing->player && (thing->flags & (MF_NOGRAVITY))))); // Exclude flying players here
+			}
+
+			if ((pusharound) )
 			{
 				int sx = m_X;
 				int sy = m_Y;
@@ -2199,14 +2466,14 @@ void DPusher::Tick ()
 				// If speed <= 0, you're outside the effective radius. You also have
 				// to be able to see the push/pull source point.
 
-				if ((speed > 0) && (P_CheckSight (thing, m_Source, 1)))
+				if ((speed > 0) && (P_CheckSight (thing, m_Source, SF_IGNOREVISIBILITY)))
 				{
 					angle_t pushangle = R_PointToAngle2 (thing->x, thing->y, sx, sy);
 					if (m_Source->GetClass()->TypeName == NAME_PointPusher)
 						pushangle += ANG180;    // away
 					pushangle >>= ANGLETOFINESHIFT;
-					thing->momx += FixedMul (speed, finecosine[pushangle]);
-					thing->momy += FixedMul (speed, finesine[pushangle]);
+					thing->velx += FixedMul (speed, finecosine[pushangle]);
+					thing->vely += FixedMul (speed, finesine[pushangle]);
 				}
 			}
 		}
@@ -2230,10 +2497,10 @@ void DPusher::Tick ()
 		if ( thing->player && thing->player->bSpectating )
 			continue;
 
+		sector_t *hsec = sec->GetHeightSec();
 		if (m_Type == p_wind)
 		{
-			if (sec->heightsec == NULL ||
-				sec->heightsec->MoreFlags & SECF_IGNOREHEIGHTSEC)
+			if (hsec == NULL)
 			{ // NOT special water sector
 				if (thing->z > thing->floorz) // above ground
 				{
@@ -2248,7 +2515,7 @@ void DPusher::Tick ()
 			}
 			else // special water sector
 			{
-				ht = sec->heightsec->floorplane.ZatPoint (thing->x, thing->y);
+				ht = hsec->floorplane.ZatPoint (thing->x, thing->y);
 				if (thing->z > ht) // above ground
 				{
 					xspeed = m_Xmag; // full force
@@ -2269,14 +2536,13 @@ void DPusher::Tick ()
 		{
 			const secplane_t *floor;
 
-			if (sec->heightsec == NULL ||
-				(sec->heightsec->MoreFlags & SECF_IGNOREHEIGHTSEC))
+			if (hsec == NULL)
 			{ // NOT special water sector
 				floor = &sec->floorplane;
 			}
 			else
 			{ // special water sector
-				floor = &sec->heightsec->floorplane;
+				floor = &hsec->floorplane;
 			}
 			if (thing->z > floor->ZatPoint (thing->x, thing->y))
 			{ // above ground
@@ -2288,8 +2554,8 @@ void DPusher::Tick ()
 				yspeed = m_Ymag;
 			}
 		}
-		thing->momx += xspeed<<(FRACBITS-PUSH_FACTOR);
-		thing->momy += yspeed<<(FRACBITS-PUSH_FACTOR);
+		thing->velx += xspeed<<(FRACBITS-PUSH_FACTOR);
+		thing->vely += yspeed<<(FRACBITS-PUSH_FACTOR);
 	}
 }
 

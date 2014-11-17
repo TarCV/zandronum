@@ -41,9 +41,7 @@
 // case of the generic moving object/actor.
 #include "actor.h"
 
-#include "d_netinf.h"
 #include "r_defs.h"
-
 #include "a_sharedglobal.h"
 #include "bots.h"
 #include "medal.h"
@@ -74,6 +72,9 @@ enum
 	APMETA_Slot8,
 	APMETA_Slot9,
 };
+
+FPlayerColorSet *P_GetPlayerColorSet(FName classname, int setnum);
+void P_EnumPlayerColorSets(FName classname, TArray<int> *out);
 
 class player_t;
 class	CSkullBot;
@@ -136,7 +137,9 @@ public:
 
 	int			crouchsprite;
 	int			MaxHealth;
+	int			MugShotMaxHealth;
 	int			RunHealth;
+	int			PlayerFlags;
 	TObjPtr<AInventory> InvFirst;		// first inventory item displayed on inventory bar
 	TObjPtr<AInventory> InvSel;			// selected inventory item
 
@@ -151,9 +154,7 @@ public:
 	fixed_t		AttackZOffset;			// attack height, relative to player center
 
 	// [CW] Fades for when you are being damaged.
-	float		RedDamageFade;
-	float		GreenDamageFade;
-	float		BlueDamageFade;
+	PalEntry DamageFade;
 
 	bool UpdateWaterLevel (fixed_t oldz, bool splash);
 	bool ResetAirSupply (bool playgasp = true);
@@ -164,6 +165,14 @@ public:
 class APlayerChunk : public APlayerPawn
 {
 	DECLARE_CLASS (APlayerChunk, APlayerPawn)
+};
+
+//
+// PlayerPawn flags
+//
+enum
+{
+	PPF_NOTHRUSTWHENINVUL = 1,	// Attacks do not thrust the player if they are invulnerable.
 };
 
 //
@@ -197,7 +206,7 @@ typedef enum
 {
 	CF_NOCLIP			= 1 << 0,		// No clipping, walk through barriers.
 	CF_GODMODE			= 1 << 1,		// No damage, no health loss.
-	CF_NOMOMENTUM		= 1 << 2,		// Not really a cheat, just a debug aid.
+	CF_NOVELOCITY		= 1 << 2,		// Not really a cheat, just a debug aid.
 	CF_NOTARGET			= 1 << 3,		// [RH] Monsters don't target
 	CF_FLY				= 1 << 4,		// [RH] Flying player
 	CF_CHASECAM			= 1 << 5,		// [RH] Put camera behind player
@@ -213,22 +222,21 @@ typedef enum
 	CF_TIMEFREEZE		= 1 << 15,		// Player has an active time freezer
 	CF_DRAIN			= 1 << 16,		// Player owns a drain powerup
 	CF_REGENERATION		= 1 << 17,		// Player owns a regeneration artifact
-	CF_HIGHJUMP			= 1 << 18,		// more Skulltag flags. Implemetation not guaranteed though. ;)
+	CF_HIGHJUMP			= 1 << 18,		// more Skulltag flags. Implementation not guaranteed though. ;)
 	CF_REFLECTION		= 1 << 19,
 	CF_PROSPERITY		= 1 << 20,
-	CF_DOUBLEFIRINGSPEED= 1 << 21,
+	CF_DOUBLEFIRINGSPEED= 1 << 21,		// Player owns a double firing speed artifact
 	CF_EXTREMELYDEAD	= 1 << 22,		// [RH] Reliably let the status bar know about extreme deaths.
+	CF_INFINITEAMMO		= 1 << 23,		// Player owns an infinite ammo artifact
 
 	CF_WEAPONBOBBING	= 1 << 24,		// [HW] Bob weapon while the player is moving
 	CF_WEAPONREADYALT	= 1 << 25,		// Weapon can fire its secondary attack
 	CF_WEAPONSWITCHOK	= 1 << 26,		// It is okay to switch away from this weapon
-
-	// [BC] Player can move freely while the game is in freeze mode.
-	CF_FREEZE			= 1 << 27,
+	CF_BUDDHA			= 1 << 27,		// [SP] Buddha mode - take damage, but don't die
 
 	// [BC] Rune effects.
-	CF_SPREAD			= 1 << 28,
-	CF_SPEED25			= 1 << 29,
+	CF_SPREAD			= 1 << 29,
+	CF_SPEED25			= 1 << 30,
 
 } cheat_t;
 
@@ -266,6 +274,7 @@ struct userinfo_t
 	BYTE		team;
 	int			aimdist;
 	int			color;
+	int			colorset;
 	int			skin;
 	int			gender;
 	int			switchonpickup;
@@ -322,17 +331,18 @@ public:
 	fixed_t		viewz;					// focal origin above r.z
 	fixed_t		viewheight;				// base height above floor for viewz
 	fixed_t		deltaviewheight;		// squat speed.
-	fixed_t		bob;					// bounded/scaled total momentum
+	fixed_t		bob;					// bounded/scaled total velocity
 
 	// killough 10/98: used for realistic bobbing (i.e. not simply overall speed)
-	// mo->momx and mo->momy represent true momenta experienced by player.
+	// mo->velx and mo->vely represent true velocity experienced by player.
 	// This only represents the thrust that the player applies himself.
-	// This avoids anomolies with such things as Boom ice and conveyors.
-	fixed_t		momx, momy;				// killough 10/98
+	// This avoids anomalies with such things as Boom ice and conveyors.
+	fixed_t		velx, vely;				// killough 10/98
 
 	bool		centering;
 	BYTE		turnticks;
 	bool		attackdown;
+	bool		usedown;
 	DWORD		oldbuttons;
 	int			health;					// only used between levels, mo->health
 										// is used during levels
@@ -356,10 +366,11 @@ public:
 	TObjPtr<AActor>		poisoner;		// NULL for non-player actors
 	TObjPtr<AActor>		attacker;		// who did damage (NULL for floors)
 	int			extralight;				// so gun flashes light up areas
-	int			fixedcolormap;			// can be set to REDCOLORMAP, etc.
+	short		fixedcolormap;			// can be set to REDCOLORMAP, etc.
+	short		fixedlightlevel;
 	pspdef_t	psprites[NUMPSPRITES];	// view sprites (gun, etc)
 	int			morphTics;				// player is a chicken/pig if > 0
-	BYTE		MorphedPlayerClass;		// [MH] (for SBARINFO) class # for this player instance when morphed
+	const PClass *MorphedPlayerClass;		// [MH] (for SBARINFO) class # for this player instance when morphed
 	int			MorphStyle;				// which effects to apply for this player instance when morphed
 	const PClass *MorphExitFlash;		// flash to apply when demorphing (cache of value given to P_MorphPlayer)
 	TObjPtr<AWeapon>	PremorphWeapon;		// ready weapon before morphing
@@ -630,12 +641,6 @@ void P_CheckPlayerSprites();
 
 
 #define CROUCHSPEED (FRACUNIT/12)
-
-EXTERN_CVAR(Float, maxviewpitch)
-
-extern int currentrenderer;
-#define MAX_DN_ANGLE	((int)((netgame || currentrenderer==0)? 56 : maxviewpitch))		// Max looking down angle
-#define MAX_UP_ANGLE	((int)((netgame || currentrenderer==0)? 32 : maxviewpitch))		// Max looking up angle
 
 // [GRB] Custom player classes
 enum
