@@ -691,6 +691,10 @@ void NETWORK_LaunchPacket( NETBUFFER_s *pBuffer, NETADDRESS_s Address )
 
 			Printf( "NETWORK_LaunchPacket: Error #%d, WSAEACCES: Permission denied for address: %s\n", iError, NETWORK_AddressToString( Address ));
 			return;
+		case WSAEAFNOSUPPORT:
+
+			Printf( "NETWORK_LaunchPacket: Error #%d, WSAEAFNOSUPPORT: Address %s incompatible with the requested protocol\n", iError, NETWORK_AddressToString( Address ));
+			return;
 		case WSAEADDRNOTAVAIL:
 
 			Printf( "NETWORK_LaunchPacket: Error #%d, WSAEADDRENOTAVAIL: Address %s not available\n", iError, NETWORK_AddressToString( Address ));
@@ -895,7 +899,7 @@ NETBUFFER_s *NETWORK_GetNetworkMessageBuffer( void )
 
 //*****************************************************************************
 //
-ULONG NETWORK_ntohs( ULONG ul )
+USHORT NETWORK_ntohs( ULONG ul )
 {
 	return ( ntohs( (u_short)ul ));
 }
@@ -994,6 +998,22 @@ bool network_GenerateLumpMD5HashAndWarnIfNeeded( const int LumpNum, const char *
 	NETWORK_GenerateLumpMD5Hash( LumpNum, MD5Hash );
 
 	int wadNum = Wads.GetWadnumFromLumpnum ( LumpNum );
+
+	// [BB] Check whether this wad is embedded in another file. In this case,
+	// we have to check whether the containing file was loaded automatically.
+	if ( wadNum >= 0 )
+	{
+		FString wadName = Wads.GetWadFullName( wadNum );
+		int index = wadName.LastIndexOf ( ":" );
+		if ( index > wadName.LastIndexOf ( ":/" ) )
+		{
+			wadName.Truncate (index);
+			int containerWadNum = Wads.GetWadnumFromWadFullName ( wadName );
+			if ( containerWadNum >= 0 )
+				wadNum = containerWadNum;
+		}
+	}
+
 	if ( ( wadNum >= 0 ) && Wads.GetLoadedAutomatically ( wadNum ) )
 	{
 		Printf ( PRINT_BOLD, "%s contains protected lump %s\n", Wads.GetWadFullName( wadNum ), LumpName );
@@ -1232,7 +1252,7 @@ static void network_InitPWADList( void )
 	ULONG ulNumPWADs = 0, ulRealIWADIdx = 0;
 	for ( ULONG ulIdx = 0; Wads.GetWadName( ulIdx ) != NULL; ulIdx++ )
 	{
-		if ( strchr( Wads.GetWadName( ulIdx ), ':' ) == NULL ) // Since WADs can now be loaded within pk3 files, we have to skip over all the ones automatically loaded. To my knowledge, the only way to do this is to skip wads that have a colon in them.
+		if ( Wads.GetLoadedAutomatically( ulIdx ) == false ) // Since WADs can now be loaded within pk3 files, we have to skip over all the ones automatically loaded. To my knowledge, the only way to do this is to skip wads that have a colon in them.
 		{
 			if ( ulNumPWADs == FWadCollection::IWAD_FILENUM )
 			{
@@ -1250,10 +1270,10 @@ static void network_InitPWADList( void )
 	for ( ULONG ulIdx = 0; Wads.GetWadName( ulIdx ) != NULL; ulIdx++ )
 	{
 		// Skip the IWAD, zandronum.pk3, files that were automatically loaded from subdirectories (such as skin files), and WADs loaded automatically within pk3 files.
+		// [BB] The latter are marked as being loaded automatically.
 		if (( ulIdx == ulRealIWADIdx ) ||
 			( stricmp( Wads.GetWadName( ulIdx ), GAMENAMELOWERCASE ".pk3" ) == 0 ) ||
-			( Wads.GetLoadedAutomatically( ulIdx )) ||
-			( strchr( Wads.GetWadName( ulIdx ), ':' ) != NULL ))
+			( Wads.GetLoadedAutomatically( ulIdx )) )
 		{
 			continue;
 		}
