@@ -37,7 +37,8 @@
 #include "p_spec.h"
 #include "g_level.h"
 #include "s_sndseq.h"
-#include "r_interpolate.h"
+#include "farchive.h"
+#include "r_data/r_interpolate.h"
 // [BC] New #includes.
 #include "cl_demo.h"
 #include "network.h"
@@ -47,6 +48,14 @@ IMPLEMENT_POINTY_CLASS (DPillar)
 	DECLARE_POINTER(m_Interp_Floor)
 	DECLARE_POINTER(m_Interp_Ceiling)
 END_POINTERS
+
+inline FArchive &operator<< (FArchive &arc, DPillar::EPillar &type)
+{
+	BYTE val = (BYTE)type;
+	arc << val;
+	type = (DPillar::EPillar)val;
+	return arc;
+}
 
 DPillar::DPillar ()
 {

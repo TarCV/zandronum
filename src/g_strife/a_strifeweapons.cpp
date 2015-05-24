@@ -53,7 +53,7 @@ void P_DaggerAlert (AActor *target, AActor *emitter)
 	emitter->flags4 |= MF4_INCOMBAT;
 
 	emitter->target = target;
-	FState * painstate = emitter->FindState(NAME_Pain);
+	FState *painstate = emitter->FindState(NAME_Pain, NAME_Dagger);
 	if (painstate != NULL)
 	{
 		// [BC] If we're the server, tell clinets to set this thing's state.
@@ -119,7 +119,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_JabDagger)
 		return;
 	}
 
-	power = MIN(10, self->player->stamina / 10);
+	power = MIN(10, self->player->mo->stamina / 10);
 	damage = (pr_jabdagger() % (power + 8)) * (power + 2);
 
 	if (self->FindInventory<APowerStrength>())
@@ -167,8 +167,11 @@ DEFINE_ACTION_FUNCTION(AActor, A_JabDagger)
 //
 //============================================================================
 
-DEFINE_ACTION_FUNCTION(AActor, A_AlertMonsters)
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_AlertMonsters)
 {
+	ACTION_PARAM_START(1);
+	ACTION_PARAM_FIXED(maxdist, 0);
+
 	// [BC] Weapons are handled by the server.
 	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
 		( CLIENTDEMO_IsPlaying( )))
@@ -178,11 +181,11 @@ DEFINE_ACTION_FUNCTION(AActor, A_AlertMonsters)
 
 	if (self->player != NULL)
 	{
-		P_NoiseAlert(self, self);
+		P_NoiseAlert(self, self, false, maxdist);
 	}
 	else if (self->target != NULL && self->target->player != NULL)
 	{
-		P_NoiseAlert (self->target, self);
+		P_NoiseAlert (self->target, self, false, maxdist);
 	}
 }
 
@@ -192,12 +195,12 @@ class APoisonBolt : public AActor
 {
 	DECLARE_CLASS (APoisonBolt, AActor)
 public:
-	int DoSpecialDamage (AActor *target, int damage);
+	int DoSpecialDamage (AActor *target, int damage, FName damagetype);
 };
 
 IMPLEMENT_CLASS (APoisonBolt)
 
-int APoisonBolt::DoSpecialDamage (AActor *target, int damage)
+int APoisonBolt::DoSpecialDamage (AActor *target, int damage, FName damagetype)
 {
 	if (target->flags & MF_NOBLOOD)
 	{
@@ -279,7 +282,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FireArrow)
 	if (ti) 
 	{
 		savedangle = self->angle;
-		self->angle += pr_electric.Random2 () << (18 - self->player->accuracy * 5 / 100);
+		self->angle += pr_electric.Random2 () << (18 - self->player->mo->accuracy * 5 / 100);
 		self->player->mo->PlayAttacking2 ();
 		P_SpawnPlayerMissile (self, ti);
 		self->angle = savedangle;
@@ -316,10 +319,10 @@ void P_StrifeGunShot (AActor *mo, bool accurate, angle_t pitch)
 
 	if (mo->player != NULL && !accurate)
 	{
-		angle += pr_sgunshot.Random2() << (20 - mo->player->accuracy * 5 / 100);
+		angle += pr_sgunshot.Random2() << (20 - mo->player->mo->accuracy * 5 / 100);
 	}
 
-	P_LineAttack (mo, angle, PLAYERMISSILERANGE, pitch, damage, NAME_None, NAME_StrifePuff);
+	P_LineAttack (mo, angle, PLAYERMISSILERANGE, pitch, damage, NAME_Hitscan, NAME_StrifePuff);
 }
 
 //============================================================================
@@ -407,7 +410,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_FireMiniMissile)
 		SERVERCOMMANDS_SetPlayerState( ULONG( player - players ), STATE_PLAYER_ATTACK2, ULONG( player - players ), SVCF_SKIPTHISCLIENT );
 
 	savedangle = self->angle;
-	self->angle += pr_minimissile.Random2() << (19 - player->accuracy * 5 / 100);
+	self->angle += pr_minimissile.Random2() << (19 - player->mo->accuracy * 5 / 100);
 	player->mo->PlayAttacking2 ();
 	P_SpawnPlayerMissile (self, PClass::FindClass("MiniMissile"));
 	self->angle = savedangle;
@@ -554,7 +557,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_FireMauler1)
 		// it should use a different puff. ZDoom's default range is longer
 		// than this, so let's not handicap it by being too faithful to the
 		// original.
-		P_LineAttack (self, angle, PLAYERMISSILERANGE, pitch, damage, NAME_None, NAME_MaulerPuff);
+		P_LineAttack (self, angle, PLAYERMISSILERANGE, pitch, damage, NAME_Hitscan, NAME_MaulerPuff);
 	}
 }
 
@@ -676,19 +679,15 @@ AActor *P_SpawnSubMissile (AActor *source, const PClass *type, AActor *target)
 	{
 		if (source->flags & MF_MISSILE && source->flags4 & MF4_SPECTRAL)
 		{
-			other->health = source->health;
-		}
-		else if (target->player != NULL)
-		{
-			other->health = -1;
+			other->FriendPlayer = source->FriendPlayer;
 		}
 		else
 		{
-			other->health = -2;
+			other->SetFriendPlayer(target->player);
 		}
 	}
 
-	if (P_CheckMissileSpawn (other))
+	if (P_CheckMissileSpawn (other, source->radius))
 	{
 		angle_t pitch = P_AimLineAttack (source, source->angle, 1024*FRACUNIT);
 		other->velz = FixedMul (-finesine[pitch>>ANGLETOFINESHIFT], other->Speed);
@@ -714,18 +713,18 @@ class APhosphorousFire : public AActor
 {
 	DECLARE_CLASS (APhosphorousFire, AActor)
 public:
-	int DoSpecialDamage (AActor *target, int damage);
+	int DoSpecialDamage (AActor *target, int damage, FName damagetype);
 };
 
 IMPLEMENT_CLASS (APhosphorousFire)
 
-int APhosphorousFire::DoSpecialDamage (AActor *target, int damage)
+int APhosphorousFire::DoSpecialDamage (AActor *target, int damage, FName damagetype)
 {
 	if (target->flags & MF_NOBLOOD)
 	{
 		return damage / 2;
 	}
-	return Super::DoSpecialDamage (target, damage);
+	return Super::DoSpecialDamage (target, damage, damagetype);
 }
 
 DEFINE_ACTION_FUNCTION(AActor, A_BurnArea)
@@ -737,7 +736,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_BurnArea)
 		return;
 	}
 
-	P_RadiusAttack (self, self->target, 128, 128, self->DamageType, true);
+	P_RadiusAttack (self, self->target, 128, 128, self->DamageType, RADF_HURTSOURCE);
 }
 
 DEFINE_ACTION_FUNCTION(AActor, A_Burnination)
@@ -811,6 +810,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_Burnination)
 			}
 		}
 	}
+
 }
 
 //============================================================================
@@ -1138,7 +1138,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_FireSigil1)
 	}
 	if (spot != NULL)
 	{
-		spot->health = -1;
+		spot->SetFriendPlayer(player);
 		spot->target = self;
 	}
 }

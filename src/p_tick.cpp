@@ -28,7 +28,7 @@
 #include "s_sound.h"
 #include "doomstat.h"
 #include "sbar.h"
-#include "r_interpolate.h"
+#include "r_data/r_interpolate.h"
 #include "i_sound.h"
 #include "g_level.h"
 // [BB] New #includes.
@@ -109,7 +109,13 @@ void P_Ticker (void)
 		// run the tic
 		if (paused || P_CheckTickerPaused())
 			return;
+	}
 
+	P_NewPspriteTick();
+
+	// [BC] Server doesn't need any of this.
+	if ( NETWORK_GetState( ) != NETSTATE_SERVER )
+	{
 /*		// [BB] ST doesn't do this.
 		// [RH] Frozen mode is only changed every 4 tics, to make it work with A_Tracer().
 		if ((level.time & 3) == 0)
@@ -126,7 +132,7 @@ void P_Ticker (void)
 		// off the music.
 		for (i = 0; i < MAXPLAYERS; i++ )
 		{
-			if (playeringame[i] && players[i].cheats & CF_TIMEFREEZE)
+			if (playeringame[i] && players[i].timefreezer != 0)
 				break;
 		}
 
@@ -150,7 +156,6 @@ void P_Ticker (void)
 		{
 			P_ThinkParticles ();	// [RH] make the particles think
 		}
-		StatusBar->Tick ();		// [RH] moved this here
 	}
 
 	// Predict the console player's position.
@@ -347,6 +352,9 @@ void P_Ticker (void)
 	if ( CLIENTDEMO_IsInFreeSpectateMode() )
 		CLIENTDEMO_FreeSpectatorPlayerThink();
 
+	// [BB] The server has no status bar.
+	if ( NETWORK_GetState( ) != NETSTATE_SERVER )
+		StatusBar->Tick ();		// [RH] moved this here
 	level.Tick ();			// [RH] let the level tick
 
 	// [BB] Some things like AMovingCamera rely on the AActor tid in the PostBeginPlay functions,

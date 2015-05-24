@@ -85,7 +85,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_SentinelAttack)
 				trail->velx = missile->velx;
 				trail->vely = missile->vely;
 				trail->velz = missile->velz;
-				P_CheckMissileSpawn (trail);
+				P_CheckMissileSpawn (trail, self->radius);
 			}
 		}
 		missile->z += missile->velz >> 2;
@@ -106,6 +106,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_SentinelRefire)
 			self->target->health <= 0 ||
 			!P_CheckSight (self, self->target, SF_SEEPASTBLOCKEVERYTHING|SF_SEEPASTSHOOTABLELINES) ||
 			P_HitFriend(self) ||
+			(self->MissileState == NULL && !self->CheckMeleeRange()) ||
 			pr_sentinelrefire() < 40)
 		{
 			// [CW] Tell clients to set the frame.
