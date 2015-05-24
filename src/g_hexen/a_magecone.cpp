@@ -29,12 +29,12 @@ class AFrostMissile : public AActor
 {
 	DECLARE_CLASS (AFrostMissile, AActor)
 public:
-	int DoSpecialDamage (AActor *victim, int damage);
+	int DoSpecialDamage (AActor *victim, int damage, FName damagetype);
 };
 
 IMPLEMENT_CLASS (AFrostMissile)
 
-int AFrostMissile::DoSpecialDamage (AActor *victim, int damage)
+int AFrostMissile::DoSpecialDamage (AActor *victim, int damage, FName damagetype)
 {
 	if (special2 > 0)
 	{
@@ -94,7 +94,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_FireConePL1)
 			P_DamageMobj (linetarget, self, self, damage, NAME_Ice);
 
 			// [BC] Apply spread.
-			if ( player->cheats & CF_SPREAD )
+			if ( player->cheats2 & CF2_SPREAD )
 				P_DamageMobj (linetarget, self, self, damage * 2, NAME_Ice);
 
 			conedone = true;
@@ -116,7 +116,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_FireConePL1)
 		}
 
 		// [BC] Apply spread.
-		if ( player->cheats & CF_SPREAD )
+		if ( player->cheats2 & CF2_SPREAD )
 		{
 			mo = P_SpawnPlayerMissile (self, RUNTIME_CLASS(AFrostMissile), self->angle + ( ANGLE_45 / 3 ));
 			if (mo)

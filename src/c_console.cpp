@@ -54,8 +54,6 @@
 #include "v_video.h"
 #include "v_text.h"
 #include "w_wad.h"
-#include "r_main.h"
-#include "r_draw.h"
 #include "sbar.h"
 #include "s_sound.h"
 #include "s_sndseq.h"
@@ -66,6 +64,7 @@
 #include "d_net.h"
 #include "g_level.h"
 #include "d_event.h"
+#include "d_player.h"
 // [BC] New #includes.
 #include "chat.h"
 #include "cl_demo.h"
@@ -103,7 +102,7 @@ extern FBaseCVar *CVars;
 extern FConsoleCommand *Commands[FConsoleCommand::HASH_SIZE];
 
 int			ConCols, PhysRows;
-bool		vidactive = false, gotconback = false;
+bool		vidactive = false;
 bool		cursoron = false;
 int			ConBottom, ConScroll, RowAdjust;
 int			CursorTicker;
@@ -301,7 +300,7 @@ CUSTOM_CVAR (Int, msgmidcolor2, 4, CVAR_ARCHIVE)
 static void maybedrawnow (bool tick, bool force)
 {
 	// FIXME: Does not work right with hw2d
-	if (ConsoleDrawing || !gotconback || screen == NULL || screen->IsLocked () || screen->Accel2D)
+	if (ConsoleDrawing || screen == NULL || screen->IsLocked () || screen->Accel2D || ConFont == NULL)
 	{
 		return;
 	}
@@ -366,7 +365,7 @@ void DequeueConsoleText ()
 	EnqueuedTextTail = &EnqueuedText;
 }
 
-void C_InitConsole (int width, int height, bool ingame)
+void C_InitConback()
 {
 	// [BC] Initialize the name of the logfile.
 	g_szDesiredLogFilename[0] = 0;
@@ -376,30 +375,26 @@ void C_InitConsole (int width, int height, bool ingame)
 	if ( Args->CheckParm( "-host" ))
 		return;
 
-	if ( (vidactive = ingame) )
+	conback = TexMan.CheckForTexture ("CONBACK", FTexture::TEX_MiscPatch);
+
+	if (!conback.isValid())
 	{
-		if (!gotconback)
-		{
-			conback = TexMan.CheckForTexture ("CONBACK", FTexture::TEX_MiscPatch);
-
-			if (!conback.isValid())
-			{
-				conback = TexMan.GetTexture (gameinfo.titlePage, FTexture::TEX_MiscPatch);
-				conshade = MAKEARGB(175,0,0,0);
-				conline = true;
-			}
-			else
-			{
-				conshade = 0;
-				conline = false;
-			}
-
-			gotconback = true;
-		}
+		conback = TexMan.GetTexture (gameinfo.titlePage, FTexture::TEX_MiscPatch);
+		conshade = MAKEARGB(175,0,0,0);
+		conline = true;
 	}
+	else
+	{
+		conshade = 0;
+		conline = false;
+	}
+}
 
+void C_InitConsole (int width, int height, bool ingame)
+{
 	int cwidth, cheight;
 
+	vidactive = ingame;
 	if (ConFont != NULL)
 	{
 		cwidth = ConFont->GetCharWidth ('M');
@@ -883,7 +878,7 @@ void AddToConsole (int printlevel, const char *text)
 						// The line start is outside the buffer. 
 						// Make space for the newly inserted stuff.
 						size_t movesize = work-linestart;
-						memmove(work + movesize, work, strlen(work));
+						memmove(work + movesize, work, strlen(work)+1);
 						work_p += movesize;
 						linestart = work;
 					}
@@ -1334,7 +1329,7 @@ void C_DrawConsole (bool hw2d)
 		(viewwindowx || viewwindowy) &&
 		viewactive)
 	{
-		BorderNeedRefresh = screen->GetPageCount ();
+		V_SetBorderNeedRefresh();
 	}
 
 	oldbottom = ConBottom;
@@ -1430,8 +1425,8 @@ void C_DrawConsole (bool hw2d)
 			{
 				screen->Dim (PalEntry ((unsigned char)(player->BlendR*255), (unsigned char)(player->BlendG*255), (unsigned char)(player->BlendB*255)),
 					player->BlendA, 0, ConBottom, screen->GetWidth(), screen->GetHeight() - ConBottom);
-				SB_state = screen->GetPageCount ();
-				BorderNeedRefresh = screen->GetPageCount ();
+				ST_SetNeedRefresh();
+				V_SetBorderNeedRefresh();
 			}
 		}
 	}

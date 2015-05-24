@@ -54,8 +54,8 @@
 #include "cl_demo.h"
 #include "cooperative.h"
 
-// List of spawnable things for the Thing_Spawn and Thing_Projectile specials.
-const PClass *SpawnableThings[MAX_SPAWNABLES];
+// Set of spawnable things for the Thing_Spawn and Thing_Projectile specials.
+TMap<int, const PClass *> SpawnableThings;
 
 static FRandom pr_leadtarget ("LeadTarget");
 
@@ -66,14 +66,13 @@ bool P_Thing_Spawn (int tid, AActor *source, int type, angle_t angle, bool fog, 
 	AActor *spot, *mobj;
 	FActorIterator iterator (tid);
 
-	if (type >= MAX_SPAWNABLES)
-		return false;
+	kind = P_GetSpawnableType(type);
 
-	if ( (kind = SpawnableThings[type]) == NULL)
+	if (kind == NULL)
 		return false;
 
 	// Handle decorate replacements.
-	kind = kind->ActorInfo->GetReplacement()->Class;
+	kind = kind->GetReplacement();
 
 	if ((GetDefaultByType (kind)->flags3 & MF3_ISMONSTER) && 
 		((dmflags & DF_NO_MONSTERS) || (level.flags2 & LEVEL2_NOMONSTERS)))
@@ -149,15 +148,7 @@ bool P_Thing_Spawn (int tid, AActor *source, int type, angle_t angle, bool fog, 
 			{
 				// If this is a monster, subtract it from the total monster
 				// count, because it already added to it during spawning.
-				if (mobj->CountsAsKill())
-				{
-					level.total_monsters--;
-				}
-				// Same, for items
-				if (mobj->flags & MF_COUNTITEM)
-				{
-					level.total_items--;
-				}
+				mobj->ClearCounters();
 				mobj->Destroy ();
 			}
 		}
@@ -200,6 +191,10 @@ bool P_MoveThing(AActor *source, fixed_t x, fixed_t y, fixed_t z, bool fog)
 		source->PrevX = x;
 		source->PrevY = y;
 		source->PrevZ = z;
+		if (source == players[consoleplayer].camera)
+		{
+			R_ResetViewInterpolation();
+		}
 
 		ULONG ulFlags = 0;
 		if ( oldx != source->x )
@@ -256,21 +251,19 @@ bool P_Thing_Projectile (int tid, AActor *source, int type, const char *type_nam
 
 	if (type_name == NULL)
 	{
-		if (type >= MAX_SPAWNABLES)
-			return false;
-
-		if ((kind = SpawnableThings[type]) == NULL)
-			return false;
+		kind = P_GetSpawnableType(type);
 	}
 	else
 	{
-		if ((kind = PClass::FindClass(type_name)) == NULL || kind->ActorInfo == NULL)
-			return false;
+		kind = PClass::FindClass(type_name);
+	}
+	if (kind == NULL || kind->ActorInfo == NULL)
+	{
+		return false;
 	}
 
-
 	// Handle decorate replacements.
-	kind = kind->ActorInfo->GetReplacement()->Class;
+	kind = kind->GetReplacement();
 
 	defflags3 = GetDefaultByType (kind)->flags3;
 	if ((defflags3 & MF3_ISMONSTER) && 
@@ -414,7 +407,7 @@ nolead:						mobj->angle = R_PointToAngle2 (mobj->x, mobj->y, targ->x, targ->y);
 					bMissileExplode = false;
 					if (mobj->flags & MF_MISSILE)
 					{
-						if (P_CheckMissileSpawn (mobj))
+						if (P_CheckMissileSpawn (mobj, spot->radius))
 						{
 							rtn = true;
 						}
@@ -425,15 +418,7 @@ nolead:						mobj->angle = R_PointToAngle2 (mobj->x, mobj->y, targ->x, targ->y);
 					{
 						// If this is a monster, subtract it from the total monster
 						// count, because it already added to it during spawning.
-						if (mobj->CountsAsKill())
-						{
-							level.total_monsters--;
-						}
-						// Same, for items
-						if (mobj->flags & MF_COUNTITEM)
-						{
-							level.total_items--;
-						}
+						mobj->ClearCounters();
 						mobj->Destroy ();
 					}
 					else
@@ -525,11 +510,10 @@ void P_RemoveThing(AActor * actor)
 			SERVERCOMMANDS_DestroyThing( actor );
 
 		// be friendly to the level statistics. ;)
+		actor->ClearCounters();
 		// [BB] Added client update.
 		if (actor->CountsAsKill() && actor->health > 0)
 		{
-			level.total_monsters--;
-
 			// [BB] Since a monster was removed, we also need to correct the number of monsters in invasion mode.
 			INVASION_UpdateMonsterCount( actor, true );
 
@@ -540,8 +524,6 @@ void P_RemoveThing(AActor * actor)
 		// [BB] Added client update.
 		if (actor->flags&MF_COUNTITEM)
 		{
-			level.total_items--;
-
 			// [BB] Inform the clients.
 			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
 				SERVERCOMMANDS_SetMapNumTotalItems( );
@@ -652,17 +634,53 @@ bool P_Thing_Raise(AActor *thing, bool bIgnorePositionCheck)
 	return true;
 }
 
+const PClass *P_GetSpawnableType(int spawnnum)
+{
+	if (spawnnum < 0)
+	{ // A named arg from a UDMF map
+		FName spawnname = FName(ENamedName(-spawnnum));
+		if (spawnname.IsValidName())
+		{
+			return PClass::FindClass(spawnname);
+		}
+	}
+	else
+	{ // A numbered arg from a Hexen or UDMF map
+		const PClass **type = SpawnableThings.CheckKey(spawnnum);
+		if (type != NULL)
+		{
+			return *type;
+		}
+	}
+	return NULL;
+}
+
+typedef TMap<int, const PClass *>::Pair SpawnablePair;
+
+static int STACK_ARGS SpawnableSort(const void *a, const void *b)
+{
+	return (*((SpawnablePair **)a))->Key - (*((SpawnablePair **)b))->Key;
+}
 
 CCMD (dumpspawnables)
 {
-	int i;
+	TMapIterator<int, const PClass *> it(SpawnableThings);
+	SpawnablePair *pair, **allpairs;
+	int i = 0;
 
-	for (i = 0; i < MAX_SPAWNABLES; i++)
+	// Sort into numerical order, since their arrangement in the map can
+	// be in an unspecified order.
+	allpairs = new TMap<int, const PClass *>::Pair *[SpawnableThings.CountUsed()];
+	while (it.NextPair(pair))
 	{
-		if (SpawnableThings[i] != NULL)
-		{
-			Printf ("%d %s\n", i, SpawnableThings[i]->TypeName.GetChars());
-		}
+		allpairs[i++] = pair;
 	}
+	qsort(allpairs, i, sizeof(*allpairs), SpawnableSort);
+	for (int j = 0; j < i; ++j)
+	{
+		pair = allpairs[j];
+		Printf ("%d %s\n", pair->Key, pair->Value->TypeName.GetChars());
+	}
+	delete[] allpairs;
 }
 
