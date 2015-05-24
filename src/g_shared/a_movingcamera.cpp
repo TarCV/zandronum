@@ -37,6 +37,7 @@
 #include "p_local.h"
 #include "p_lnspec.h"
 #include "doomstat.h"
+#include "farchive.h"
 // [BB] New #includes.
 #include "a_movingcamera.h"
 #include "cl_demo.h"
@@ -414,7 +415,7 @@ void APathFollower::NewNode ()
 
 	while ( (spec = iterator.Next ()) )
 	{
-		LineSpecials[spec->special] (NULL, NULL, false, spec->args[0],
+		P_ExecuteSpecial(spec->special, NULL, NULL, false, spec->args[0],
 			spec->args[1], spec->args[2], spec->args[3], spec->args[4]);
 	}
 }

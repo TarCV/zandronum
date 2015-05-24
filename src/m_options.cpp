@@ -96,7 +96,6 @@
 #include "network.h"
 #include "scoreboard.h"
 #include "version.h"
-#include "browser.h"
 #include "m_random.h"
 #include "lastmanstanding.h"
 #include "campaign.h"
@@ -131,18 +130,11 @@ EXTERN_CVAR (Bool, vid_vsync)
 EXTERN_CVAR(Int, displaynametags)
 EXTERN_CVAR (Int, snd_channels)
 
-void StartGLMenu (void);
-EXTERN_CVAR(Int, vid_renderer)
-static value_t Renderers[] = {
-	{ 0.0, "Software" },
-	{ 1.0, "OpenGL" },
-};
-//EXTERN_CVAR(Bool, hud_althud)
-
 //
 // defaulted values
 //
 CVAR (Float, mouse_sensitivity, 1.f, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+CVAR (Float, snd_menuvolume, 0.6f, CVAR_ARCHIVE)
 
 // Show messages has default, 0 = off, 1 = on
 CVAR (Bool, show_messages, true, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
@@ -421,6 +413,7 @@ static menu_t ConfirmMenu = {
  *
  *=======================================*/
 
+static void StartAutomapMenu (void);
 static void CustomizeControls (void);
 static void GameplayOptions (void);
 static void CompatibilityOptions (void);
@@ -461,9 +454,10 @@ static menuitem_t OptionItems[] =
 	{ more,		"Mouse options",		{NULL},					{0.0}, {0.0},	{0.0}, {(value_t *)MouseOptions} },
 	{ more,		"Joystick options",		{NULL},					{0.0}, {0.0},	{0.0}, {(value_t *)JoystickOptions} },
 	{ redtext,	" ",					{NULL},					{0.0}, {0.0},	{0.0}, {NULL} },
-	{ more,		"Player setup",			{NULL},					{0.0}, {0.0},	{0.0}, {(value_t *)M_PlayerSetup} },
+	{ more,		"Player Setup",			{NULL},					{0.0}, {0.0},	{0.0}, {(value_t *)M_PlayerSetup} },
 	{ more,		"Gameplay Options",		{NULL},					{0.0}, {0.0},	{0.0}, {(value_t *)GameplayOptions} },
 	{ more,		"Compatibility Options",{NULL},					{0.0}, {0.0},	{0.0}, {(value_t *)CompatibilityOptions} },
+	{ more,		"Automap Options",		{NULL},					{0.0}, {0.0},	{0.0}, {(value_t *)StartAutomapMenu} },
 	{ more,		"Sound Options",		{NULL},					{0.0}, {0.0},	{0.0}, {(value_t *)SoundOptions} },
 	{ more,		"Network Options",		{NULL},					{0.0}, {0.0},	{0.0}, {(value_t *)NetworkOptions} }, // [CK]
 	{ more,		"Display Options",		{NULL},					{0.0}, {0.0},	{0.0}, {(value_t *)VideoOptions} },
@@ -673,13 +667,13 @@ menu_t ControlsMenu =
 	2,
 };
 
+
 /*=======================================
  *
  * Display Options Menu
  *
  *=======================================*/
 static void StartMessagesMenu (void);
-static void StartAutomapMenu (void);
 static void StartHUDMenu (void);
 static void InitCrosshairsList();
 #ifdef G15_ENABLED
@@ -705,6 +699,15 @@ EXTERN_CVAR (Bool, cl_capfps)
 
 
 static TArray<valuestring_t> Crosshairs;
+
+void StartGLMenu (void);
+EXTERN_CVAR(Int, vid_renderer)
+static value_t Renderers[] = {
+	{ 0.0, "Software" },
+	{ 1.0, "OpenGL" },
+};
+EXTERN_CVAR (Float, vid_brightness)
+EXTERN_CVAR (Float, vid_contrast)
 
 static value_t ColumnMethods[] = {
 	{ 0.0, "Original" },
@@ -764,7 +767,6 @@ static value_t DisplayTagsTypes[] = {
 static menuitem_t VideoItems[] = {
 	{ more,		"Message Options",		{NULL},					{0.0}, {0.0},	{0.0}, {(value_t *)StartMessagesMenu} },
 	{ more,     "OpenGL Options",		{NULL},					{0.0}, {0.0},	{0.0}, {(value_t *)StartGLMenu} },
-	{ more,		"Automap Options",		{NULL},					{0.0}, {0.0},	{0.0}, {(value_t *)StartAutomapMenu} },
 	{ more,		"HUD Options",			{NULL},					{0.0}, {0.0},	{0.0}, {(value_t *)StartHUDMenu} },
 
 	{ redtext,	" ",					{NULL},					{0.0}, {0.0},	{0.0}, {NULL} },
@@ -772,34 +774,34 @@ static menuitem_t VideoItems[] = {
 	{ slider,	"Brightness",			{&vid_brightness},		{-0.8f}, {0.8f},	{0.05f}, {NULL} },
 	{ slider,	"Contrast",				{&vid_contrast},	   	{0.1f}, {3.0},	{0.1f}, {NULL} },
 	{ discrete, "Vertical Sync",		{&vid_vsync},			{2.0}, {0.0},	{0.0}, {OnOff} },
-	{ slider,	"Blood brightness",		{&blood_fade_scalar},  	{0.0}, {1.0},	{0.05}, {NULL} },
 	{ redtext,	" ",					{NULL},					{0.0}, {0.0},	{0.0}, {NULL} },
 	{ discrete, "Cap framerate",		{&cl_capfps},			{4.0}, {0.0},	{0.0}, {YesNo} },
+	{ discrete, "Stretch short skies",	{&r_stretchsky},	   	{2.0}, {0.0},	{0.0}, {OnOff} },
 	{ discrete, "Screen wipe style",	{&wipetype},			{4.0}, {0.0},	{0.0}, {Wipes} },
 	{ discrete, "Death camera",			{&r_deathcamera},		{4.0}, {0.0},	{0.0}, {YesNo} },
-	{ discrete, "Use fuzz effect",		{&r_drawfuzz},			{2.0}, {0.0},	{0.0}, {YesNo} },
 	{ discrete, "Respawn invul effect",	{&cl_respawninvuleffect},	{3.0}, {0.0},	{0.0}, {RespawnInvulEffectTypes} },
-	{ discrete, "Rocket Trails",		{&cl_rockettrails},		{4.0}, {0.0},	{0.0}, {RocketTrailTypes} },
-	{ discrete, "Grenade Trails",		{&cl_grenadetrails},		{2.0}, {0.0},	{0.0}, {OnOff} },
-	{ discrete, "Blood Type",			{&cl_bloodtype},	   	{3.0}, {0.0},	{0.0}, {BloodTypes} },
-	{ discrete, "Bullet Puff Type",		{&cl_pufftype},			{2.0}, {0.0},	{0.0}, {PuffTypes} },
-	{ discrete, "Stretch short skies",	{&r_stretchsky},	   	{2.0}, {0.0},	{0.0}, {OnOff} },
-	{ redtext,	" ",					{NULL},					{0.0}, {0.0},	{0.0}, {NULL} },
 	{ discrete, "Column render mode",	{&r_columnmethod},		{2.0}, {0.0},	{0.0}, {ColumnMethods} },
 	{ discrete, "Disable alpha",		{&r_drawtrans},			{2.0}, {0.0},	{0.0}, {NoYes} },
 	{ discrete, "Show player spawns",	{&cl_showspawns},		{2.0}, {0.0},	{0.0}, {OnOff} }, // [CK]
+	{ slider,	"Blood brightness",		{&blood_fade_scalar},  	{0.0}, {1.0},	{0.05}, {NULL} },
 #ifdef _WIN32
 	{ discrete,	"Show ENDOOM screen",	{&showendoom},			{3.0}, {0.0},	{0.0}, {Endoom} },
 	{ discrete, "DirectDraw palette hack", {&vid_palettehack},	{2.0}, {0.0},	{0.0}, {OnOff} },
 	{ discrete, "Use attached surfaces", {&vid_attachedsurfaces},{2.0}, {0.0},	{0.0}, {OnOff} },
 #endif
-
+	{ redtext,	" ",					{NULL},					{0.0}, {0.0},	{0.0}, {NULL} },
+	{ discrete, "Use fuzz effect",		{&r_drawfuzz},			{2.0}, {0.0},	{0.0}, {YesNo} },
 	{ discrete, "Use fake contrast",	{&r_fakecontrast},		{3.0}, {0.0},	{0.0}, {Contrast} },
+	{ discrete, "Rocket Trails",		{&cl_rockettrails},		{4.0}, {0.0},	{0.0}, {RocketTrailTypes} },
+	// [BB]
+	{ discrete, "Grenade Trails",		{&cl_grenadetrails},		{2.0}, {0.0},	{0.0}, {OnOff} },
+	{ discrete, "Blood Type",			{&cl_bloodtype},	   	{3.0}, {0.0},	{0.0}, {BloodTypes} },
+	{ discrete, "Bullet Puff Type",		{&cl_pufftype},			{2.0}, {0.0},	{0.0}, {PuffTypes} },
 	{ discrete, "Display nametags",		{&displaynametags},		{4.0}, {0.0},	{0.0}, {DisplayTagsTypes} },
 };
 
 // [BB] Moved crosshair selection to the HUD menu.
-//#define CROSSHAIR_INDEX 10
+//#define CROSSHAIR_INDEX 11
 
 menu_t VideoMenu =
 {
@@ -922,6 +924,7 @@ menu_t HUDMenu =
  *
  *=======================================*/
 static void StartMapColorsMenu (void);
+static void StartMapControlsMenu (void);
 
 EXTERN_CVAR (Int, am_rotate)
 EXTERN_CVAR (Int, am_overlay)
@@ -932,6 +935,7 @@ EXTERN_CVAR (Bool, am_showtime)
 EXTERN_CVAR (Int, am_map_secrets)
 EXTERN_CVAR (Bool, am_showtotaltime)
 EXTERN_CVAR (Bool, am_drawmapback)
+EXTERN_CVAR (Bool, am_textured)
 
 static value_t MapColorTypes[] = {
 	{ 0, "Custom" },
@@ -961,9 +965,11 @@ static value_t OverlayTypes[] = {
 static menuitem_t AutomapItems[] = {
 	{ discrete, "Map color set",		{&am_colorset},			{4.0}, {0.0},	{0.0}, {MapColorTypes} },
 	{ more,		"Set custom colors",	{NULL},					{0.0}, {0.0},	{0.0}, {(value_t*)StartMapColorsMenu} },
+	{ more,		"Customize map controls",	{NULL},					{0.0}, {0.0},	{0.0}, {(value_t*)StartMapControlsMenu} },
 	{ redtext,	" ",					{NULL},					{0.0}, {0.0},	{0.0}, {NULL} },
 	{ discrete, "Rotate automap",		{&am_rotate},		   	{3.0}, {0.0},	{0.0}, {RotateTypes} },
 	{ discrete, "Overlay automap",		{&am_overlay},			{3.0}, {0.0},	{0.0}, {OverlayTypes} },
+	{ discrete, "Enable textured display",		{&am_textured},			{3.0}, {0.0},	{0.0}, {OnOff} },
 	{ redtext,	" ",					{NULL},					{0.0}, {0.0},	{0.0}, {NULL} },
 	{ discrete, "Show item counts",		{&am_showitems},		{2.0}, {0.0},	{0.0}, {OnOff} },
 	{ discrete, "Show monster counts",	{&am_showmonsters},		{2.0}, {0.0},	{0.0}, {OnOff} },
@@ -983,6 +989,37 @@ menu_t AutomapMenu =
 	0,
 	AutomapItems,
 };
+
+menuitem_t MapControlsItems[] =
+{
+	{ redtext,"ENTER to change, BACKSPACE to clear", {NULL}, {0.0}, {0.0}, {0.0}, {NULL} },
+	{ redtext,	" ",					{NULL},	{0.0}, {0.0}, {0.0}, {NULL} },
+	{ whitetext,"Map Controls",				{NULL},	{0.0}, {0.0}, {0.0}, {NULL} },
+	{ mapcontrol,	"Pan left",					{NULL}, {0.0}, {0.0}, {0.0}, {(value_t *)"+am_panleft"} },
+	{ mapcontrol,	"Pan right",				{NULL}, {0.0}, {0.0}, {0.0}, {(value_t *)"+am_panright"} },
+	{ mapcontrol,	"Pan up",					{NULL}, {0.0}, {0.0}, {0.0}, {(value_t *)"+am_panup"} },
+	{ mapcontrol,	"Pan down",					{NULL}, {0.0}, {0.0}, {0.0}, {(value_t *)"+am_pandown"} },
+	{ mapcontrol,	"Zoom in",					{NULL}, {0.0}, {0.0}, {0.0}, {(value_t *)"+am_zoomin"} },
+	{ mapcontrol,	"Zoom out",					{NULL}, {0.0}, {0.0}, {0.0}, {(value_t *)"+am_zoomout"} },
+	{ mapcontrol,	"Toggle zoom",				{NULL}, {0.0}, {0.0}, {0.0}, {(value_t *)"am_gobig"} },
+	{ mapcontrol,	"Toggle follow",			{NULL}, {0.0}, {0.0}, {0.0}, {(value_t *)"am_togglefollow"} },
+	{ mapcontrol,	"Toggle grid",				{NULL}, {0.0}, {0.0}, {0.0}, {(value_t *)"am_togglegrid"} },
+	{ mapcontrol,	"Toggle texture",			{NULL}, {0.0}, {0.0}, {0.0}, {(value_t *)"am_toggletexture"} },
+	{ mapcontrol,	"Set mark",					{NULL}, {0.0}, {0.0}, {0.0}, {(value_t *)"am_setmark"} },
+	{ mapcontrol,	"Clear mark",				{NULL}, {0.0}, {0.0}, {0.0}, {(value_t *)"am_clearmarks"} },
+};
+
+menu_t MapControlsMenu =
+{
+	"CUSTOMIZE MAP CONTROLS",
+	3,
+	countof(MapControlsItems),
+	0,
+	MapControlsItems,
+	2,
+};
+
+
 
 /*=======================================
  *
@@ -1191,7 +1228,7 @@ static menuitem_t MessagesItems[] = {
 	{ discrete, "Show messages",		{&show_messages},		{2.0}, {0.0},   {0.0}, {OnOff} },
 	{ discrete, "Show obituaries",		{&show_obituaries},		{2.0}, {0.0},   {0.0}, {OnOff} },
 	{ discrete, "Chat sound",			{&chat_sound},			{4.0}, {0.0},   {0.0}, {ChatSounds} },
-	{ discrete, "Minimum message level",{&msglevel},		   	{3.0}, {0.0},   {0.0}, {MessageLevels} },
+	{ discrete, "Minimum message level", {&msglevel},		   	{3.0}, {0.0},   {0.0}, {MessageLevels} },
 	{ discrete, "Center messages",		{&con_centernotify},	{2.0}, {0.0},	{0.0}, {OnOff} },
 	{ discrete, "Color in messages",	{&con_colorinmessages},	{3.0}, {0.0},	{0.0}, {MessageColorLevels} },
 	{ redtext,	" ",					{NULL},					{0.0}, {0.0},	{0.0}, {NULL} },
@@ -1432,6 +1469,7 @@ value_t DF_Crouch[3] = {
 	{ DF_YES_CROUCH, "On" }
 };
 
+
 static menuitem_t DMFlagsItems[] = {
 	{ discrete, "Teamplay",				{&teamplay},	{2.0}, {0.0}, {0.0}, {OnOff} },
 	{ slider,	"Team damage scalar",	{&teamdamage},	{0.0}, {1.0}, {0.05f},{NULL} },
@@ -1439,16 +1477,6 @@ static menuitem_t DMFlagsItems[] = {
 	{ discrete, "Smart Autoaim",		{&sv_smartaim},	{4.0}, {0.0}, {0.0}, {SmartAim} },
 	{ redtext,	" ",					{NULL},			{0.0}, {0.0}, {0.0}, {NULL} },
 	{ bitmask,	"Falling damage",		{&dmflags},		{4.0}, {DF_FORCE_FALLINGZD|DF_FORCE_FALLINGHX}, {0}, {FallingDM} },
-	{ bitflag,	"Weapons stay (DM)",	{&dmflags},		{0}, {0}, {0}, {(value_t *)DF_WEAPONS_STAY} },
-	{ bitflag,	"Allow powerups (DM)",	{&dmflags},		{1}, {0}, {0}, {(value_t *)DF_NO_ITEMS} },
-	{ bitflag,	"Allow health (DM)",	{&dmflags},		{1}, {0}, {0}, {(value_t *)DF_NO_HEALTH} },
-	{ bitflag,	"Allow armor (DM)",		{&dmflags},		{1}, {0}, {0}, {(value_t *)DF_NO_ARMOR} },
-	{ bitflag,	"Spawn farthest (DM)",	{&dmflags},		{0}, {0}, {0}, {(value_t *)DF_SPAWN_FARTHEST} },
-	{ bitflag,	"Same map (DM)",		{&dmflags},		{0}, {0}, {0}, {(value_t *)DF_SAME_LEVEL} },
-	{ bitflag,	"Force respawn (DM)",	{&dmflags},		{0}, {0}, {0}, {(value_t *)DF_FORCE_RESPAWN} },
-	{ bitflag,	"Allow exit (DM)",		{&dmflags},		{1}, {0}, {0}, {(value_t *)DF_NO_EXIT} },
-	{ bitflag,	"Barrels respawn (DM)",	{&dmflags2},	{0}, {0}, {0}, {(value_t *)DF2_BARRELS_RESPAWN} },
-	{ bitflag,	"No respawn protection (DM)",{&dmflags2},	{0}, {0}, {0}, {(value_t *)DF2_NO_RESPAWN_INVUL} },
 	{ bitflag,	"Drop weapon",			{&dmflags2},	{0}, {0}, {0}, {(value_t *)DF2_YES_WEAPONDROP} },
 	{ bitflag,	"Double ammo",			{&dmflags2},	{0}, {0}, {0}, {(value_t *)DF2_YES_DOUBLEAMMO} },
 	{ bitflag,	"Infinite ammo",		{&dmflags},		{0}, {0}, {0}, {(value_t *)DF_INFINITE_AMMO} },
@@ -1458,7 +1486,7 @@ static menuitem_t DMFlagsItems[] = {
 	{ bitflag,	"Monsters respawn",		{&dmflags},		{0}, {0}, {0}, {(value_t *)DF_MONSTERS_RESPAWN} },
 	{ bitflag,	"No respawn",			{&dmflags2},	{0}, {0}, {0}, {(value_t *)DF2_NO_RESPAWN} },
 	{ bitflag,	"Items respawn",		{&dmflags},		{0}, {0}, {0}, {(value_t *)DF_ITEMS_RESPAWN} },
-	{ bitflag,	"Mega powerups respawn",{&dmflags},		{0}, {0}, {0}, {(value_t *)DF_RESPAWN_SUPER} },
+	{ bitflag,	"Big powerups respawn",	{&dmflags},		{0}, {0}, {0}, {(value_t *)DF_RESPAWN_SUPER} },
 	{ bitflag,	"Fast monsters",		{&dmflags},		{0}, {0}, {0}, {(value_t *)DF_FAST_MONSTERS} },
 	{ bitflag,	"Degeneration",			{&dmflags2},	{0}, {0}, {0}, {(value_t *)DF2_YES_DEGENERATION} },
 	{ bitflag,	"Allow Autoaim",		{&dmflags2},	{1}, {0}, {0}, {(value_t *)DF2_NOAUTOAIM} },
@@ -1471,16 +1499,29 @@ static menuitem_t DMFlagsItems[] = {
 	{ bitflag,	"Allow automap",		{&dmflags2},	{1}, {0}, {0}, {(value_t *)DF2_NO_AUTOMAP} },
 	{ bitflag,	"Automap allies",		{&dmflags2},	{1}, {0}, {0}, {(value_t *)DF2_NO_AUTOMAP_ALLIES} },
 	{ bitflag,	"Allow spying",			{&dmflags2},	{1}, {0}, {0}, {(value_t *)DF2_DISALLOW_SPYING} },
-	{ bitflag,	"Don't spawn runes (DM)",	{&dmflags2},	{0}, {0}, {0}, {(value_t *)DF2_NO_RUNES} },
-	{ bitflag,	"Instant flag return (ST/CTF)",	{&dmflags2},	{0}, {0}, {0}, {(value_t *)DF2_INSTANT_RETURN} },
-	{ bitflag,	"Server picks teams (ST/CTF)",	{&dmflags2},	{0}, {0}, {0}, {(value_t *)DF2_NO_TEAM_SELECT} },
 	{ bitflag,	"Chasecam cheat",		{&dmflags2},	{0}, {0}, {0}, {(value_t *)DF2_CHASECAM} },
 	{ bitflag,	"Check ammo for weapon switch",	{&dmflags2},	{1}, {0}, {0}, {(value_t *)DF2_DONTCHECKAMMO} },
 	{ bitflag,	"Killing Romero kills all his spawns",	{&dmflags2},	{0}, {0}, {0}, {(value_t *)DF2_KILLBOSSMONST} },
 
+	{ redtext,	" ",					{NULL},			{0}, {0}, {0}, {NULL} },
+	{ whitetext,"Deathmatch Settings",	{NULL},			{0}, {0}, {0}, {NULL} },
+	{ bitflag,	"Weapons stay",			{&dmflags},		{0}, {0}, {0}, {(value_t *)DF_WEAPONS_STAY} },
+	{ bitflag,	"Allow powerups",		{&dmflags},		{1}, {0}, {0}, {(value_t *)DF_NO_ITEMS} },
+	{ bitflag,	"Allow health",			{&dmflags},		{1}, {0}, {0}, {(value_t *)DF_NO_HEALTH} },
+	{ bitflag,	"Allow armor",			{&dmflags},		{1}, {0}, {0}, {(value_t *)DF_NO_ARMOR} },
+	{ bitflag,	"Spawn farthest",		{&dmflags},		{0}, {0}, {0}, {(value_t *)DF_SPAWN_FARTHEST} },
+	{ bitflag,	"Same map",				{&dmflags},		{0}, {0}, {0}, {(value_t *)DF_SAME_LEVEL} },
+	{ bitflag,	"Force respawn",		{&dmflags},		{0}, {0}, {0}, {(value_t *)DF_FORCE_RESPAWN} },
+	{ bitflag,	"Allow exit",			{&dmflags},		{1}, {0}, {0}, {(value_t *)DF_NO_EXIT} },
+	{ bitflag,	"Barrels respawn",		{&dmflags2},	{0}, {0}, {0}, {(value_t *)DF2_BARRELS_RESPAWN} },
+	{ bitflag,	"No respawn protection",{&dmflags2},	{0}, {0}, {0}, {(value_t *)DF2_NO_RESPAWN_INVUL} },
 	{ bitflag,	"Lose frag if fragged",	{&dmflags2},	{0}, {0}, {0}, {(value_t *)DF2_YES_LOSEFRAG} },
 	{ bitflag,	"Keep frags gained",	{&dmflags2},	{0}, {0}, {0}, {(value_t *)DF2_YES_KEEPFRAGS} },
 	{ bitflag,	"No team switching",	{&dmflags2},	{0}, {0}, {0}, {(value_t *)DF2_NO_TEAM_SWITCH} },
+	// [BB]
+	{ bitflag,	"Don't spawn runes (DM)",	{&dmflags2},	{0}, {0}, {0}, {(value_t *)DF2_NO_RUNES} },
+	{ bitflag,	"Instant flag return (ST/CTF)",	{&dmflags2},	{0}, {0}, {0}, {(value_t *)DF2_INSTANT_RETURN} },
+	{ bitflag,	"Server picks teams (ST/CTF)",	{&dmflags2},	{0}, {0}, {0}, {(value_t *)DF2_NO_TEAM_SELECT} },
 
 	{ redtext,	" ",					{NULL},			{0}, {0}, {0}, {NULL} },
 	{ whitetext,"Cooperative Settings",	{NULL},			{0}, {0}, {0}, {NULL} },
@@ -1685,6 +1726,7 @@ static valueenum_t Resamplers[] =
 static menuitem_t SoundItems[] =
 {
 	{ slider,	"Sounds volume",		{&snd_sfxvolume},		{0.0}, {1.0},	{0.05f}, {NULL} },
+	{ slider,	"Menu volume",			{&snd_menuvolume},		{0.0}, {1.0},	{0.05f}, {NULL} },
 	{ slider,	"Music volume",			{&snd_musicvolume},		{0.0}, {1.0},	{0.05f}, {NULL} },
 	{ discrete, "MIDI device",			{&snd_mididevice},		{0.0}, {0.0},	{0.0}, {NULL} },
 	{ redtext,	" ",					{NULL},					{0.0}, {0.0},	{0.0}, {NULL} },
@@ -1715,7 +1757,7 @@ static menu_t SoundMenu =
 	SoundItems,
 };
 
-#define MIDI_DEVICE_ITEM 2
+#define MIDI_DEVICE_ITEM 3
 
 /*=======================================
  *
@@ -2191,20 +2233,28 @@ menu_t CallVoteMenu = {
 
 void SendNewColor (int red, int green, int blue);
 void M_PlayerSetup (void);
-void M_AccountSetup( void );
 void M_SetupPlayerSetupMenu( void );
-void M_StartBrowserMenu( void );
 void M_Spectate( void );
 void M_CallVote( void );
 void M_ChangeTeam( void );
 void M_Skirmish( void );
 
+#ifdef WIN32
+// [RC] In Windows, a menu to launch IDEse or the internal browser is shown. There currently isn't an IDEse for Linux.
+void M_StartIdeSe( void )
+{
+	I_RunProgram( "idese.exe" );
+	exit( 0 );
+}
+#endif
+
 static menuitem_t MultiplayerItems[] =
 {
 	{ more,		"Offline skirmish",				{NULL},					{0.0}, {0.0},	{0.0}, {(value_t *)M_Skirmish} }, // [RC] Clarification that Skirmish is not hosting
-	{ more,		"Browse servers",		{NULL},					{0.0}, {0.0},	{0.0}, {(value_t *)M_StartBrowserMenu} },
+#ifdef WIN32
+	{ more,		"Browse servers",		{NULL},					{0.0}, {0.0},	{0.0}, {(value_t *)M_StartIdeSe} },
+#endif
 	{ more,		"Player setup",			{NULL},					{0.0}, {0.0},	{0.0}, {(value_t *)M_PlayerSetup} },
-//	{ more,		"Account setup",		{NULL},					{0.0}, {0.0},	{0.0}, {(value_t *)M_AccountSetup} },
 	{ redtext,	" ",					{NULL},					{0.0}, {0.0},	{0.0}, {NULL} },
 	{ more,		"Spectate",				{NULL},					{0.0}, {0.0},	{0.0}, {(value_t *)M_Spectate} },
 	{ more,		"Switch teams",				{NULL},					{0.0}, {0.0}, {0.0}, {(value_t *)M_ChangeTeam} },
@@ -2283,674 +2333,6 @@ bool M_SkulltagVersionDrawer( void )
 	screen->DrawText( SmallFont, CR_WHITE, 160 - ( SmallFont->StringWidth( szString ) / 2 ), ulCurYPos, szString, DTA_Clean, true, TAG_DONE );
 
 	return false;
-}
-
-/*=======================================
- *
- * Browser Menu
- *
- *=======================================*/
-
-static	LONG	g_lSelectedServer = -1;
-static	int		g_iSortedServers[MAX_BROWSER_SERVERS];
-
-void M_RefreshServers( void );
-void M_GetServerInfo( void );
-void M_CheckConnectToServer( void );
-void M_VerifyJoinWithoutWad( int iChar );
-void M_ConnectToServer( void );
-void M_BuildServerList( void );
-bool M_ScrollServerList( bool bUp );
-LONG M_CalcLastSortedIndex( void );
-bool M_ShouldShowServer( LONG lServer );
-bool M_BrowserMenuDrawer( void );
-void M_StartInternalBrowse( void );
-
-static	void			browsermenu_SortServers( ULONG ulSortType );
-static	int	STACK_ARGS	browsermenu_PingCompareFunc( const void *arg1, const void *arg2 );
-static	int	STACK_ARGS	browsermenu_ServerNameCompareFunc( const void *arg1, const void *arg2 );
-static	int	STACK_ARGS	browsermenu_MapNameCompareFunc( const void *arg1, const void *arg2 );
-static	int	STACK_ARGS	browsermenu_PlayersCompareFunc( const void *arg1, const void *arg2 );
-
-#define	NUM_SERVER_SLOTS	8
-#define	SERVER_SLOT_START	8
-
-CVAR( Int, menu_browser_servers, 0, CVAR_ARCHIVE )
-CVAR( Int, menu_browser_gametype, 0, CVAR_ARCHIVE )
-CVAR( Int, menu_browser_sortby, 0, CVAR_ARCHIVE );
-CVAR( Bool, menu_browser_showempty, true, CVAR_ARCHIVE );
-CVAR( Bool, menu_browser_showfull, true, CVAR_ARCHIVE )
-
-// [RC] In Windows, a menu to launch IDEse or the internal browser is shown. There currently isn't an IDEse for Linux.
-#ifdef WIN32
-
-	void M_StartIdeSe( void )
-	{
-		I_RunProgram( "idese.exe" );
-		exit( 0 );
-	}
-
-	static menuitem_t BrowserTypeItems[] = 
-	{
-		{ more,		"IDEse",		{NULL},					{0.0}, {0.0},	{0.0}, {(value_t *)M_StartIdeSe} },
-		{ more,		"Internal browser",			{NULL},					{0.0}, {0.0},	{0.0}, {(value_t *)M_StartInternalBrowse} },
-	};
-
-	menu_t BrowserTypeMenu = {
-		"SELECT BROWSER",
-		0,
-		countof(BrowserTypeItems),
-		0,
-		BrowserTypeItems,
-		0,
-		0,
-		0,
-		0,
-		false,
-		NULL,
-	};	
-
-#endif
-
-static menuitem_t BrowserItems[] =
-{
-	{ discrete, "Servers",				{&menu_browser_servers},		{2.0}, {0.0},	{0.0}, {ServerTypeVals} },
-	{ discrete, "Gametype",				{&menu_browser_gametype},		{17.0}, {0.0},	{0.0}, {ServerGameModeVals} },
-	{ discrete, "Sort by",				{&menu_browser_sortby},			{4.0}, {0.0},	{0.0}, {ServerSortTypeVals} },
-	{ discrete, "Show empty",			{&menu_browser_showempty},		{2.0}, {0.0},	{0.0}, {YesNo} },
-	{ discrete,	"Show full",			{&menu_browser_showfull},		{2.0}, {0.0},	{0.0}, {YesNo} },
-	{ redtext,	" ",					{NULL},							{0.0}, {0.0},	{0.0}, {NULL} },
-	{ browserheader," ",				{NULL},							{0.0}, {0.0},	{0.0}, {NULL} },
-	{ redtext,	" ",					{NULL},							{0.0}, {0.0},	{0.0}, {NULL} },
-	{ browserslot, NULL,				{NULL},							{0.0}, {0.0},	{0.0}, {NULL} },
-	{ browserslot, NULL,				{NULL},							{0.0}, {0.0},	{0.0}, {NULL} },
-	{ browserslot, NULL,				{NULL},							{0.0}, {0.0},	{0.0}, {NULL} },
-	{ browserslot, NULL,				{NULL},							{0.0}, {0.0},	{0.0}, {NULL} },
-	{ browserslot, NULL,				{NULL},							{0.0}, {0.0},	{0.0}, {NULL} },
-	{ browserslot, NULL,				{NULL},							{0.0}, {0.0},	{0.0}, {NULL} },
-	{ browserslot, NULL,				{NULL},							{0.0}, {0.0},	{0.0}, {NULL} },
-	{ browserslot, NULL,				{NULL},							{0.0}, {0.0},	{0.0}, {NULL} },
-	{ redtext,	" ",					{NULL},							{0.0}, {0.0},	{0.0}, {NULL} },
-	{ more,		"Refresh",				{NULL},							{0.0}, {0.0},	{0.0}, {(value_t *)M_RefreshServers} },
-	{ more,		"Get server info",		{NULL},							{0.0}, {0.0},	{0.0}, {(value_t *)M_GetServerInfo} },
-	{ more,		"Join game!",			{NULL},							{0.0}, {0.0},	{0.0}, {(value_t *)M_CheckConnectToServer} },
-};
-
-menu_t BrowserMenu = {
-	"SERVER BROWSER",
-	0,
-	countof(BrowserItems),
-	0,
-	BrowserItems,
-	0,
-	0,
-	0,
-	M_BrowserMenuDrawer,
-	false,
-	NULL,
-};
-
-void M_StartBrowserMenu( void )
-{
-	// Switch the menu.
-	#ifdef WIN32
-		M_SwitchMenu( &BrowserTypeMenu );
-	#else
-		M_StartInternalBrowse( );
-	#endif
-}
-
-void M_StartInternalBrowse( void )
-{
-	g_lSelectedServer = -1;
-
-	// First, clear the existing server list.
-	BROWSER_ClearServerList( );
-
-	// Then, query the master server.
-	BROWSER_QueryMasterServer( );
-
-	// Build the server list.
-//	M_BuildServerList( );
-
-	// Switch the menu.
-	M_SwitchMenu( &BrowserMenu );
-}
-
-//*****************************************************************************
-//
-bool M_BrowserMenuDrawer( void )
-{
-	LONG	lNumServers;
-	char	szString[256];
-
-	lNumServers = M_CalcLastSortedIndex( );
-	sprintf( szString, "Currently showing %d servers", static_cast<int> (lNumServers) );
-	screen->DrawText( SmallFont, CR_WHITE, 160 - ( SmallFont->StringWidth( szString ) / 2 ), 190, szString, DTA_Clean, true, TAG_DONE );
-
-	return false;
-}
-
-//*****************************************************************************
-//
-void M_RefreshServers( void )
-{
-	// Don't do anything if we're still waiting for a response from the master server.
-	if ( BROWSER_WaitingForMasterResponse( ))
-		return;
-
-	g_lSelectedServer = -1;
-
-	// First, clear the existing server list.
-	BROWSER_ClearServerList( );
-
-	// Then, query the master server.
-	BROWSER_QueryMasterServer( );
-}
-
-//*****************************************************************************
-//
-char	g_szVerifyJoinString[128];
-void M_CheckConnectToServer( void )
-{
-	if ( g_lSelectedServer != -1 && BROWSER_IsActive( g_lSelectedServer ))
-	{
-		ULONG	ulIdx;
-		bool	bNeedToLoadWads = false;
-		FString	WadList;
-		FString	MissingWadList;
-
-		// If the server uses a PWAD, make sure we have it loaded. If not, ask the user
-		// if he'd like to join the server anyway.
-		for ( ulIdx = 0; ulIdx < static_cast<unsigned> (BROWSER_GetNumPWADs( g_lSelectedServer )); ulIdx++ )
-		{
-			WadList += BROWSER_GetPWADName( g_lSelectedServer, ulIdx );
-
-			if ( ulIdx + 1 < static_cast<unsigned> (BROWSER_GetNumPWADs( g_lSelectedServer )))
-				WadList += " ";
-
-			if ( Wads.CheckIfWadLoaded( BROWSER_GetPWADName( g_lSelectedServer, ulIdx )) == -1 )
-			{
-				// A needed wad hasn't bee loaded! Signify that we'll need to load wads.
-				bNeedToLoadWads = true;
-				// [BB] Save the wads we are missing so that we can print a meaningful error message.
-				MissingWadList += BROWSER_GetPWADName( g_lSelectedServer, ulIdx );
-				MissingWadList += "\n";
-			}
-		}
-
-		// Clear away the menus.
-		M_ClearMenus( );
-
-		// Check if we need to load up PWADs before we join the server.
-		if ( bNeedToLoadWads )
-		{
-			I_Error ( "Can't connect to \"%s\". You don't have the following wads loaded:\n%s\nNote: It is recommended to use Doomseeker or IDE to join servers.", BROWSER_GetHostName ( g_lSelectedServer ), MissingWadList.GetChars() );
-
-			gamestate = GS_FULLCONSOLE;
-			if ( 0 )//D_LoadWads( szWadList ))
-			{
-				// Everything checked out! Join the server.
-				M_ConnectToServer( );
-			}
-		}
-		else
-		{
-			// Everything checked out! Join the server.
-			M_ConnectToServer( );
-		}
-	}
-}
-
-//*****************************************************************************
-//
-void M_VerifyJoinWithoutWad( int iChar )
-{
-	if ( iChar != 'y' )
-		return;
-
-	// User wants to join the server.
-	M_ConnectToServer( );
-}
-
-//*****************************************************************************
-//
-void M_ConnectToServer( void )
-{
-	if ( g_lSelectedServer != -1 && BROWSER_IsActive( g_lSelectedServer ))
-	{
-		char	szString[128];
-
-		// Build our command string.
-		sprintf( szString, "connect %s", NETWORK_AddressToString( BROWSER_GetAddress( g_lSelectedServer )));
-
-		// Do the equavilent of typing "connect <IP>" in the console.
-		AddCommandString( szString );
-
-		// Clear out the menus.
-		M_ClearMenus( );
-	}
-}
-
-//*****************************************************************************
-//
-void M_BuildServerList( void )
-{
-	ULONG	ulIdx;
-
-	// First, sort the menus.
-	browsermenu_SortServers( menu_browser_sortby );
-
-	for ( ulIdx = SERVER_SLOT_START; ulIdx < ( SERVER_SLOT_START + NUM_SERVER_SLOTS ); ulIdx++ )
-		BrowserItems[ulIdx].f.lServer = g_iSortedServers[ulIdx - SERVER_SLOT_START];
-}
-
-//*****************************************************************************
-//
-bool M_ScrollServerList( bool bUp )
-{
-	ULONG	ulIdx;
-
-	if ( bUp )
-	{
-		if ( BrowserItems[SERVER_SLOT_START].f.lServer != g_iSortedServers[0] )
-		{
-			for ( ulIdx = SERVER_SLOT_START; ulIdx < ( SERVER_SLOT_START + NUM_SERVER_SLOTS ); ulIdx++ )
-			{
-				ULONG	ulSortedIdx;
-
-				// Go through the sorted server list and attempt to match it with the
-				// server in this menu slot. If it matches, change the menu server slot
-				// to the previous sorted server slot.
-				for ( ulSortedIdx = 1; ulSortedIdx < MAX_BROWSER_SERVERS; ulSortedIdx++ )
-				{
-					if ( BrowserItems[ulIdx].f.lServer == g_iSortedServers[ulSortedIdx] )
-					{
-						BrowserItems[ulIdx].f.lServer = g_iSortedServers[ulSortedIdx - 1];
-						break;
-					}
-				}
-			}
-
-			// Scrolling took place.
-			return ( true );
-		}
-		// No scrolling took place.
-		else
-			return ( false );
-	}
-	else
-	{
-		// No servers in the list.
-		if ( M_CalcLastSortedIndex( ) == 0 )
-			return ( false );
-
-		if ( BrowserItems[SERVER_SLOT_START + NUM_SERVER_SLOTS].f.lServer != g_iSortedServers[M_CalcLastSortedIndex( ) - 1] )
-		{
-			for ( ulIdx = SERVER_SLOT_START; ulIdx < ( SERVER_SLOT_START + NUM_SERVER_SLOTS ); ulIdx++ )
-			{
-				ULONG	ulSortedIdx;
-
-				// Go through the sorted server list and attempt to match it with the
-				// server in this menu slot. If it matches, change the menu server slot
-				// to the next sorted server slot.
-				for ( ulSortedIdx = 0; ulSortedIdx < MAX_BROWSER_SERVERS - 1; ulSortedIdx++ )
-				{
-					if ( BrowserItems[ulIdx].f.lServer == g_iSortedServers[ulSortedIdx] )
-					{
-						BrowserItems[ulIdx].f.lServer = g_iSortedServers[ulSortedIdx + 1];
-						break;
-					}
-				}
-			}
-
-			// Scrolling took place.
-			return ( true );
-		}
-		// No scrolling took place.
-		else
-			return ( false );
-	}
-}
-
-//*****************************************************************************
-//
-LONG M_CalcLastSortedIndex( void )
-{
-	ULONG	ulIdx;
-
-	for ( ulIdx = 0; ulIdx < MAX_BROWSER_SERVERS; ulIdx++ )
-	{
-		if ( M_ShouldShowServer( g_iSortedServers[ulIdx] ) == false )
-			return ( ulIdx );
-	}
-
-	return ( ulIdx );
-}
-
-//*****************************************************************************
-//
-bool M_ShouldShowServer( LONG lServer )
-{
-	// Don't show inactive servers.
-	if ( BROWSER_IsActive( lServer ) == false )
-		return ( false );
-/*
-	// Don't show servers that don't have the same IWAD we do.
-	if ( stricmp( SERVER_MASTER_GetIWADName( ), BROWSER_GetIWADName( lServer )) != 0 )
-		return ( false );
-*/
-	// Don't show Internet servers if we are only showing LAN servers.
-	if ( menu_browser_servers == 1 )
-	{
-		if ( BROWSER_IsLAN( lServer ) == false )
-			return ( false );
-	}
-
-	// Don't show LAN servers if we are only showing Internet servers.
-	if ( menu_browser_servers == 0 )
-	{
-		if ( BROWSER_IsLAN( lServer ) == true )
-			return ( false );
-	}
-
-	// Don't show empty servers.
-	if ( menu_browser_showempty == false )
-	{
-		if ( BROWSER_GetNumPlayers( lServer ) == 0 )
-			return ( false );
-	}
-
-	// Don't show full servers.
-	if ( menu_browser_showfull == false )
-	{
-		if ( BROWSER_GetNumPlayers( lServer ) ==  BROWSER_GetMaxClients( lServer ))
-			return ( false );
-	}
-
-	// Don't show servers that have the gameplay mode we want.
-	if ( menu_browser_gametype != 0 )
-	{
-		if ( BROWSER_GetGameMode( lServer ) != ( menu_browser_gametype - 1 ))
-			return ( false );
-	}
-
-	return ( true );
-}
-
-//*****************************************************************************
-//
-static void browsermenu_SortServers( ULONG ulSortType )
-{
-	ULONG	ulIdx;
-
-	for ( ulIdx = 0; ulIdx < MAX_BROWSER_SERVERS; ulIdx++ )
-		g_iSortedServers[ulIdx] = ulIdx;
-
-	switch ( ulSortType )
-	{
-	// Ping.
-	case 0:
-
-		qsort( g_iSortedServers, MAX_BROWSER_SERVERS, sizeof( int ), browsermenu_PingCompareFunc );
-		break;
-	// Server name.
-	case 1:
-
-		qsort( g_iSortedServers, MAX_BROWSER_SERVERS, sizeof( int ), browsermenu_ServerNameCompareFunc );
-		break;
-	// Map name.
-	case 2:
-
-		qsort( g_iSortedServers, MAX_BROWSER_SERVERS, sizeof( int ), browsermenu_MapNameCompareFunc );
-		break;
-	// Players.
-	case 3:
-
-		qsort( g_iSortedServers, MAX_BROWSER_SERVERS, sizeof( int ), browsermenu_PlayersCompareFunc );
-		break;
-	}
-}
-
-//*****************************************************************************
-//
-static int STACK_ARGS browsermenu_PingCompareFunc( const void *arg1, const void *arg2 )
-{
-	if (( M_ShouldShowServer( *(int *)arg1 ) == false ) && ( M_ShouldShowServer( *(int *)arg2 ) == false ))
-		return ( 0 );
-
-	if ( M_ShouldShowServer( *(int *)arg1 ) == false )
-		return ( 1 );
-
-	if ( M_ShouldShowServer( *(int *)arg2 ) == false )
-		return ( -1 );
-
-	return ( BROWSER_GetPing( *(int *)arg1 ) - BROWSER_GetPing( *(int *)arg2 ));
-}
-
-//*****************************************************************************
-//
-static int STACK_ARGS browsermenu_ServerNameCompareFunc( const void *arg1, const void *arg2 )
-{
-	if (( M_ShouldShowServer( *(int *)arg1 ) == false ) && ( M_ShouldShowServer( *(int *)arg2 ) == false ))
-		return ( 0 );
-
-	if ( M_ShouldShowServer( *(int *)arg1 ) == false )
-		return ( 1 );
-
-	if ( M_ShouldShowServer( *(int *)arg2 ) == false )
-		return ( -1 );
-
-	return ( stricmp( BROWSER_GetHostName( *(int *)arg1 ), BROWSER_GetHostName( *(int *)arg2 )));
-}
-
-//*****************************************************************************
-//
-static int STACK_ARGS browsermenu_MapNameCompareFunc( const void *arg1, const void *arg2 )
-{
-	if (( M_ShouldShowServer( *(int *)arg1 ) == false ) && ( M_ShouldShowServer( *(int *)arg2 ) == false ))
-		return ( 0 );
-
-	if ( M_ShouldShowServer( *(int *)arg1 ) == false )
-		return ( 1 );
-
-	if ( M_ShouldShowServer( *(int *)arg2 ) == false )
-		return ( -1 );
-
-	return ( stricmp( BROWSER_GetMapname( *(int *)arg1 ), BROWSER_GetMapname( *(int *)arg2 )));
-}
-
-//*****************************************************************************
-//
-static int STACK_ARGS browsermenu_PlayersCompareFunc( const void *arg1, const void *arg2 )
-{
-	if (( M_ShouldShowServer( *(int *)arg1 ) == false ) && ( M_ShouldShowServer( *(int *)arg2 ) == false ))
-		return ( 0 );
-
-	if ( M_ShouldShowServer( *(int *)arg1 ) == false )
-		return ( 1 );
-
-	if ( M_ShouldShowServer( *(int *)arg2 ) == false )
-		return ( -1 );
-
-	return ( BROWSER_GetNumPlayers( *(int *)arg2 ) - BROWSER_GetNumPlayers( *(int *)arg1 ));
-}
-
-/*=======================================
- *
- * Server Info Menu
- *
- *=======================================*/
-
-void M_ReturnToBrowserMenu( void );
-bool M_DrawServerInfo( void );
-
-static menuitem_t ServerInfoItems[] =
-{
-	{ redtext,	" ",					{NULL},							{0.0}, {0.0},	{0.0}, {NULL} },
-	{ redtext,	" ",					{NULL},							{0.0}, {0.0},	{0.0}, {NULL} },
-	{ redtext,	" ",					{NULL},							{0.0}, {0.0},	{0.0}, {NULL} },
-	{ redtext,	" ",					{NULL},							{0.0}, {0.0},	{0.0}, {NULL} },
-	{ redtext,	" ",					{NULL},							{0.0}, {0.0},	{0.0}, {NULL} },
-	{ redtext,	" ",					{NULL},							{0.0}, {0.0},	{0.0}, {NULL} },
-	{ redtext,	" ",					{NULL},							{0.0}, {0.0},	{0.0}, {NULL} },
-	{ redtext,	" ",					{NULL},							{0.0}, {0.0},	{0.0}, {NULL} },
-	{ redtext,	" ",					{NULL},							{0.0}, {0.0},	{0.0}, {NULL} },
-	{ redtext,	" ",					{NULL},							{0.0}, {0.0},	{0.0}, {NULL} },
-	{ redtext,	" ",					{NULL},							{0.0}, {0.0},	{0.0}, {NULL} },
-	{ redtext,	" ",					{NULL},							{0.0}, {0.0},	{0.0}, {NULL} },
-	{ redtext,	" ",					{NULL},							{0.0}, {0.0},	{0.0}, {NULL} },
-	{ redtext,	" ",					{NULL},							{0.0}, {0.0},	{0.0}, {NULL} },
-	{ redtext,	" ",					{NULL},							{0.0}, {0.0},	{0.0}, {NULL} },
-	{ redtext,	" ",					{NULL},							{0.0}, {0.0},	{0.0}, {NULL} },
-	{ redtext,	" ",					{NULL},							{0.0}, {0.0},	{0.0}, {NULL} },
-	{ redtext,	" ",					{NULL},							{0.0}, {0.0},	{0.0}, {NULL} },
-	{ redtext,	" ",					{NULL},							{0.0}, {0.0},	{0.0}, {NULL} },
-	{ redtext,	" ",					{NULL},							{0.0}, {0.0},	{0.0}, {NULL} },
-	{ more,		"Return to browser",	{NULL},							{0.0}, {0.0},	{0.0}, {(value_t *)M_ReturnToBrowserMenu} },
-};
-
-menu_t ServerInfoMenu = {
-	"SERVER INFORMATION",
-	20,
-	countof(ServerInfoItems),
-	0,
-	ServerInfoItems,
-	0,
-	0,
-	0,
-	M_DrawServerInfo,
-	false,
-	NULL,
-	MNF_ALIGNLEFT,
-};
-
-//*****************************************************************************
-//
-void M_ReturnToBrowserMenu( void )
-{
-	CurrentMenu->lastOn = CurrentItem;
-	M_PopMenuStack( );
-}
-
-//*****************************************************************************
-//
-bool M_DrawServerInfo( void )
-{
-	ULONG	ulIdx;
-	ULONG	ulCurYPos;
-	ULONG	ulTextHeight;
-	char	szString[256];
-
-	if ( g_lSelectedServer == -1 )
-		return false;
-
-	ulCurYPos = 32;
-	ulTextHeight = ( gameinfo.gametype == GAME_Doom ? 8 : 9 );
-
-	sprintf( szString, "Name: \\cc%s", BROWSER_GetHostName( g_lSelectedServer ));
-	V_ColorizeString( szString );
-	screen->DrawText( SmallFont, CR_UNTRANSLATED, 16, ulCurYPos, szString, DTA_Clean, true, TAG_DONE );
-
-	ulCurYPos += ulTextHeight;
-
-	sprintf( szString, "IP: \\cc%s", NETWORK_AddressToString( BROWSER_GetAddress( g_lSelectedServer )));
-	V_ColorizeString( szString );
-	screen->DrawText( SmallFont, CR_UNTRANSLATED, 16, ulCurYPos, szString, DTA_Clean, true, TAG_DONE );
-
-	ulCurYPos += ulTextHeight;
-
-	sprintf( szString, "Map: \\cc%s", BROWSER_GetMapname( g_lSelectedServer ));
-	V_ColorizeString( szString );
-	screen->DrawText( SmallFont, CR_UNTRANSLATED, 16, ulCurYPos, szString, DTA_Clean, true, TAG_DONE );
-
-	ulCurYPos += ulTextHeight;
-
-	sprintf( szString, "Gametype: \\cc%s", GameModeVals[BROWSER_GetGameMode( g_lSelectedServer )].name );
-	V_ColorizeString( szString );
-	screen->DrawText( SmallFont, CR_UNTRANSLATED, 16, ulCurYPos, szString, DTA_Clean, true, TAG_DONE );
-
-	ulCurYPos += ulTextHeight;
-
-	sprintf( szString, "IWAD: \\cc%s", BROWSER_GetIWADName( g_lSelectedServer ));
-	V_ColorizeString( szString );
-	screen->DrawText( SmallFont, CR_UNTRANSLATED, 16, ulCurYPos, szString, DTA_Clean, true, TAG_DONE );
-
-	ulCurYPos += ulTextHeight;
-
-	sprintf( szString, "PWADs: \\cc%d", static_cast<int> (BROWSER_GetNumPWADs( g_lSelectedServer )));
-	V_ColorizeString( szString );
-	screen->DrawText( SmallFont, CR_UNTRANSLATED, 16, ulCurYPos, szString, DTA_Clean, true, TAG_DONE );
-
-	ulCurYPos += ulTextHeight;
-
-	for ( ulIdx = 0; ulIdx < static_cast<unsigned> (MIN( (int)BROWSER_GetNumPWADs( g_lSelectedServer ), 4 )); ulIdx++ )
-	{
-		sprintf( szString, "\\cc%s", BROWSER_GetPWADName( g_lSelectedServer, ulIdx ));
-		V_ColorizeString( szString );
-		screen->DrawText( SmallFont, CR_UNTRANSLATED, 32, ulCurYPos, szString, DTA_Clean, true, TAG_DONE );
-
-		ulCurYPos += ulTextHeight;
-	}
-
-	sprintf( szString, "WAD URL: \\cc%s", BROWSER_GetWadURL( g_lSelectedServer ));
-	V_ColorizeString( szString );
-	screen->DrawText( SmallFont, CR_UNTRANSLATED, 16, ulCurYPos, szString, DTA_Clean, true, TAG_DONE );
-
-	ulCurYPos += ulTextHeight;
-
-	sprintf( szString, "Host e-mail: \\cc%s", BROWSER_GetEmailAddress( g_lSelectedServer ));
-	V_ColorizeString( szString );
-	screen->DrawText( SmallFont, CR_UNTRANSLATED, 16, ulCurYPos, szString, DTA_Clean, true, TAG_DONE );
-
-	ulCurYPos += ulTextHeight;
-
-	sprintf( szString, "Players: \\cc%d/%d", static_cast<int> (BROWSER_GetNumPlayers( g_lSelectedServer )), static_cast<int> (BROWSER_GetMaxClients( g_lSelectedServer )));
-	V_ColorizeString( szString );
-	screen->DrawText( SmallFont, CR_UNTRANSLATED, 16, ulCurYPos, szString, DTA_Clean, true, TAG_DONE );
-
-	ulCurYPos += ulTextHeight;
-
-	if ( BROWSER_GetNumPlayers( g_lSelectedServer ))
-	{
-		ulCurYPos += ulTextHeight;
-
-		screen->DrawText( SmallFont, CR_UNTRANSLATED, 32, ulCurYPos, "NAME", DTA_Clean, true, TAG_DONE );
-		screen->DrawText( SmallFont, CR_UNTRANSLATED, 192, ulCurYPos, "FRAGS", DTA_Clean, true, TAG_DONE );
-		screen->DrawText( SmallFont, CR_UNTRANSLATED, 256, ulCurYPos, "PING", DTA_Clean, true, TAG_DONE );
-
-		ulCurYPos += ( ulTextHeight * 2 );
-
-		for ( ulIdx = 0; static_cast<signed> (ulIdx) < MIN( (int)BROWSER_GetNumPlayers( g_lSelectedServer ), 4 ); ulIdx++ )
-		{
-			sprintf( szString, "%s", BROWSER_GetPlayerName( g_lSelectedServer, ulIdx ));
-			V_ColorizeString( szString );
-			screen->DrawText( SmallFont, CR_GRAY, 32, ulCurYPos, szString, DTA_Clean, true, TAG_DONE );
-
-			sprintf( szString, "%d", static_cast<int> (BROWSER_GetPlayerFragcount( g_lSelectedServer, ulIdx )));
-			V_ColorizeString( szString );
-			screen->DrawText( SmallFont, CR_GRAY, 192, ulCurYPos, szString, DTA_Clean, true, TAG_DONE );
-
-			sprintf( szString, "%d", static_cast<int> (BROWSER_GetPlayerPing( g_lSelectedServer, ulIdx )));
-			V_ColorizeString( szString );
-			screen->DrawText( SmallFont, CR_GRAY, 256, ulCurYPos, szString, DTA_Clean, true, TAG_DONE );
-
-			ulCurYPos += ulTextHeight;
-		}
-	}
-
-	return false;
-}
-
-//*****************************************************************************
-//
-void M_GetServerInfo( void )
-{
-	if ( g_lSelectedServer != -1 )
-	{
-		// Switch the menu.
-		M_SwitchMenu( &ServerInfoMenu );
-	}
 }
 
 /*=======================================
@@ -3118,80 +2500,6 @@ void M_AcceptPlayerSetupChangesFromPrompt( int iChar )
 
 /*=======================================
  *
- * Account setup Menu
- *
- *=======================================*/
-/*
-void M_NewAccount( void );
-
-menuitem_t AccountSetupItems[] = {
-//	{ redtext,	" ",						NULL,					0.0, 0.0, 0.0, NULL  },
-//	{ redtext,	"Please enter your account information below",						NULL,					0.0, 0.0, 0.0, NULL  },
-//	{ redtext,	" ",						NULL,					0.0, 0.0, 0.0, NULL  },
-	{ string,	"Username",					&cl_accountname,		0.0, 0.0, 0.0, NULL  },
-	{ pwstring,	"Password",					&cl_accountpassword,	0.0, 0.0, 0.0, NULL  },
-	{ redtext,	" ",						NULL,					0.0, 0.0, 0.0, NULL  },
-	{ discrete, "Auto-login",				&cl_autologin,			2.0, 0.0, 0.0, YesNo },
-	{ discrete, "Auto-ghost",				&cl_autoghost,			2.0, 0.0, 0.0, YesNo },
-	{ redtext,	" ",						NULL,					0.0, 0.0, 0.0, NULL  },
-	{ more,		"Log in",					NULL,					0.0, 0.0, 0.0, {(value_t *)M_NewAccount} },
-	{ more,		"New account",				NULL,					0.0, 0.0, 0.0, {(value_t *)M_NewAccount} },
-};
-
-menu_t AccountSetupMenu = {
-	"ACCOUNT SETUP",
-	0,
-	countof(AccountSetupItems),
-	0,
-	AccountSetupItems,
-	0,
-	0,
-	NULL,
-	MNF_ALIGNLEFT,
-};
-
-void M_AccountSetup( void )
-{
-	M_SwitchMenu( &AccountSetupMenu );
-}
-*/
-/*=======================================
- *
- * New account Menu
- *
- *=======================================*/
-/*
-menuitem_t NewAccountItems[] = {
-	{ redtext,	"Please choose a username and password.",						NULL,					0.0, 0.0, 0.0, NULL  },
-	{ redtext,	" ",						NULL,					0.0, 0.0, 0.0, NULL  },
-	{ string,	"Username",					&cl_accountname,		0.0, 0.0, 0.0, NULL  },
-	{ pwstring,	"Password",					&cl_accountpassword,	0.0, 0.0, 0.0, NULL  },
-	{ redtext,	" ",						NULL,					0.0, 0.0, 0.0, NULL  },
-	{ more,		"Create account!",			NULL,					0.0, 0.0, 0.0, {(value_t *)M_NewAccount} },
-};
-
-menu_t NewAccountMenu = {
-	"NEW ACCOUNT",
-	0,
-	countof(NewAccountItems),
-	0,
-	NewAccountItems,
-	0,
-	0,
-	NULL,
-	MNF_ALIGNLEFT,
-};
-
-void M_NewAccount( void )
-{
-	if ( NewAccountMenu.lastOn == 0 )
-		NewAccountMenu.lastOn = 2;
-
-	M_SwitchMenu( &NewAccountMenu );
-}
-*/
-/*=======================================
- *
  * Weapon setup Menu
  *
  *=======================================*/
@@ -3320,7 +2628,6 @@ menu_t SkirmishMenu = {
 	NULL,
 	false,
 	NULL,
-	MNF_ALIGNLEFT,
 };
 
 void M_Skirmish( void )
@@ -3602,7 +2909,6 @@ menu_t BotSetupMenu = {
 	NULL,
 	false,
 	NULL,
-	MNF_ALIGNLEFT,
 };
 
 /*=======================================
@@ -3661,7 +2967,6 @@ menu_t TeamBotSetupMenu = {
 	NULL,
 	false,
 	NULL,
-	MNF_ALIGNLEFT,
 };
 
 void M_BotSetup( void )
@@ -3773,7 +3078,6 @@ menu_t PlayerClassSelectionMenu =
 	NULL,
 	false,
 	NULL,
-	MNF_ALIGNLEFT,
 };
 
 static void InitAvailablePlayerClassList( ULONG ulTeam )
@@ -3882,7 +3186,6 @@ menu_t JoinTeamMenu =
 	NULL,
 	false,
 	NULL,
-	MNF_ALIGNLEFT,
 };
 
 static void InitAvailableTeamsList( )
@@ -3963,7 +3266,6 @@ menu_t JoinMenu =
 	NULL,
 	false,
 	NULL,
-	MNF_CENTERED,
 };
 
 static value_t FilterModes[] =
@@ -4236,13 +3538,13 @@ void M_SizeDisplay (int diff)
 CCMD (sizedown)
 {
 	M_SizeDisplay (-1);
-	S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", 1, ATTN_NONE);
+	S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", snd_menuvolume, ATTN_NONE);
 }
 
 CCMD (sizeup)
 {
 	M_SizeDisplay (1);
-	S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", 1, ATTN_NONE);
+	S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", snd_menuvolume, ATTN_NONE);
 }
 
 // Draws a string in the console font, scaled to the 8x8 cells
@@ -4264,7 +3566,9 @@ void M_BuildKeyList (menuitem_t *item, int numitems)
 	for (i = 0; i < numitems; i++, item++)
 	{
 		if (item->type == control)
-			C_GetKeysForCommand (item->e.command, &item->b.key1, &item->c.key2);
+			Bindings.GetKeysForCommand (item->e.command, &item->b.key1, &item->c.key2);
+		else if (item->type == mapcontrol)
+			AutomapBindings.GetKeysForCommand (item->e.command, &item->b.key1, &item->c.key2);
 	}
 }
 
@@ -4276,7 +3580,7 @@ static void CalcIndent (menu_t *menu)
 	for (i = 0; i < menu->numitems; i++)
 	{
 		item = menu->items + i;
-		if (item->type != whitetext && item->type != redtext && item->type != browserheader && item->type != browserslot && item->type != screenres &&
+		if (item->type != whitetext && item->type != redtext && item->type != screenres &&
 			item->type != joymore && (item->type != discrete || item->c.discretecenter != 1))
 		{
 			thiswidth = SmallFont->StringWidth (item->label);
@@ -4536,7 +3840,7 @@ void M_OptDrawer ()
 			}
 		}
 
-		if (item->type != screenres && item->type != browserslot)
+		if (item->type != screenres)
 		{
 			FString somestring;
 			const char *label;
@@ -4561,13 +3865,7 @@ void M_OptDrawer ()
 			{
 			case more:
 			case safemore:
-				// Align this menu to the left-hand side.
-				if ( CurrentMenu->iFlags & MNF_ALIGNLEFT )
-					x = 32 * CleanXfac_1;
-				else if ( CurrentMenu->iFlags & MNF_CENTERED )
-					x = ( SCREENWIDTH - SmallFont->StringWidth( item->label ) * CleanXfac_1 ) / 2;
-				else
-					x = indent - width;
+				x = indent - width;
 				color = MoreColor;
 				break;
 
@@ -4603,16 +3901,6 @@ void M_OptDrawer ()
 				color = MoreColor;
 				break;
 
-			case browserheader:
-
-				screen->DrawText( SmallFont, CR_UNTRANSLATED, 16, y, "PING", DTA_Clean, true, TAG_DONE );
-				screen->DrawText( SmallFont, CR_UNTRANSLATED, 48, y, "NAME", DTA_Clean, true, TAG_DONE );
-				screen->DrawText( SmallFont, CR_UNTRANSLATED, /*128*/160, y, "MAP", DTA_Clean, true, TAG_DONE );
-//				screen->DrawText( SmallFont, CR_UNTRANSLATED, 160, y, "WAD", DTA_Clean, true, TAG_DONE );
-				screen->DrawText( SmallFont, CR_UNTRANSLATED, 224, y, "TYPE", DTA_Clean, true, TAG_DONE );
-				screen->DrawText( SmallFont, CR_UNTRANSLATED, 272, y, "PLYRS", DTA_Clean, true, TAG_DONE );
-				break;
-
 			case discrete:
 				if (item->d.graycheck != NULL && !(**item->d.graycheck))
 				{
@@ -4621,26 +3909,12 @@ void M_OptDrawer ()
 				// Intentional fall-through
 
 			default:
-
-				// Align this menu to the left-hand side.
-				if ( CurrentMenu->iFlags & MNF_ALIGNLEFT )
-					x = 32 * CleanXfac_1;
-				else if ( CurrentMenu->iFlags & MNF_CENTERED )
-					x = ( SCREENWIDTH - SmallFont->StringWidth( item->label ) * CleanXfac_1 ) / 2;
-				else
-					x = indent - width;
-
-				color = (item->type == control && menuactive == MENU_WaitKey && i == CurrentItem)
+				x = indent - width;
+				color = ((item->type == control || item->type == mapcontrol) && menuactive == MENU_WaitKey && i == CurrentItem)
 					? CR_YELLOW : LabelColor;
 				break;
 			}
 			screen->DrawText (SmallFont, color, x, y, label, DTA_CleanNoMove_1, true, DTA_ColorOverlay, overlay, TAG_DONE);
-
-			// [BC/BB] Skulltag's alignment handling.
-			if ( CurrentMenu->iFlags & MNF_ALIGNLEFT )
-				x = ( 32 + 6 ) * CleanXfac_1 + width;
-			else
-				x = indent + cursorspace;
 
 			switch (item->type)
 			{
@@ -4722,16 +3996,15 @@ void M_OptDrawer ()
 					}
 				}
 
-				// [BB] To handle MNF_ALIGNLEFT, "x" is used instead of "indent + cursorspace"
 				if (v == vals)
 				{
-					screen->DrawText (SmallFont, ValueColor, x, y, "Unknown",
+					screen->DrawText (SmallFont, ValueColor, indent + cursorspace, y, "Unknown",
 						DTA_CleanNoMove_1, true, DTA_ColorOverlay, overlay, TAG_DONE);
 				}
 				else
 				{
 					screen->DrawText (SmallFont, item->type == cdiscrete ? v : ValueColor,
-						x, y,
+						indent + cursorspace, y,
 						item->type != discretes ? item->e.values[v].name : item->e.valuestrings[v].name.GetChars(),
 						DTA_CleanNoMove_1, true, DTA_ColorOverlay, overlay, TAG_DONE);
 				}
@@ -4750,7 +4023,7 @@ void M_OptDrawer ()
 			break;
 
 			case nochoice:
-				screen->DrawText (SmallFont, CR_GOLD, x, y,
+				screen->DrawText (SmallFont, CR_GOLD, indent + cursorspace, y,
 					(item->e.values[(int)item->b.min]).name, DTA_CleanNoMove_1, true, TAG_DONE);
 				break;
 
@@ -4785,33 +4058,21 @@ void M_OptDrawer ()
 				// [BC] Hack for player color.
 				if ( strcmp( item->label, "Red" ) == 0 )
 				{
-					USHORT	usX;
-
-					usX = ( SmallFont->StringWidth( "Green" ) + 8 + 32 ) * CleanXfac_1;
-
-					M_DrawSlider( usX, y, 0.0f, 255.0f, RPART( g_ulPlayerSetupColor ), -1 );
+					M_DrawSlider( indent + cursorspace, y, 0.0f, 255.0f, RPART( g_ulPlayerSetupColor ), -1 );
 				}
 				else if ( strcmp( item->label, "Green" ) == 0 )
 				{
-					USHORT	usX;
-
-					usX = ( SmallFont->StringWidth( "Green" ) + 8 + 32 ) * CleanXfac_1;
-
-					M_DrawSlider( usX, y, 0.0f, 255.0f, GPART( g_ulPlayerSetupColor ), -1 );
+					M_DrawSlider( indent + cursorspace, y, 0.0f, 255.0f, GPART( g_ulPlayerSetupColor ), -1 );
 				}
 				else if ( strcmp( item->label, "Blue" ) == 0 )
 				{
-					USHORT	usX;
-
-					usX = ( SmallFont->StringWidth( "Green" ) + 8 + 32 ) * CleanXfac_1;
-
-					M_DrawSlider( usX, y, 0.0f, 255.0f, BPART( g_ulPlayerSetupColor ), -1 );
+					M_DrawSlider( indent + cursorspace, y, 0.0f, 255.0f, BPART( g_ulPlayerSetupColor ), -1 );
 				}
 				// Default.
 				else
 				{
 					value = item->a.cvar->GetGenericRep (CVAR_Float);
-					M_DrawSlider (x, y + labelofs, item->b.min, item->c.max, value.Float, 1);
+					M_DrawSlider (indent + cursorspace, y + labelofs, item->b.min, item->c.max, value.Float, 1);
 				}
 				break;
 
@@ -4825,6 +4086,7 @@ void M_OptDrawer ()
 				break;
 
 			case control:
+			case mapcontrol:
 			{
 				char description[64];
 
@@ -4915,7 +4177,7 @@ void M_OptDrawer ()
 				}
 
 				screen->DrawText (SmallFont, ValueColor,
-					x, y, str, DTA_CleanNoMove_1, true, TAG_DONE);
+					indent + cursorspace, y, str, DTA_CleanNoMove_1, true, TAG_DONE);
 			}
 			break;
 
@@ -4925,16 +4187,16 @@ void M_OptDrawer ()
 				// draw the temporary string and the cursor.
 				if ( g_bStringInput && i == CurrentItem )
 				{
-					screen->DrawText( SmallFont, CR_GREY, x, y, g_szStringInputBuffer, DTA_CleanNoMove_1, true, TAG_DONE );
+					screen->DrawText( SmallFont, CR_GREY, indent + cursorspace, y, g_szStringInputBuffer, DTA_CleanNoMove_1, true, TAG_DONE );
 
 					// Draw the cursor.
 					screen->DrawText( SmallFont, CR_GREY,
-						x + SmallFont->StringWidth( g_szStringInputBuffer ) * CleanXfac_1,
+						indent + cursorspace + SmallFont->StringWidth( g_szStringInputBuffer ) * CleanXfac_1,
 						y,
 						gameinfo.gametype == GAME_Doom ? "_" : "[", DTA_CleanNoMove_1, true, TAG_DONE );
 				}
 				else
-					screen->DrawText( SmallFont, CR_GREY, x, y, *item->a.stringcvar, DTA_CleanNoMove_1, true, TAG_DONE );
+					screen->DrawText( SmallFont, CR_GREY, indent + cursorspace, y, *item->a.stringcvar, DTA_CleanNoMove_1, true, TAG_DONE );
 				break;
 			case pwstring:
 
@@ -4950,11 +4212,11 @@ void M_OptDrawer ()
 						for ( ulIdx = 0; ulIdx < strlen( szPWString ); ulIdx++ )
 							szPWString[ulIdx] = '*';
 
-						screen->DrawText( SmallFont, CR_GREY, x, y, szPWString, DTA_CleanNoMove_1, true, TAG_DONE );
+						screen->DrawText( SmallFont, CR_GREY, indent + cursorspace, y, szPWString, DTA_CleanNoMove_1, true, TAG_DONE );
 
 						// Draw the cursor.
 						screen->DrawText( SmallFont, CR_GREY,
-							x + SmallFont->StringWidth( szPWString ) * CleanXfac_1,
+							indent + cursorspace + SmallFont->StringWidth( szPWString ) * CleanXfac_1,
 							y,
 							gameinfo.gametype == GAME_Doom ? "_" : "[", DTA_CleanNoMove_1, true, TAG_DONE );
 					}
@@ -4967,7 +4229,7 @@ void M_OptDrawer ()
 						for ( ulIdx = 0; ulIdx < strlen( szPWString ); ulIdx++ )
 							szPWString[ulIdx] = '*';
 
-						screen->DrawText( SmallFont, CR_GREY, x, y, szPWString, DTA_CleanNoMove_1, true, TAG_DONE );
+						screen->DrawText( SmallFont, CR_GREY, indent + cursorspace, y, szPWString, DTA_CleanNoMove_1, true, TAG_DONE );
 					}
 				}
 				break;
@@ -4976,16 +4238,16 @@ void M_OptDrawer ()
 					char	szString[16];
 				
 					sprintf( szString, "%d", item->a.cvar->GetGenericRep( CVAR_Int ).Int);
-					screen->DrawText( SmallFont, CR_GREY, x, y, szString, DTA_CleanNoMove_1, true, TAG_DONE );
+					screen->DrawText( SmallFont, CR_GREY, indent + cursorspace, y, szString, DTA_CleanNoMove_1, true, TAG_DONE );
 				}
 				break;
 			case skintype:
 
-				screen->DrawText( SmallFont, CR_GREY, x, y, skins[g_ulPlayerSetupSkin].name, DTA_CleanNoMove_1, true, TAG_DONE );
+				screen->DrawText( SmallFont, CR_GREY, indent + cursorspace, y, skins[g_ulPlayerSetupSkin].name, DTA_CleanNoMove_1, true, TAG_DONE );
 				break;
 			case classtype:
 
-				screen->DrawText( SmallFont, CR_GREY, x, y, ( g_lPlayerSetupClass == -1 ) ? "random" : PlayerClasses[g_lPlayerSetupClass].Type->Meta.GetMetaString (APMETA_DisplayName), DTA_CleanNoMove_1, true, TAG_DONE );
+				screen->DrawText( SmallFont, CR_GREY, indent + cursorspace, y, ( g_lPlayerSetupClass == -1 ) ? "random" : PlayerClasses[g_lPlayerSetupClass].Type->Meta.GetMetaString (APMETA_DisplayName), DTA_CleanNoMove_1, true, TAG_DONE );
 				break;
 			case botslot:
 
@@ -5043,12 +4305,12 @@ void M_OptDrawer ()
 
 					Val = pVar->GetGenericRep( CVAR_Int );
 					if ( BOTINFO_GetName( Val.Int ) == NULL )
-						screen->DrawText( SmallFont, CR_GREY, x, y, "-", DTA_CleanNoMove_1, true, TAG_DONE );
+						screen->DrawText( SmallFont, CR_GREY, indent + cursorspace, y, "-", DTA_CleanNoMove_1, true, TAG_DONE );
 					else
 					{
 						sprintf( szBuffer, "%s", BOTINFO_GetName( Val.Int ));
 						V_ColorizeString( szBuffer );
-						screen->DrawText( SmallFont, CR_GREY, x, y, szBuffer, DTA_CleanNoMove_1, true, TAG_DONE );
+						screen->DrawText( SmallFont, CR_GREY, indent + cursorspace, y, szBuffer, DTA_CleanNoMove_1, true, TAG_DONE );
 					}
 				}
 				break;
@@ -5056,7 +4318,7 @@ void M_OptDrawer ()
 			case txslider:
 
 				value = item->a.cvar->GetGenericRep (CVAR_Float);
-				M_DrawSlider (x, y + labelofs, item->b.min, item->c.max, value.Float, 1);
+				M_DrawSlider (indent + cursorspace, y + labelofs, item->b.min, item->c.max, value.Float, 1);
 				break;
 			case mnnumber:
 
@@ -5064,11 +4326,11 @@ void M_OptDrawer ()
 				// draw the temporary string and the cursor.
 				if ( g_bStringInput && i == CurrentItem )
 				{
-					screen->DrawText( SmallFont, CR_GREY, x, y, g_szStringInputBuffer, DTA_CleanNoMove_1, true, TAG_DONE );
+					screen->DrawText( SmallFont, CR_GREY, indent + cursorspace, y, g_szStringInputBuffer, DTA_CleanNoMove_1, true, TAG_DONE );
 
 					// Draw the cursor.
 					screen->DrawText( SmallFont, CR_GREY,
-						x + SmallFont->StringWidth( g_szStringInputBuffer ) * CleanXfac_1,
+						indent + cursorspace + SmallFont->StringWidth( g_szStringInputBuffer ) * CleanXfac_1,
 						y,
 						gameinfo.gametype == GAME_Doom ? "_" : "[", DTA_CleanNoMove_1, true, TAG_DONE );
 				}
@@ -5077,7 +4339,7 @@ void M_OptDrawer ()
 					char	szString[16];
 				
 					sprintf( szString, "%d", item->a.cvar->GetGenericRep( CVAR_Int ).Int);
-					screen->DrawText( SmallFont, CR_GREY, x, y, szString, DTA_CleanNoMove_1, true, TAG_DONE );
+					screen->DrawText( SmallFont, CR_GREY, indent + cursorspace, y, szString, DTA_CleanNoMove_1, true, TAG_DONE );
 				}
 				break;
 			default:
@@ -5088,12 +4350,7 @@ void M_OptDrawer ()
 				i == CurrentItem &&
 				(skullAnimCounter < 6 || menuactive == MENU_WaitKey))
 			{
-				if ( CurrentMenu->iFlags & MNF_CENTERED )
-					M_DrawConText(CR_RED, ( SCREENWIDTH - ( SmallFont->StringWidth( item->label ) + 22 ) * CleanXfac_1 ) / 2, y-CleanYfac_1+labelofs, "\xd" );
-				else if ( CurrentMenu->iFlags & MNF_ALIGNLEFT )
-					M_DrawConText(CR_RED, ( 32 - /*p->width*/8 - 3 ) * CleanXfac_1, y-CleanYfac_1+labelofs, "\xd" );
-				else
-					M_DrawConText(CR_RED, indent + 3 * CleanXfac_1, y-CleanYfac_1+labelofs, "\xd");
+				M_DrawConText(CR_RED, indent + 3 * CleanXfac_1, y-CleanYfac_1+labelofs, "\xd");
 			}
 		}
 		else if ( item->type == screenres )
@@ -5123,64 +4380,6 @@ void M_OptDrawer ()
 			if (i == CurrentItem && ((item->a.selmode != -1 && (skullAnimCounter < 6 || menuactive == MENU_WaitKey)) || testingmode))
 			{
 				M_DrawConText(CR_RED, item->a.selmode * colwidth + 8 * CleanXfac_1, y - CleanYfac_1 + labelofs, "\xd");
-			}
-		}
-		else if ( item->type == browserslot )
-		{
-			LONG	lServer;
-			char	szString[32];
-			LONG	lColor;
-
-			lServer = item->f.lServer;
-
-			if ( M_ShouldShowServer( lServer ))
-			{
-				if ( lServer == g_lSelectedServer )
-					lColor = CR_ORANGE;
-				else
-					lColor = CR_GRAY;
-
-				// Draw ping.
-				sprintf( szString, "%d", static_cast<int> (BROWSER_GetPing( lServer )));
-				screen->DrawText( SmallFont, lColor, 16, y, szString, DTA_Clean, true, TAG_DONE );
-
-				// Draw name.
-				strncpy( szString, BROWSER_GetHostName( lServer ), 12 );
-				szString[12] = 0;
-				if ( strlen( BROWSER_GetHostName( lServer )) > 12 )
-					sprintf( szString + strlen ( szString ), "..." );
-				screen->DrawText( SmallFont, lColor, 48, y, szString, DTA_Clean, true, TAG_DONE );
-
-				// Draw map.
-				strncpy( szString, BROWSER_GetMapname( lServer ), 8 );
-				screen->DrawText( SmallFont, lColor, /*128*/160, y, szString, DTA_Clean, true, TAG_DONE );
-/*
-				// Draw wad.
-				if ( BROWSER_Get
-				sprintf( szString, "%d", BROWSER_GetPing( lServer ));
-				screen->DrawText( SmallFont, CR_GRAY, 160, y, "WAD", DTA_Clean, true, TAG_DONE );
-*/
-				// Draw gametype.
-				strncpy( szString, GAMEMODE_GetShortName( BROWSER_GetGameMode( lServer )), 8 );
-				screen->DrawText( SmallFont, lColor, 224, y, szString, DTA_Clean, true, TAG_DONE );
-
-				// Draw players.
-				sprintf( szString, "%d/%d", static_cast<int> (BROWSER_GetNumPlayers( lServer )), static_cast<int> (BROWSER_GetMaxClients( lServer )));
-				screen->DrawText( SmallFont, lColor, 272, y, szString, DTA_Clean, true, TAG_DONE );
-
-				// Draw the cursor.
-				if (( i == CurrentItem ) && ( skullAnimCounter < 6 ))
-					screen->DrawText( ConFont, CR_RED, 6, y-1 + labelofs, "\xd", DTA_Clean, true, TAG_DONE );
-
-				// If the server in the highest browser slot is not the first server in the sorted server list, draw
-				// an up scroll arrow. (If this happens, we must have scrolled down.)
-				if (( i == SERVER_SLOT_START ) && ( lServer != g_iSortedServers[0] ) && ( BROWSER_CalcNumServers( )))
-					screen->DrawText( ConFont, CR_ORANGE, 300, y-1 + labelofs - 4, "\x1a", DTA_Clean, true, TAG_DONE );
-
-				// If the server in the highest browser slot is not the last server in the sorted server list, draw
-				// a down scroll arrow.
-				if (( i == ( SERVER_SLOT_START + NUM_SERVER_SLOTS - 1 )) && ( lServer != g_iSortedServers[M_CalcLastSortedIndex( ) - 1] ) && ( BROWSER_CalcNumServers( )))
-					screen->DrawText( ConFont, CR_ORANGE, 300, y-1 + labelofs + 4, "\x1b", DTA_Clean, true, TAG_DONE );
 			}
 		}
 	}
@@ -5238,7 +4437,14 @@ void M_OptResponder(event_t *ev)
 	{
 		if (ev->data1 != KEY_ESCAPE)
 		{
-			C_ChangeBinding(item->e.command, ev->data1);
+			if (item->type == control)
+			{
+				Bindings.SetBind(ev->data1, item->e.command);
+			}
+			else if (item->type == mapcontrol)
+			{
+				AutomapBindings.SetBind(ev->data1, item->e.command);
+			}
 			M_BuildKeyList(CurrentMenu->items, CurrentMenu->numitems);
 		}
 		menuactive = MENU_On;
@@ -5261,7 +4467,7 @@ void M_OptResponder(event_t *ev)
 			NewBits = BitTranslate[DummyDepthCvar];
 			setmodeneeded = true;
 			testingmode = I_GetTime(false) + 5 * TICRATE;
-			S_Sound (CHAN_VOICE | CHAN_UI, "menu/choose", 1, ATTN_NONE);
+			S_Sound (CHAN_VOICE | CHAN_UI, "menu/choose", snd_menuvolume, ATTN_NONE);
 			SetModesMenu (NewWidth, NewHeight, NewBits);
 		}
 		else if (ev->data1 >= '0' && ev->data1 <= '9')
@@ -5325,7 +4531,6 @@ void M_OptButtonHandler(EMenuKey key, bool repeat)
 		if (CurrentMenu->numitems > 1)
 		{
 			int modecol;
-			bool	bMoveCursor = true;
 
 			if (item->type == screenres)
 			{
@@ -5337,39 +4542,25 @@ void M_OptButtonHandler(EMenuKey key, bool repeat)
 				modecol = 0;
 			}
 
-			if (( CurrentMenu->items[CurrentItem].type == browserslot ) &&
-				( CurrentItem == SERVER_SLOT_START + NUM_SERVER_SLOTS - 1 ) &&
-				( CurrentMenu->items[CurrentItem].f.lServer != g_iSortedServers[M_CalcLastSortedIndex( ) - 1] ))
+			do
 			{
-				M_ScrollServerList( false );
-				bMoveCursor = false;
-			}
-
-			if ( bMoveCursor )
-			{
-				do
+				CurrentItem++;
+				if (CanScrollDown && CurrentItem == VisBottom)
 				{
-					CurrentItem++;
-					if (CanScrollDown && CurrentItem == VisBottom)
-					{
-						CurrentMenu->scrollpos++;
-						VisBottom++;
-					}
-					if (CurrentItem == CurrentMenu->numitems)
-					{
-						CurrentMenu->scrollpos = 0;
-						CurrentItem = 0;
-					}
-				} while (CurrentMenu->items[CurrentItem].type == redtext ||
-						 CurrentMenu->items[CurrentItem].type == whitetext ||
-						 CurrentMenu->items[CurrentItem].type == browserheader ||
-						 (CurrentMenu->items[CurrentItem].type == browserslot &&
-						  M_ShouldShowServer( CurrentMenu->items[CurrentItem].f.lServer ) == false) ||
-						 (CurrentMenu->items[CurrentItem].type == screenres &&
-						  !CurrentMenu->items[CurrentItem].b.res1) ||
-						 (CurrentMenu->items[CurrentItem].type == numberedmore &&
-						  !CurrentMenu->items[CurrentItem].b.position));
-			}
+					CurrentMenu->scrollpos++;
+					VisBottom++;
+				}
+				if (CurrentItem == CurrentMenu->numitems)
+				{
+					CurrentMenu->scrollpos = 0;
+					CurrentItem = 0;
+				}
+			} while (CurrentMenu->items[CurrentItem].type == redtext ||
+					 CurrentMenu->items[CurrentItem].type == whitetext ||
+					 (CurrentMenu->items[CurrentItem].type == screenres &&
+					  !CurrentMenu->items[CurrentItem].b.res1) ||
+					 (CurrentMenu->items[CurrentItem].type == numberedmore &&
+					  !CurrentMenu->items[CurrentItem].b.position));
 
 			if (CurrentMenu->items[CurrentItem].type == screenres)
 			{
@@ -5381,7 +4572,7 @@ void M_OptButtonHandler(EMenuKey key, bool repeat)
 				CurrentMenu->items[CurrentItem].a.selmode = modecol;
 			}
 
-			S_Sound (CHAN_VOICE | CHAN_UI, "menu/cursor", 1, ATTN_NONE);
+			S_Sound (CHAN_VOICE | CHAN_UI, "menu/cursor", snd_menuvolume, ATTN_NONE);
 		}
 		break;
 
@@ -5389,7 +4580,6 @@ void M_OptButtonHandler(EMenuKey key, bool repeat)
 		if (CurrentMenu->numitems > 1)
 		{
 			int modecol;
-			bool	bMoveCursor = true;
 
 			if (item->type == screenres)
 			{
@@ -5401,72 +4591,58 @@ void M_OptButtonHandler(EMenuKey key, bool repeat)
 				modecol = 0;
 			}
 
-			if (( CurrentMenu->items[CurrentItem].type == browserslot ) &&
-				( CurrentItem == SERVER_SLOT_START ) &&
-				( CurrentMenu->items[CurrentItem].f.lServer != g_iSortedServers[0] ))
+			do
 			{
-				M_ScrollServerList( true );
-				bMoveCursor = false;
-			}
-
-			if ( bMoveCursor )
-			{
-				do
+				CurrentItem--;
+				if (CurrentMenu->scrollpos > 0 &&
+					CurrentItem == CurrentMenu->scrolltop + CurrentMenu->scrollpos)
 				{
-					CurrentItem--;
-					if (CurrentMenu->scrollpos > 0 &&
-						CurrentItem == CurrentMenu->scrolltop + CurrentMenu->scrollpos)
-					{
-						CurrentMenu->scrollpos--;
-					}
-					if (CurrentItem < 0)
-					{
-						int ytop, maxitems, rowheight;
+					CurrentMenu->scrollpos--;
+				}
+				if (CurrentItem < 0)
+				{
+					int ytop, maxitems, rowheight;
 
-						// Figure out how many lines of text fit on the menu
-						if (CurrentMenu->y != 0)
-						{
-							ytop = CurrentMenu->y;
-						}
-						else if (BigFont && CurrentMenu->texttitle)
-						{
-							ytop = 15 + BigFont->GetHeight ();
-						}
-						else
-						{
-							ytop = 15;
-						}
-						if (!(gameinfo.gametype & GAME_DoomChex))
-						{
-							ytop -= 2;
-							rowheight = 9;
-						}
-						else
-						{
-							rowheight = 8;
-						}
-						ytop *= CleanYfac_1;
-						rowheight *= CleanYfac_1;
-						maxitems = (screen->GetHeight() - rowheight - ytop) / rowheight + 1;
-
-						CurrentMenu->scrollpos = MAX (0,CurrentMenu->numitems - maxitems + CurrentMenu->scrolltop);
-						CurrentItem = CurrentMenu->numitems - 1;
+					// Figure out how many lines of text fit on the menu
+					if (CurrentMenu->y != 0)
+					{
+						ytop = CurrentMenu->y;
 					}
-				} while (CurrentMenu->items[CurrentItem].type == redtext ||
-						 CurrentMenu->items[CurrentItem].type == whitetext ||
-						 CurrentMenu->items[CurrentItem].type == browserheader ||
-						 (CurrentMenu->items[CurrentItem].type == browserslot &&
-						  M_ShouldShowServer( CurrentMenu->items[CurrentItem].f.lServer ) == false) ||
-						 (CurrentMenu->items[CurrentItem].type == screenres &&
-						  !CurrentMenu->items[CurrentItem].b.res1) ||
-						 (CurrentMenu->items[CurrentItem].type == numberedmore &&
-						  !CurrentMenu->items[CurrentItem].b.position));
-			}
+					else if (BigFont && CurrentMenu->texttitle)
+					{
+						ytop = 15 + BigFont->GetHeight ();
+					}
+					else
+					{
+						ytop = 15;
+					}
+					if (!(gameinfo.gametype & GAME_DoomChex))
+					{
+						ytop -= 2;
+						rowheight = 9;
+					}
+					else
+					{
+						rowheight = 8;
+					}
+					ytop *= CleanYfac_1;
+					rowheight *= CleanYfac_1;
+					maxitems = (screen->GetHeight() - rowheight - ytop) / rowheight + 1;
+
+					CurrentMenu->scrollpos = MAX (0,CurrentMenu->numitems - maxitems + CurrentMenu->scrolltop);
+					CurrentItem = CurrentMenu->numitems - 1;
+				}
+			} while (CurrentMenu->items[CurrentItem].type == redtext ||
+					 CurrentMenu->items[CurrentItem].type == whitetext ||
+					 (CurrentMenu->items[CurrentItem].type == screenres &&
+					  !CurrentMenu->items[CurrentItem].b.res1) ||
+					 (CurrentMenu->items[CurrentItem].type == numberedmore &&
+					  !CurrentMenu->items[CurrentItem].b.position));
 
 			if (CurrentMenu->items[CurrentItem].type == screenres)
 				CurrentMenu->items[CurrentItem].a.selmode = modecol;
 
-			S_Sound (CHAN_VOICE | CHAN_UI, "menu/cursor", 1, ATTN_NONE);
+			S_Sound (CHAN_VOICE | CHAN_UI, "menu/cursor", snd_menuvolume, ATTN_NONE);
 		}
 		break;
 
@@ -5481,7 +4657,6 @@ void M_OptButtonHandler(EMenuKey key, bool repeat)
 			CurrentItem = CurrentMenu->scrolltop + CurrentMenu->scrollpos + 1;
 			while (CurrentMenu->items[CurrentItem].type == redtext ||
 				   CurrentMenu->items[CurrentItem].type == whitetext ||
-				   CurrentMenu->items[CurrentItem].type == browserheader ||
 				   (CurrentMenu->items[CurrentItem].type == screenres &&
 					!CurrentMenu->items[CurrentItem].b.res1) ||
 				   (CurrentMenu->items[CurrentItem].type == numberedmore &&
@@ -5489,7 +4664,7 @@ void M_OptButtonHandler(EMenuKey key, bool repeat)
 			{
 				++CurrentItem;
 			}
-			S_Sound (CHAN_VOICE | CHAN_UI, "menu/cursor", 1, ATTN_NONE);
+			S_Sound (CHAN_VOICE | CHAN_UI, "menu/cursor", snd_menuvolume, ATTN_NONE);
 		}
 		break;
 
@@ -5505,7 +4680,6 @@ void M_OptButtonHandler(EMenuKey key, bool repeat)
 			CurrentItem = CurrentMenu->scrolltop + CurrentMenu->scrollpos + 1;
 			while (CurrentMenu->items[CurrentItem].type == redtext ||
 				   CurrentMenu->items[CurrentItem].type == whitetext ||
-				   CurrentMenu->items[CurrentItem].type == browserheader ||
 				   (CurrentMenu->items[CurrentItem].type == screenres &&
 					!CurrentMenu->items[CurrentItem].b.res1) ||
 				   (CurrentMenu->items[CurrentItem].type == numberedmore &&
@@ -5513,7 +4687,7 @@ void M_OptButtonHandler(EMenuKey key, bool repeat)
 			{
 				++CurrentItem;
 			}
-			S_Sound (CHAN_VOICE | CHAN_UI, "menu/cursor", 1, ATTN_NONE);
+			S_Sound (CHAN_VOICE | CHAN_UI, "menu/cursor", snd_menuvolume, ATTN_NONE);
 		}
 		break;
 
@@ -5591,7 +4765,7 @@ void M_OptButtonHandler(EMenuKey key, bool repeat)
 							item->a.cvar->SetGenericRep (newval, CVAR_Float);
 					}
 				}
-				S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", 1, ATTN_NONE);
+				S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", snd_menuvolume, ATTN_NONE);
 				break;
 
 			case joy_sens:
@@ -5599,7 +4773,7 @@ void M_OptButtonHandler(EMenuKey key, bool repeat)
 				if (value.Float < item->b.min)
 					value.Float = item->b.min;
 				SELECTED_JOYSTICK->SetSensitivity(value.Float);
-				S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", 1, ATTN_NONE);
+				S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", snd_menuvolume, ATTN_NONE);
 				break;
 
 			case joy_slider:
@@ -5632,12 +4806,12 @@ void M_OptButtonHandler(EMenuKey key, bool repeat)
 				{
 					SELECTED_JOYSTICK->SetAxisDeadZone(item->a.joyselection, value.Float);
 				}
-				S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", 1, ATTN_NONE);
+				S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", snd_menuvolume, ATTN_NONE);
 				break;
 
 			case palettegrid:
 				SelColorIndex = (SelColorIndex - 1) & 15;
-				S_Sound (CHAN_VOICE | CHAN_UI, "menu/cursor", 1, ATTN_NONE);
+				S_Sound (CHAN_VOICE | CHAN_UI, "menu/cursor", snd_menuvolume, ATTN_NONE);
 				break;
 
 			case discretes:
@@ -5681,19 +4855,15 @@ void M_OptButtonHandler(EMenuKey key, bool repeat)
 					// Hack hack. Rebuild list of resolutions
 					if (item->e.values == Depths)
 						BuildModesList (SCREENWIDTH, SCREENHEIGHT, DisplayBits);
-
-					// [BC] Hack for the browser menu. If we changed a setting, rebuild the list.
-					if ( CurrentMenu == &BrowserMenu )
-						M_BuildServerList( );
 				}
-				S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", 1, ATTN_NONE);
+				S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", snd_menuvolume, ATTN_NONE);
 				break;
 
 			case ediscrete:
 				value = item->a.cvar->GetGenericRep(CVAR_String);
 				value.String = const_cast<char *>(M_FindPrevVal(value.String, item->e.enumvalues, (int)item->b.numvalues));
 				item->a.cvar->SetGenericRep(value, CVAR_String);
-				S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", 1, ATTN_NONE);
+				S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", snd_menuvolume, ATTN_NONE);
 				break;
 
 			case bitmask:
@@ -5712,21 +4882,21 @@ void M_OptButtonHandler(EMenuKey key, bool repeat)
 					value.Int = (value.Int & ~bmask) | int(item->e.values[cur].value);
 					item->a.cvar->SetGenericRep (value, CVAR_Int);
 				}
-				S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", 1, ATTN_NONE);
+				S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", snd_menuvolume, ATTN_NONE);
 				break;
 
 			case inverter:
 				value = item->a.cvar->GetGenericRep (CVAR_Float);
 				value.Float = -value.Float;
 				item->a.cvar->SetGenericRep (value, CVAR_Float);
-				S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", 1, ATTN_NONE);
+				S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", snd_menuvolume, ATTN_NONE);
 				break;
 
 			case joy_inverter:
 				assert(item->e.joyslidernum == 0);
 				value.Float = SELECTED_JOYSTICK->GetAxisScale(item->a.joyselection);
 				SELECTED_JOYSTICK->SetAxisScale(item->a.joyselection, -value.Float);
-				S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", 1, ATTN_NONE);
+				S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", snd_menuvolume, ATTN_NONE);
 				break;
 
 			case screenres:
@@ -5750,7 +4920,7 @@ void M_OptButtonHandler(EMenuKey key, bool repeat)
 						item->a.selmode = col;
 					}
 				}
-				S_Sound (CHAN_VOICE | CHAN_UI, "menu/cursor", 1, ATTN_NONE);
+				S_Sound (CHAN_VOICE | CHAN_UI, "menu/cursor", snd_menuvolume, ATTN_NONE);
 				break;
 
 			case number:
@@ -6020,7 +5190,7 @@ void M_OptButtonHandler(EMenuKey key, bool repeat)
 							item->a.cvar->SetGenericRep (newval, CVAR_Float);
 					}
 				}
-				S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", 1, ATTN_NONE);
+				S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", snd_menuvolume, ATTN_NONE);
 				break;
 
 			case joy_sens:
@@ -6028,7 +5198,7 @@ void M_OptButtonHandler(EMenuKey key, bool repeat)
 				if (value.Float > item->c.max)
 					value.Float = item->c.max;
 				SELECTED_JOYSTICK->SetSensitivity(value.Float);
-				S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", 1, ATTN_NONE);
+				S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", snd_menuvolume, ATTN_NONE);
 				break;
 
 			case joy_slider:
@@ -6061,12 +5231,12 @@ void M_OptButtonHandler(EMenuKey key, bool repeat)
 				{
 					SELECTED_JOYSTICK->SetAxisDeadZone(item->a.joyselection, value.Float);
 				}
-				S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", 1, ATTN_NONE);
+				S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", snd_menuvolume, ATTN_NONE);
 				break;
 
 			case palettegrid:
 				SelColorIndex = (SelColorIndex + 1) & 15;
-				S_Sound (CHAN_VOICE | CHAN_UI, "menu/cursor", 1, ATTN_NONE);
+				S_Sound (CHAN_VOICE | CHAN_UI, "menu/cursor", snd_menuvolume, ATTN_NONE);
 				break;
 
 			case discretes:
@@ -6110,19 +5280,15 @@ void M_OptButtonHandler(EMenuKey key, bool repeat)
 					// Hack hack. Rebuild list of resolutions
 					if (item->e.values == Depths)
 						BuildModesList (SCREENWIDTH, SCREENHEIGHT, DisplayBits);
-
-					// [BC] Hack for the browser menu. If we changed a setting, rebuild the list.
-					if ( CurrentMenu == &BrowserMenu )
-						M_BuildServerList( );
 				}
-				S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", 1, ATTN_NONE);
+				S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", snd_menuvolume, ATTN_NONE);
 				break;
 
 			case ediscrete:
 				value = item->a.cvar->GetGenericRep(CVAR_String);
 				value.String = const_cast<char *>(M_FindNextVal(value.String, item->e.enumvalues, (int)item->b.numvalues));
 				item->a.cvar->SetGenericRep(value, CVAR_String);
-				S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", 1, ATTN_NONE);
+				S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", snd_menuvolume, ATTN_NONE);
 				break;
 
 			case bitmask:
@@ -6141,21 +5307,21 @@ void M_OptButtonHandler(EMenuKey key, bool repeat)
 					value.Int = (value.Int & ~bmask) | int(item->e.values[cur].value);
 					item->a.cvar->SetGenericRep (value, CVAR_Int);
 				}
-				S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", 1, ATTN_NONE);
+				S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", snd_menuvolume, ATTN_NONE);
 				break;
 
 			case inverter:
 				value = item->a.cvar->GetGenericRep (CVAR_Float);
 				value.Float = -value.Float;
 				item->a.cvar->SetGenericRep (value, CVAR_Float);
-				S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", 1, ATTN_NONE);
+				S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", snd_menuvolume, ATTN_NONE);
 				break;
 
 			case joy_inverter:
 				assert(item->e.joyslidernum == 0);
 				value.Float = SELECTED_JOYSTICK->GetAxisScale(item->a.joyselection);
 				SELECTED_JOYSTICK->SetAxisScale(item->a.joyselection, -value.Float);
-				S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", 1, ATTN_NONE);
+				S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", snd_menuvolume, ATTN_NONE);
 				break;
 
 			case screenres:
@@ -6182,7 +5348,7 @@ void M_OptButtonHandler(EMenuKey key, bool repeat)
 						item->a.selmode = col;
 					}
 				}
-				S_Sound (CHAN_VOICE | CHAN_UI, "menu/cursor", 1, ATTN_NONE);
+				S_Sound (CHAN_VOICE | CHAN_UI, "menu/cursor", snd_menuvolume, ATTN_NONE);
 				break;
 
 			case number:
@@ -6381,7 +5547,12 @@ void M_OptButtonHandler(EMenuKey key, bool repeat)
 	case MKEY_Clear:
 		if (item->type == control)
 		{
-			C_UnbindACommand (item->e.command);
+			Bindings.UnbindACommand (item->e.command);
+			item->b.key1 = item->c.key2 = 0;
+		}
+		else if (item->type == mapcontrol)
+		{
+			AutomapBindings.UnbindACommand (item->e.command);
 			item->b.key1 = item->c.key2 = 0;
 		}
 		// [BB] Handle flipping of the player sprite preview
@@ -6406,7 +5577,7 @@ void M_OptButtonHandler(EMenuKey key, bool repeat)
 				setmodeneeded = true;
 				NewBits = BitTranslate[DummyDepthCvar];
 			}
-			S_Sound (CHAN_VOICE | CHAN_UI, "menu/choose", 1, ATTN_NONE);
+			S_Sound (CHAN_VOICE | CHAN_UI, "menu/choose", snd_menuvolume, ATTN_NONE);
 			SetModesMenu (NewWidth, NewHeight, NewBits);
 		}
 		else if ((item->type == more ||
@@ -6418,7 +5589,7 @@ void M_OptButtonHandler(EMenuKey key, bool repeat)
 				 && item->e.mfunc)
 		{
 			CurrentMenu->lastOn = CurrentItem;
-			S_Sound (CHAN_VOICE | CHAN_UI, "menu/choose", 1, ATTN_NONE);
+			S_Sound (CHAN_VOICE | CHAN_UI, "menu/choose", snd_menuvolume, ATTN_NONE);
 			if (item->type == safemore || item->type == rsafemore)
 			{
 				ActivateConfirm (item->label, item->e.mfunc);
@@ -6453,9 +5624,9 @@ void M_OptButtonHandler(EMenuKey key, bool repeat)
 			if (item->e.values == Depths)
 				BuildModesList (SCREENWIDTH, SCREENHEIGHT, DisplayBits);
 
-			S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", 1, ATTN_NONE);
+			S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", snd_menuvolume, ATTN_NONE);
 		}
-		else if (item->type == control)
+		else if (item->type == control || item->type == mapcontrol)
 		{
 			menuactive = MENU_WaitKey;
 			OldMessage = CurrentMenu->items[0].label;
@@ -6466,7 +5637,7 @@ void M_OptButtonHandler(EMenuKey key, bool repeat)
 		else if (item->type == listelement)
 		{
 			CurrentMenu->lastOn = CurrentItem;
-			S_Sound (CHAN_VOICE | CHAN_UI, "menu/choose", 1, ATTN_NONE);
+			S_Sound (CHAN_VOICE | CHAN_UI, "menu/choose", snd_menuvolume, ATTN_NONE);
 			item->e.lfunc (CurrentItem);
 		}
 		else if (item->type == inverter)
@@ -6474,14 +5645,14 @@ void M_OptButtonHandler(EMenuKey key, bool repeat)
 			value = item->a.cvar->GetGenericRep (CVAR_Float);
 			value.Float = -value.Float;
 			item->a.cvar->SetGenericRep (value, CVAR_Float);
-			S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", 1, ATTN_NONE);
+			S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", snd_menuvolume, ATTN_NONE);
 		}
 		else if (item->type == joy_inverter)
 		{
 			assert(item->e.joyslidernum == 0);
 			value.Float = SELECTED_JOYSTICK->GetAxisScale(item->a.joyselection);
 			SELECTED_JOYSTICK->SetAxisScale(item->a.joyselection, -value.Float);
-			S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", 1, ATTN_NONE);
+			S_Sound (CHAN_VOICE | CHAN_UI, "menu/change", snd_menuvolume, ATTN_NONE);
 		}
 		else if (item->type == screenres)
 		{
@@ -6489,7 +5660,7 @@ void M_OptButtonHandler(EMenuKey key, bool repeat)
 		else if (item->type == colorpicker)
 		{
 			CurrentMenu->lastOn = CurrentItem;
-			S_Sound (CHAN_VOICE | CHAN_UI, "menu/choose", 1, ATTN_NONE);
+			S_Sound (CHAN_VOICE | CHAN_UI, "menu/choose", snd_menuvolume, ATTN_NONE);
 			StartColorPickerMenu (item->label, item->a.colorcvar);
 		}
 		else if (item->type == palettegrid)
@@ -6515,14 +5686,6 @@ void M_OptButtonHandler(EMenuKey key, bool repeat)
 
 			// Enter string input mode.
 			g_bStringInput = true;
-		}
-		else if ( item->type == browserslot )
-		{
-			if ( M_ShouldShowServer( item->f.lServer ))
-			{
-				g_lSelectedServer = item->f.lServer;
-				S_Sound (CHAN_VOICE | CHAN_UI, "menu/choose", 1, ATTN_NONE);
-			}
 		}
 
 		break;
@@ -6604,6 +5767,12 @@ CCMD (menu_scoreboard)
 static void StartMapColorsMenu (void)
 {
 	M_SwitchMenu (&MapColorsMenu);
+}
+
+static void StartMapControlsMenu (void)
+{
+	M_BuildKeyList (MapControlsMenu.items, MapControlsMenu.numitems);
+	M_SwitchMenu (&MapControlsMenu);
 }
 
 CCMD (menu_mapcolors)
@@ -7262,12 +6431,14 @@ void M_LoadKeys (const char *modname, bool dbl)
 
 	mysnprintf (section, countof(section), "%s.%s%sBindings", GameNames[gameinfo.gametype], modname,
 		dbl ? ".Double" : ".");
+
+	FKeyBindings *bindings = dbl? &DoubleBindings : &Bindings;
 	if (GameConfig->SetSection (section))
 	{
 		const char *key, *value;
 		while (GameConfig->NextInSection (key, value))
 		{
-			C_DoBind (key, value, dbl);
+			bindings->DoBind (key, value);
 		}
 	}
 }
@@ -7278,12 +6449,13 @@ int M_DoSaveKeys (FConfigFile *config, char *section, int i, bool dbl)
 
 	config->SetSection (section, true);
 	config->ClearCurrentSection ();
+	FKeyBindings *bindings = dbl? &DoubleBindings : &Bindings;
 	for (++i; i < most; ++i)
 	{
 		menuitem_t *item = &CustomControlsItems[i];
 		if (item->type == control)
 		{
-			C_ArchiveBindings (config, dbl, item->e.command);
+			bindings->ArchiveBindings (config, item->e.command);
 			continue;
 		}
 		break;
@@ -7329,7 +6501,7 @@ void FreeKeySections()
 	for (i = numStdControls; i < CustomControlsItems.Size(); ++i)
 	{
 		menuitem_t *item = &CustomControlsItems[i];
-		if (item->type == whitetext || item->type == control)
+		if (item->type == whitetext || item->type == control || item->type == mapcontrol)
 		{
 			if (item->label != NULL)
 			{

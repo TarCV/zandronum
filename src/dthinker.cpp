@@ -42,6 +42,7 @@
 #include "statnums.h"
 #include "i_system.h"
 #include "doomerrors.h"
+#include "farchive.h"
 // [BB] New #includes.
 #include "cl_demo.h"
 #include "doomstat.h"
@@ -196,19 +197,10 @@ void DThinker::SerializeAll(FArchive &arc, bool hubLoad)
 				statcount--;
 			}
 		}
-		catch (class CDoomError &err)
+		catch (class CDoomError &)
 		{
 			bSerialOverride = false;
-
-			// DestroyAllThinkers cannot be called here. It will try to delete the corrupted
-			// object table left behind by the serializer and crash.
-			// Trying to continue is not an option here because the garbage collector will 
-			// crash the next time it runs.
-			// Even making this a fatal error will crash but at least the message can be seen
-			// before the crash - which is not the case with all other options.
-
-			//DestroyAllThinkers();
-			I_FatalError("%s", err.GetMessage());
+			DestroyAllThinkers();
 			throw;
 		}
 		bSerialOverride = false;
@@ -459,7 +451,7 @@ int DThinker::TickThinkers (FThinkerList *list, FThinkerList *dest)
 		NextToThink = node->NextThinker;
 		if (node->ObjectFlags & OF_JustSpawned)
 		{
-			node->ObjectFlags &= ~OF_JustSpawned;
+			// Leave OF_JustSpawn set until after Tick() so the ticker can check it.
 			if (dest != NULL)
 			{ // Move thinker from this list to the destination list
 				node->Remove();
@@ -480,8 +472,9 @@ int DThinker::TickThinkers (FThinkerList *list, FThinkerList *dest)
 				( node->IsKindOf( RUNTIME_CLASS( AActor )) == false ) ||
 				( static_cast<AActor *>( node ) != players[consoleplayer].mo ))
 			{
-				node->Tick ();
+				node->Tick();
 			}
+			node->ObjectFlags &= ~OF_JustSpawned;
 			GC::CheckGC();
 		}
 		node = NextToThink;

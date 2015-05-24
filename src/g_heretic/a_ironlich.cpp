@@ -19,12 +19,12 @@ class AWhirlwind : public AActor
 {
 	DECLARE_CLASS (AWhirlwind, AActor)
 public:
-	int DoSpecialDamage (AActor *target, int damage);
+	int DoSpecialDamage (AActor *target, int damage, FName damagetype);
 };
 
 IMPLEMENT_CLASS(AWhirlwind)
 
-int AWhirlwind::DoSpecialDamage (AActor *target, int damage)
+int AWhirlwind::DoSpecialDamage (AActor *target, int damage, FName damagetype)
 {
 	int randVal;
 
@@ -90,8 +90,8 @@ DEFINE_ACTION_FUNCTION(AActor, A_LichAttack)
 	if (self->CheckMeleeRange ())
 	{
 		int damage = pr_atk.HitDice (6);
-		P_DamageMobj (target, self, self, damage, NAME_Melee);
-		P_TraceBleed (damage, target, self);
+		int newdam = P_DamageMobj (target, self, self, damage, NAME_Melee);
+		P_TraceBleed (newdam > 0 ? newdam : damage, target, self);
 		return;
 	}
 	dist = P_AproxDistance (self->x-target->x, self->y-target->y)
@@ -147,7 +147,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_LichAttack)
 				if ( ( NETWORK_GetState( ) == NETSTATE_SERVER ) )
 					SERVERCOMMANDS_SpawnMissile( fire );
 
-				P_CheckMissileSpawn (fire);
+				P_CheckMissileSpawn (fire, self->radius);
 			}
 		}
 	}
@@ -223,7 +223,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_LichIceImpact)
 		shard->velx = FixedMul (shard->Speed, finecosine[angle]);
 		shard->vely = FixedMul (shard->Speed, finesine[angle]);
 		shard->velz = -FRACUNIT*6/10;
-		P_CheckMissileSpawn (shard);
+		P_CheckMissileSpawn (shard, self->radius);
 	}
 }
 

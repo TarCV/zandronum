@@ -463,7 +463,7 @@ bool GAMEMODE_IsGameInProgressOrResultSequence( void )
 //
 bool GAMEMODE_IsLobbyMap( void )
 {
-	return level.flags2 & LEVEL2_ISLOBBY || stricmp(level.mapname, lobby) == 0;
+	return level.flagsZA & LEVEL_ZA_ISLOBBY || stricmp(level.mapname, lobby) == 0;
 }
 
 //*****************************************************************************
@@ -471,14 +471,14 @@ bool GAMEMODE_IsLobbyMap( void )
 bool GAMEMODE_IsLobbyMap( const char* mapname )
 {
 	// [BB] The level is not loaded yet, so we can't use level.flags2 directly.
-	const level_info_t *levelinfo = FindLevelInfo( mapname );
+	const level_info_t *levelinfo = FindLevelInfo( mapname, false );
 
 	if (levelinfo == NULL)
 	{
 		return false;
 	}
 
-	return levelinfo->flags2 & LEVEL2_ISLOBBY || stricmp( levelinfo->mapname, lobby ) == 0;
+	return levelinfo->flagsZA & LEVEL_ZA_ISLOBBY || stricmp( levelinfo->mapname, lobby ) == 0;
 }
 
 //*****************************************************************************
@@ -684,26 +684,6 @@ void GAMEMODE_ResetPlayersKillCount( const bool bInformClients )
 			SERVERCOMMANDS_SetPlayerPoints ( ulIdx );
 		}
 	}
-}
-//*****************************************************************************
-//
-bool GAMEMODE_IsActorVisibleToConsoleplayersCamera( const AActor* pActor )
-{
-	// [BB] Safety check. This should never be NULL. Nevertheless, we return true to leave the default ZDoom behavior unaltered.
-	if ( players[consoleplayer].camera == NULL )
-		return true;
-
-	if ( TEAM_IsActorVisibleToPlayer( pActor, players[consoleplayer].camera->player ) == false )
-		return false;
-
-	const player_t* pPlayer = players[consoleplayer].camera->player;
-
-	if ( ( pActor->VisibleToPlayerClass != NAME_None )
-		&& pPlayer && pPlayer->mo && ( pActor->VisibleToPlayerClass != pPlayer->mo->GetClass()->TypeName ) )
-		return false;
-
-	// [BB] Passed all checks.
-	return true;
 }
 
 //*****************************************************************************

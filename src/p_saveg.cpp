@@ -44,9 +44,14 @@
 #include "s_sndseq.h"
 #include "v_palette.h"
 #include "a_sharedglobal.h"
-#include "r_interpolate.h"
+#include "r_data/r_interpolate.h"
 #include "g_level.h"
 #include "po_man.h"
+#include "p_setup.h"
+#include "r_data/colormaps.h"
+#include "farchive.h"
+#include "p_lnspec.h"
+#include "p_acs.h"
 // [BB] New #includes.
 #include "deathmatch.h"
 #include "cl_demo.h"
@@ -57,6 +62,11 @@ static void ReadOnePlayer (FArchive &arc, bool skipload);
 static void ReadMultiplePlayers (FArchive &arc, int numPlayers, int numPlayersNow, bool skipload);
 static void SpawnExtraPlayers ();
 
+inline FArchive &operator<< (FArchive &arc, FLinkedSector &link)
+{
+	arc << link.Sector << link.Type;
+	return arc;
+}
 
 //
 // P_ArchivePlayers
@@ -85,7 +95,7 @@ void P_SerializePlayers (FArchive &arc, bool skipload)
 		{
 			if (playeringame[i])
 			{
-				arc.WriteString (players[i].userinfo.netname);
+				arc.WriteString (players[i].userinfo.GetName());
 				players[i].Serialize (arc);
 			}
 		}
@@ -108,6 +118,8 @@ void P_SerializePlayers (FArchive &arc, bool skipload)
 		{
 			SpawnExtraPlayers ();
 		}
+		// Redo pitch limits, since the spawned player has them at 0.
+		players[consoleplayer].SendPitchLimits();
 	}
 }
 
@@ -177,7 +189,7 @@ static void ReadMultiplePlayers (FArchive &arc, int numPlayers, int numPlayersNo
 		{
 			for (j = 0; j < MAXPLAYERS; ++j)
 			{
-				if (playerUsed[j] == 0 && stricmp(players[j].userinfo.netname, nametemp[i]) == 0)
+				if (playerUsed[j] == 0 && stricmp(players[j].userinfo.GetName(), nametemp[i]) == 0)
 				{ // Found a match, so copy our temp player to the real player
 					Printf ("Found player %d (%s) at %d\n", i, nametemp[i], j);
 					CopyPlayer (&players[j], &playertemp[i], nametemp[i]);
@@ -198,7 +210,7 @@ static void ReadMultiplePlayers (FArchive &arc, int numPlayers, int numPlayersNo
 				{
 					if (playerUsed[j] == 0)
 					{
-						Printf ("Assigned player %d (%s) to %d (%s)\n", i, nametemp[i], j, players[j].userinfo.netname);
+						Printf ("Assigned player %d (%s) to %d (%s)\n", i, nametemp[i], j, players[j].userinfo.GetName());
 						CopyPlayer (&players[j], &playertemp[i], nametemp[i]);
 						playerUsed[j] = 1;
 						tempPlayerUsed[i] = 1;
@@ -256,6 +268,9 @@ static void CopyPlayer (player_t *dst, player_t *src, const char *name)
 	dst->cheats |= chasecam;
 
 	dst->userinfo = uibackup;
+	// Validate the skin
+	dst->userinfo.SkinNumChanged(R_FindSkin(skins[dst->userinfo.GetSkin()].name, dst->CurrentPlayerClass));
+
 	// Make sure the player pawn points to the proper player struct.
 	if (dst->mo != NULL)
 	{
@@ -282,7 +297,7 @@ static void SpawnExtraPlayers ()
 		if (playeringame[i] && players[i].mo == NULL)
 		{
 			players[i].playerstate = PST_ENTER;
-			P_SpawnPlayer (&playerstarts[i], false, &players[i]);
+			P_SpawnPlayer(&playerstarts[i], i, (level.flags2 & LEVEL2_PRERAISEWEAPON) ? SPF_WEAPONFULLYUP : 0);
 		}
 	}
 }
@@ -314,9 +329,18 @@ void P_SerializeWorld (FArchive &arc)
 	for (i = 0, sec = sectors; i < numsectors; i++, sec++)
 	{
 		arc << sec->floorplane
-			<< sec->ceilingplane
-			<< sec->lightlevel
-			<< sec->special
+			<< sec->ceilingplane;
+		if (SaveVersion < 3223)
+		{
+			BYTE bytelight;
+			arc << bytelight;
+			sec->lightlevel = bytelight;
+		}
+		else
+		{
+			arc << sec->lightlevel;
+		}
+		arc << sec->special
 			<< sec->tag
 			<< sec->soundtraversed
 			<< sec->seqType
@@ -346,16 +370,8 @@ void P_SerializeWorld (FArchive &arc)
 			<< sec->interpolations[0]
 			<< sec->interpolations[1]
 			<< sec->interpolations[2]
-			<< sec->interpolations[3];
-
-		if (SaveVersion < 2492)
-		{
-			sec->SeqName = NAME_None;
-		}
-		else
-		{
-			arc << sec->SeqName;
-		}
+			<< sec->interpolations[3]
+			<< sec->SeqName;
 
 		sec->e->Serialize(arc);
 		if (arc.IsStoring ())
@@ -373,7 +389,7 @@ void P_SerializeWorld (FArchive &arc)
 				<< desaturate;
 			sec->ColorMap = GetSpecialLights (color, fade, desaturate);
 		}
-		arc << sec->ceiling_reflect << sec->floor_reflect;
+		arc << sec->reflect[sector_t::ceiling] << sec->reflect[sector_t::floor];
 
 		// [BC]
 		arc << sec->floorOrCeiling
@@ -434,8 +450,16 @@ void P_SerializeWorld (FArchive &arc)
 			<< li->activation
 			<< li->special
 			<< li->Alpha
-			<< li->id
-			<< li->args[0] << li->args[1] << li->args[2] << li->args[3] << li->args[4];
+			<< li->id;
+		if (P_IsACSSpecial(li->special))
+		{
+			P_SerializeACSScriptNumber(arc, li->args[0], false);
+		}
+		else
+		{
+			arc << li->args[0];
+		}
+		arc << li->args[1] << li->args[2] << li->args[3] << li->args[4];
 		// [BC]
 		arc << li->ulTexChangeFlags
 			<< li->SavedSpecial
@@ -510,7 +534,7 @@ FArchive &operator<< (FArchive &arc, sector_t::splane &p)
 {
 	arc << p.xform.xoffs << p.xform.yoffs << p.xform.xscale << p.xform.yscale 
 		<< p.xform.angle << p.xform.base_yoffs << p.xform.base_angle
-		<< p.Flags << p.Light << p.Texture << p.TexZ;
+		<< p.Flags << p.Light << p.Texture << p.TexZ << p.alpha;
 	return arc;
 }
 
@@ -606,6 +630,102 @@ void P_SerializePolyobjs (FArchive &arc)
 			deltaX -= po->StartSpot.x;
 			deltaY -= po->StartSpot.y;
 			po->MovePolyobj (deltaX, deltaY, true);
+		}
+	}
+}
+
+//==========================================================================
+//
+// RecalculateDrawnSubsectors
+//
+// In case the subsector data is unusable this function tries to reconstruct
+// if from the linedefs' ML_MAPPED info.
+//
+//==========================================================================
+
+void RecalculateDrawnSubsectors()
+{
+	for(int i=0;i<numsubsectors;i++)
+	{
+		subsector_t *sub = &subsectors[i];
+		for(unsigned int j=0;j<sub->numlines;j++)
+		{
+			if (sub->firstline[j].linedef != NULL && 
+				(sub->firstline[j].linedef->flags & ML_MAPPED))
+			{
+				sub->flags |= SSECF_DRAWN;
+			}
+		}
+	}
+}
+
+//==========================================================================
+//
+// ArchiveSubsectors
+//
+//==========================================================================
+
+void P_SerializeSubsectors(FArchive &arc)
+{
+	int num_verts, num_subs, num_nodes;	
+	BYTE by;
+
+	if (arc.IsStoring())
+	{
+		if (hasglnodes)
+		{
+			arc << numvertexes << numsubsectors << numnodes;	// These are only for verification
+			for(int i=0;i<numsubsectors;i+=8)
+			{
+				by = 0;
+				for(int j=0;j<8;j++)
+				{
+					if (i+j<numsubsectors && (subsectors[i+j].flags & SSECF_DRAWN))
+					{
+						by |= (1<<j);
+					}
+				}
+				arc << by;
+			}
+		}
+		else
+		{
+			int v = 0;
+			arc << v << v << v;
+		}
+	}
+	else
+	{
+		arc << num_verts << num_subs << num_nodes;
+		if (num_verts != numvertexes ||
+			num_subs != numsubsectors ||
+			num_nodes != numnodes)
+		{
+			// Nodes don't match - we can't use this info
+			for(int i=0;i<num_subs;i+=8)
+			{
+				// Skip the subsector info.
+				arc << by;
+			}
+			if (hasglnodes)
+			{
+				RecalculateDrawnSubsectors();
+			}
+			return;
+		}
+		else
+		{
+			for(int i=0;i<numsubsectors;i+=8)
+			{
+				arc << by;
+				for(int j=0;j<8;j++)
+				{
+					if ((by & (1<<j)) && i+j<numsubsectors)
+					{
+						subsectors[i+j].flags |= SSECF_DRAWN;
+					}
+				}
+			}
 		}
 	}
 }

@@ -41,9 +41,8 @@
 #include "gl/system/gl_system.h"
 #include "files.h"
 #include "m_swap.h"
-#include "r_draw.h"
 #include "v_video.h"
-#include "r_main.h"
+#include "r_data/r_translate.h"
 #include "m_png.h"
 #include "m_crc32.h"
 #include "w_wad.h"
@@ -52,6 +51,7 @@
 #include "vectors.h"
 
 #include "gl/system/gl_framebuffer.h"
+#include "gl/system/gl_threads.h"
 #include "gl/renderer/gl_renderer.h"
 #include "gl/renderer/gl_lightdata.h"
 #include "gl/renderer/gl_renderstate.h"
@@ -65,6 +65,7 @@
 #include "gl/textures/gl_material.h"
 #include "gl/utility/gl_clock.h"
 #include "gl/utility/gl_templates.h"
+#include "gl/models/gl_models.h"
 
 //===========================================================================
 // 
@@ -87,16 +88,19 @@ void FGLRenderer::Initialize()
 	mirrortexture = FTexture::CreateTexture(Wads.GetNumForFullName("glstuff/mirror.png"), FTexture::TEX_MiscPatch);
 	gllight = FTexture::CreateTexture(Wads.GetNumForFullName("glstuff/gllight.png"), FTexture::TEX_MiscPatch);
 
-	mVBO = new FVertexBuffer;
+	mVBO = new FFlatVertexBuffer;
 	mFBID = 0;
 	SetupLevel();
 	mShaderManager = new FShaderManager;
+	//mThreadManager = new FGLThreadManager;
 }
 
 FGLRenderer::~FGLRenderer() 
 {
+	gl_CleanModelData();
 	gl_DeleteAllAttachedLights();
 	FMaterial::FlushAll();
+	//if (mThreadManager != NULL) delete mThreadManager;
 	if (mShaderManager != NULL) delete mShaderManager;
 	if (mVBO != NULL) delete mVBO;
 	if (glpart2) delete glpart2;
@@ -166,10 +170,10 @@ void FGLRenderer::ProcessParticle(particle_t *part, sector_t *sector)
 //
 //===========================================================================
 
-void FGLRenderer::ProcessSector(sector_t *fakesector, subsector_t *sub)
+void FGLRenderer::ProcessSector(sector_t *fakesector)
 {
 	GLFlat glflat;
-	glflat.ProcessSector(fakesector, sub);
+	glflat.ProcessSector(fakesector);
 }
 
 //===========================================================================
@@ -295,12 +299,11 @@ void FGLRenderer::DrawTexture(FTexture *img, DCanvas::DrawParms &parms)
 
 	FMaterial * gltex = FMaterial::ValidateTexture(img);
 
-	const PatchTextureInfo * pti;
-
-	if (parms.colorOverlay)
+	if (parms.colorOverlay && (parms.colorOverlay & 0xffffff) == 0)
 	{
 		// Right now there's only black. Should be implemented properly later
 		light = 1.f - APART(parms.colorOverlay)/255.f;
+		parms.colorOverlay = 0;
 	}
 
 	if (!img->bHasCanvas)
@@ -313,20 +316,18 @@ void FGLRenderer::DrawTexture(FTexture *img, DCanvas::DrawParms &parms)
 				GLTranslationPalette * pal = static_cast<GLTranslationPalette*>(parms.remap->GetNative());
 				if (pal) translation = -pal->GetIndex();
 			}
-			pti = gltex->BindPatch(CM_DEFAULT, translation);
+			gltex->BindPatch(CM_DEFAULT, translation);
 		}
 		else 
 		{
 			// This is an alpha texture
-			pti = gltex->BindPatch(CM_SHADE, 0);
+			gltex->BindPatch(CM_SHADE, 0);
 		}
 
-		if (!pti) return;
-
-		u1 = pti->GetUL();
-		v1 = pti->GetVT();
-		u2 = pti->GetUR();
-		v2 = pti->GetVB();
+		u1 = gltex->GetUL();
+		v1 = gltex->GetVT();
+		u2 = gltex->GetUR();
+		v2 = gltex->GetVB();
 	}
 	else
 	{
@@ -393,6 +394,26 @@ void FGLRenderer::DrawTexture(FTexture *img, DCanvas::DrawParms &parms)
 	gl.TexCoord2f(u2, v2);
 	glVertex2d(x + w, y + h);
 	gl.End();
+
+	if (parms.colorOverlay)
+	{
+		gl_RenderState.SetTextureMode(TM_MASK);
+		gl_RenderState.BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		gl_RenderState.BlendEquation(GL_FUNC_ADD);
+		gl_RenderState.Apply();
+		gl.Color4ub(RPART(parms.colorOverlay),GPART(parms.colorOverlay),BPART(parms.colorOverlay),APART(parms.colorOverlay));
+		gl.Begin(GL_TRIANGLE_STRIP);
+		gl.TexCoord2f(u1, v1);
+		glVertex2d(x, y);
+		gl.TexCoord2f(u1, v2);
+		glVertex2d(x, y + h);
+		gl.TexCoord2f(u2, v1);
+		glVertex2d(x + w, y);
+		gl.TexCoord2f(u2, v2);
+		glVertex2d(x + w, y + h);
+		gl.End();
+	}
+
 	gl_RenderState.EnableAlphaTest(true);
 	
 	gl.Scissor(0, 0, screen->GetWidth(), screen->GetHeight());
@@ -480,21 +501,22 @@ void FGLRenderer::FlatFill (int left, int top, int right, int bottom, FTexture *
 	
 	if (!gltexture) return;
 
-	const WorldTextureInfo * wti = gltexture->Bind(CM_DEFAULT, 0, 0);
-	if (!wti) return;
+	gltexture->Bind(CM_DEFAULT, 0, 0);
 	
+	// scaling is not used here.
 	if (!local_origin)
 	{
-		fU1=wti->GetU(left);
-		fV1=wti->GetV(top);
-		fU2=wti->GetU(right);
-		fV2=wti->GetV(bottom);
+		fU1 = float(left) / src->GetWidth();
+		fV1 = float(top) / src->GetHeight();
+		fU2 = float(right) / src->GetWidth();
+		fV2 = float(bottom) / src->GetHeight();
 	}
 	else
-	{		fU1=wti->GetU(0);
-		fV1=wti->GetV(0);
-		fU2=wti->GetU(right-left);
-		fV2=wti->GetV(bottom-top);
+	{		
+		fU1 = 0;
+		fV1 = 0;
+		fU2 = float(right-left) / src->GetWidth();
+		fV2 = float(bottom-top) / src->GetHeight();
 	}
 	gl_RenderState.Apply();
 	gl.Begin(GL_TRIANGLE_STRIP);
@@ -515,7 +537,7 @@ void FGLRenderer::Clear(int left, int top, int right, int bottom, int palcolor, 
 {
 	int rt;
 	int offY = 0;
-	PalEntry p = palcolor==-1? (PalEntry)color : GPalette.BaseColors[palcolor];
+	PalEntry p = palcolor==-1 || color != 0? (PalEntry)color : GPalette.BaseColors[palcolor];
 	int width = right-left;
 	int height= bottom-top;
 	
@@ -541,3 +563,72 @@ void FGLRenderer::Clear(int left, int top, int right, int bottom, int palcolor, 
 	
 	gl.Disable(GL_SCISSOR_TEST);
 }
+
+//==========================================================================
+//
+// D3DFB :: FillSimplePoly
+//
+// Here, "simple" means that a simple triangle fan can draw it.
+//
+//==========================================================================
+
+void FGLRenderer::FillSimplePoly(FTexture *texture, FVector2 *points, int npoints,
+	double originx, double originy, double scalex, double scaley,
+	angle_t rotation, FDynamicColormap *colormap, int lightlevel)
+{
+	if (npoints < 3)
+	{ // This is no polygon.
+		return;
+	}
+
+	FMaterial *gltexture = FMaterial::ValidateTexture(texture);
+
+	if (gltexture == NULL)
+	{
+		return;
+	}
+
+	FColormap cm;
+	cm = colormap;
+
+	lightlevel = gl_CalcLightLevel(lightlevel, 0, true);
+	PalEntry pe = gl_CalcLightColor(lightlevel, cm.LightColor, cm.blendfactor, true);
+	gl.Color3ub(pe.r, pe.g, pe.b);
+
+	gltexture->Bind(cm.colormap);
+
+	int i;
+	float rot = float(rotation * M_PI / float(1u << 31));
+	bool dorotate = rot != 0;
+
+	float cosrot = cos(rot);
+	float sinrot = sin(rot);
+
+	//float yoffs = GatheringWipeScreen ? 0 : LBOffset;
+	float uscale = float(1.f / (texture->GetScaledWidth() * scalex));
+	float vscale = float(1.f / (texture->GetScaledHeight() * scaley));
+	if (gltexture->tex->bHasCanvas)
+	{
+		vscale = 0 - vscale;
+	}
+	float ox = float(originx);
+	float oy = float(originy);
+
+	gl_RenderState.Apply();
+	gl.Begin(GL_TRIANGLE_FAN);
+	for (i = 0; i < npoints; ++i)
+	{
+		float u = points[i].X - 0.5f - ox;
+		float v = points[i].Y - 0.5f - oy;
+		if (dorotate)
+		{
+			float t = u;
+			u = t * cosrot - v * sinrot;
+			v = v * cosrot + t * sinrot;
+		}
+		gl.TexCoord2f(u * uscale, v * vscale);
+		gl.Vertex3f(points[i].X, points[i].Y /* + yoffs */, 0);
+	}
+	gl.End();
+}
+
