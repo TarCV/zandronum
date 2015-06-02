@@ -41,6 +41,7 @@
 #include "gl/system/gl_system.h"
 #include "c_dispatch.h"
 #include "p_local.h"
+#include "p_effect.h"
 #include "vectors.h"
 #include "gl/gl_functions.h"
 #include "g_level.h"
@@ -62,7 +63,7 @@
 //
 //==========================================================================
 
-bool gl_GetSpriteLight(AActor *self, fixed_t x, fixed_t y, fixed_t z, subsector_t * subsec, int desaturation, float * out)
+bool gl_GetSpriteLight(AActor *self, fixed_t x, fixed_t y, fixed_t z, subsector_t * subsec, int desaturation, float * out, line_t *line, int side)
 {
 	ADynamicLight *light;
 	float frac, lr, lg, lb;
@@ -90,6 +91,14 @@ bool gl_GetSpriteLight(AActor *self, fixed_t x, fixed_t y, fixed_t z, subsector_
 					
 					if (frac > 0)
 					{
+						if (line != NULL)
+						{
+							if (P_PointOnLineSide(light->x, light->y, line) != side) 
+							{
+								node = node->nextLight;
+								continue;
+							}
+						}
 						lr = light->GetRed() / 255.0f * gl_lights_intensity;
 						lg = light->GetGreen() / 255.0f * gl_lights_intensity;
 						lb = light->GetBlue() / 255.0f * gl_lights_intensity;
@@ -138,15 +147,21 @@ static int gl_SetSpriteLight(AActor *self, fixed_t x, fixed_t y, fixed_t z, subs
 							  PalEntry ThingColor, bool weapon)
 {
 	float r,g,b;
-	float result[3];
+	float result[4]; // Korshun.
 
 	gl_GetLightColor(lightlevel, rellight, cm, &r, &g, &b, weapon);
-	if (!gl_GetSpriteLight(self, x, y, z, subsec, cm? cm->colormap : 0, result))
+	bool res = gl_GetSpriteLight(self, x, y, z, subsec, cm? cm->colormap : 0, result);
+	if (!res || glset.lightmode == 8)
 	{
 		r *= ThingColor.r/255.f;
 		g *= ThingColor.g/255.f;
 		b *= ThingColor.b/255.f;
 		gl.Color4f(r, g, b, alpha);
+		if (glset.lightmode == 8) 
+		{
+			gl.VertexAttrib1f(VATTR_LIGHTLEVEL, gl_CalcLightLevel(lightlevel, rellight, weapon) / 255.0f); // Korshun.
+			gl_RenderState.SetDynLight(result[0], result[1], result[2]);
+		}
 		return lightlevel;
 	}
 	else
@@ -163,7 +178,7 @@ static int gl_SetSpriteLight(AActor *self, fixed_t x, fixed_t y, fixed_t z, subs
 		g *= ThingColor.g/255.f;
 		b *= ThingColor.b/255.f;
 
-		gl.Color4f(r, g, b, alpha);
+		gl.Color4f(r, g, b, alpha);		
 
 		if (dlightlevel == 0) return 0;
 
@@ -263,7 +278,7 @@ int gl_SetSpriteLighting(FRenderStyle style, AActor *thing, int lightlevel, int 
 		cm->LightColor.r = cm->LightColor.g = cm->LightColor.b = gray;
 	}
 
-	if (style.BlendOp == STYLEOP_Fuzz)
+	if (style.BlendOp == STYLEOP_Shadow)
 	{
 		gl.Color4f(0.2f * ThingColor.r / 255.f, 0.2f * ThingColor.g / 255.f, 
 					0.2f * ThingColor.b / 255.f, (alpha = 0.33f));
