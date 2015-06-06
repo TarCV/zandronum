@@ -62,6 +62,7 @@ extern HWND Window;
 #include "a_pickups.h"
 #include "doomstat.h"
 #include "i_system.h"
+#include "gi.h"
 // [BC] New #includes.
 #include "network.h"
 // [RC] For name cleaning
@@ -86,7 +87,8 @@ FGameConfigFile::FGameConfigFile ()
 	FString user_docs, user_app_support, local_app_support;
 #endif
 	FString pathname;
-	
+
+	OkayToWrite = false;	// Do not allow saving of the config before DoGameSetup()
 	bMigrating = false;
 	bModSetup = false;
 	pathname = GetConfigPath (true);
@@ -158,6 +160,7 @@ FGameConfigFile::FGameConfigFile ()
 #elif !defined(unix)
 		SetValueForKey ("Path", "$PROGDIR", true);
 #else
+		SetValueForKey ("Path", "~/" GAME_DIR, true);
 		SetValueForKey ("Path", SHARE_DIR, true);
 #endif
 		SetValueForKey ("Path", "$DOOMWADDIR", true);
@@ -361,18 +364,6 @@ void FGameConfigFile::DoGameSetup (const char *gamename)
 {
 	const char *key;
 	const char *value;
-	enum { Doom, Heretic, Hexen, Strife, Chex } game;
-
-	if (strcmp (gamename, "Heretic") == 0)
-		game = Heretic;
-	else if (strcmp (gamename, "Hexen") == 0)
-		game = Hexen;
-	else if (strcmp (gamename, "Strife") == 0)
-		game = Strife;
-	else if (strcmp (gamename, "Chex") == 0)
-		game = Chex;
-	else
-		game = Doom;
 
 	if (bMigrating)
 	{
@@ -394,9 +385,9 @@ void FGameConfigFile::DoGameSetup (const char *gamename)
 		ReadCVars (0);
 	}
 
-	if (game != Doom && game != Strife && game != Chex)
+	if (gameinfo.gametype & GAME_Raven)
 	{
-		SetRavenDefaults (game == Hexen);
+		SetRavenDefaults (gameinfo.gametype == GAME_Hexen);
 	}
 
 	// The NetServerInfo section will be read and override anything loaded
@@ -413,29 +404,38 @@ void FGameConfigFile::DoGameSetup (const char *gamename)
 		ReadCVars (0);
 	}
 
-	strncpy (subsection, "Bindings", sublen);
-	if (!SetSection (section))
-	{ // Config has no bindings for the given game
-		if (!bMigrating)
-		{
-			C_SetDefaultBindings ();
-		}
-	}
-	else
+	if (!bMigrating)
 	{
-		C_UnbindAll ();
+		C_SetDefaultBindings ();
+	}
+
+	strncpy (subsection, "Bindings", sublen);
+	if (SetSection (section))
+	{
+		Bindings.UnbindAll();
 		while (NextInSection (key, value))
 		{
-			C_DoBind (key, value, false);
+			Bindings.DoBind (key, value);
 		}
 	}
 
 	strncpy (subsection, "DoubleBindings", sublen);
 	if (SetSection (section))
 	{
+		DoubleBindings.UnbindAll();
 		while (NextInSection (key, value))
 		{
-			C_DoBind (key, value, true);
+			DoubleBindings.DoBind (key, value);
+		}
+	}
+
+	strncpy (subsection, "AutomapBindings", sublen);
+	if (SetSection (section))
+	{
+		AutomapBindings.UnbindAll();
+		while (NextInSection (key, value))
+		{
+			AutomapBindings.DoBind (key, value);
 		}
 	}
 
@@ -456,6 +456,7 @@ void FGameConfigFile::DoGameSetup (const char *gamename)
 			}
 		}
 	}
+	OkayToWrite = true;
 }
 
 // Like DoGameSetup(), but for mod-specific cvars.
@@ -592,11 +593,15 @@ void FGameConfigFile::ArchiveGameData (const char *gamename)
 
 	strcpy (subsection, "Bindings");
 	SetSection (section, true);
-	C_ArchiveBindings (this, false);
+	Bindings.ArchiveBindings (this);
 
 	strncpy (subsection, "DoubleBindings", sublen);
 	SetSection (section, true);
-	C_ArchiveBindings (this, true);
+	DoubleBindings.ArchiveBindings (this);
+
+	strncpy (subsection, "AutomapBindings", sublen);
+	SetSection (section, true);
+	AutomapBindings.ArchiveBindings (this);
 
 	strcpy (subsection, "RevealedBotsAndSkins");
 	SetSection (section, true);

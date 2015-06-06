@@ -39,9 +39,11 @@
 */
 #include "gl/system/gl_system.h"
 #include "sbar.h"
-#include "r_main.h"
+#include "r_utility.h"
 #include "v_video.h"
 #include "doomstat.h"
+#include "d_player.h"
+#include "g_level.h"
 
 #include "gl/system/gl_cvars.h"
 #include "gl/renderer/gl_renderer.h"
@@ -57,6 +59,7 @@
 EXTERN_CVAR (Bool, r_drawplayersprites)
 EXTERN_CVAR(Float, transsouls)
 EXTERN_CVAR (Bool, st_scale)
+EXTERN_CVAR(Int, gl_fuzztype)
 
 
 //==========================================================================
@@ -65,7 +68,7 @@ EXTERN_CVAR (Bool, st_scale)
 //
 //==========================================================================
 
-void FGLRenderer::DrawPSprite (player_t * player,pspdef_t *psp,fixed_t sx, fixed_t sy, int cm_index, bool hudModelStep)
+void FGLRenderer::DrawPSprite (player_t * player,pspdef_t *psp,fixed_t sx, fixed_t sy, int cm_index, bool hudModelStep, int OverrideShader)
 {
 	float			fU1,fV1;
 	float			fU2,fV2;
@@ -73,7 +76,8 @@ void FGLRenderer::DrawPSprite (player_t * player,pspdef_t *psp,fixed_t sx, fixed
 	int				x1,y1,x2,y2;
 	float			scale;
 	fixed_t			scalex;
-	fixed_t			texturemid;
+	fixed_t			texturemid;// 4:3		16:9		16:10			17:10			5:4
+	static fixed_t xratio[] = {FRACUNIT, FRACUNIT*3/4, FRACUNIT*5/6, FRACUNIT*40/51, FRACUNIT};
 	
 	// [BB] In the HUD model step we just render the model and break out. 
 	if ( hudModelStep )
@@ -87,17 +91,16 @@ void FGLRenderer::DrawPSprite (player_t * player,pspdef_t *psp,fixed_t sx, fixed
 	FTextureID lump = gl_GetSpriteFrame(psp->sprite, psp->frame, 0, 0, &mirror);
 	if (!lump.isValid()) return;
 
-	FMaterial * tex=FMaterial::ValidateTexture(lump, false);
+	FMaterial * tex = FMaterial::ValidateTexture(lump, false);
 	if (!tex) return;
 
-	const PatchTextureInfo * pti = tex->BindPatch(cm_index, 0);
-	if (!pti) return;
+	tex->BindPatch(cm_index, 0, OverrideShader);
 
 	int vw = viewwidth;
 	int vh = viewheight;
 
 	// calculate edges of the shape
-	scalex=FRACUNIT * vw / 320 * BaseRatioSizes[WidescreenRatio][3] / 48;
+	scalex = xratio[WidescreenRatio] * vw / 320;
 
 	tx = sx - ((160 + tex->GetScaledLeftOffset(GLUSE_PATCH))<<FRACBITS);
 	x1 = (FixedMul(tx, scalex)>>FRACBITS) + (vw>>1);
@@ -126,25 +129,28 @@ void FGLRenderer::DrawPSprite (player_t * player,pspdef_t *psp,fixed_t sx, fixed
 	}
 
 	scale = ((SCREENHEIGHT*vw)/SCREENWIDTH) / 200.0f;    
-	y1=viewwindowy+(vh>>1)-(int)(((float)texturemid/(float)FRACUNIT)*scale);
-	y2=y1+(int)((float)tex->TextureHeight(GLUSE_PATCH)*scale)+1;
+	y1 = viewwindowy + (vh >> 1) - (int)(((float)texturemid / (float)FRACUNIT) * scale);
+	y2 = y1 + (int)((float)tex->TextureHeight(GLUSE_PATCH) * scale) + 1;
 
 	if (!mirror)
 	{
-		fU1=pti->GetUL();
-		fV1=pti->GetVT();
-		fU2=pti->GetUR();
-		fV2=pti->GetVB();
+		fU1=tex->GetUL();
+		fV1=tex->GetVT();
+		fU2=tex->GetUR();
+		fV2=tex->GetVB();
 	}
 	else
 	{
-		fU2=pti->GetUL();
-		fV1=pti->GetVT();
-		fU1=pti->GetUR();
-		fV2=pti->GetVB();
+		fU2=tex->GetUL();
+		fV1=tex->GetVT();
+		fU1=tex->GetUR();
+		fV2=tex->GetVB();
 	}
 
-	if (tex->tex->gl_info.mIsTransparent) gl_RenderState.EnableAlphaTest(false);
+	if (tex->GetTransparent() || OverrideShader != 0)
+	{
+		gl_RenderState.EnableAlphaTest(false);
+	}
 	gl_RenderState.Apply();
 	gl.Begin(GL_TRIANGLE_STRIP);
 	gl.TexCoord2f(fU1, fV1); gl.Vertex2f(x1,y1);
@@ -152,7 +158,10 @@ void FGLRenderer::DrawPSprite (player_t * player,pspdef_t *psp,fixed_t sx, fixed
 	gl.TexCoord2f(fU2, fV1); gl.Vertex2f(x2,y1);
 	gl.TexCoord2f(fU2, fV2); gl.Vertex2f(x2,y2);
 	gl.End();
-	if (tex->tex->gl_info.mIsTransparent) gl_RenderState.EnableAlphaTest(true);
+	if (tex->GetTransparent() || OverrideShader != 0)
+	{
+		gl_RenderState.EnableAlphaTest(true);
+	}
 }
 
 //==========================================================================
@@ -160,6 +169,8 @@ void FGLRenderer::DrawPSprite (player_t * player,pspdef_t *psp,fixed_t sx, fixed
 // R_DrawPlayerSprites
 //
 //==========================================================================
+
+EXTERN_CVAR(Bool, gl_brightfog)
 
 void FGLRenderer::DrawPlayerSprites(sector_t * viewsector, bool hudModelStep)
 {
@@ -209,9 +220,21 @@ void FGLRenderer::DrawPlayerSprites(sector_t * viewsector, bool hudModelStep)
 		fakesec    = gl_FakeFlat(viewsector, &fs, false);
 
 		// calculate light level for weapon sprites
-		lightlevel = fakesec->lightlevel;
+		lightlevel = gl_ClampLight(fakesec->lightlevel);
+		if (glset.lightmode == 8)
+		{
+			lightlevel = gl_CalcLightLevel(lightlevel, getExtraLight(), true);
 
-		lightlevel = gl_CheckSpriteGlow(viewsector->GetTexture(sector_t::floor), lightlevel, playermo->z-playermo->floorz);
+			// Korshun: the way based on max possible light level for sector like in software renderer.
+			float min_L = 36.0/31.0 - ((lightlevel/255.0) * (63.0/31.0)); // Lightlevel in range 0-63
+			if (min_L < 0)
+				min_L = 0;
+			else if (min_L > 1.0)
+				min_L = 1.0;
+
+			lightlevel = (1.0 - min_L) * 255;
+		}
+		lightlevel = gl_CheckSpriteGlow(viewsector, lightlevel, playermo->x, playermo->y, playermo->z);
 
 		// calculate colormap for weapon sprites
 		if (viewsector->e->XFloor.ffloors.Size() && !glset.nocoloredspritelighting)
@@ -245,8 +268,16 @@ void FGLRenderer::DrawPlayerSprites(sector_t * viewsector, bool hudModelStep)
 		}
 	}
 
+	
+	// Korshun: fullbright fog in opengl, render weapon sprites fullbright.
+	if (glset.brightfog && ((level.flags&LEVEL_HASFADETABLE) || cm.FadeColor != 0))
+	{
+		lightlevel = 255;
+		statebright[0] = statebright[1] = true;
+	}
+
 	PalEntry ThingColor = playermo->fillcolor;
-	vissprite_t vis;
+	visstyle_t vis;
 
 	vis.RenderStyle=playermo->RenderStyle;
 	vis.alpha=playermo->alpha;
@@ -264,10 +295,31 @@ void FGLRenderer::DrawPlayerSprites(sector_t * viewsector, bool hudModelStep)
 	}
 
 	// Set the render parameters
-	vis.RenderStyle.CheckFuzz();
+
+	int OverrideShader = 0;
+	float trans = 0.f;
+	if (vis.RenderStyle.BlendOp >= STYLEOP_Fuzz && vis.RenderStyle.BlendOp <= STYLEOP_FuzzOrRevSub)
+	{
+		vis.RenderStyle.CheckFuzz();
+		if (vis.RenderStyle.BlendOp == STYLEOP_Fuzz)
+		{
+			if (gl.shadermodel >= 4 && gl_fuzztype != 0)
+			{
+				// Todo: implement shader selection here
+				vis.RenderStyle = LegacyRenderStyles[STYLE_Translucent];
+				OverrideShader = gl_fuzztype + 4;
+				trans = 0.99f;	// trans may not be 1 here
+			}
+			else
+			{
+				vis.RenderStyle.BlendOp = STYLEOP_Shadow;
+			}
+		}
+		statebright[0] = statebright[1] = false;
+	}
+
 	gl_SetRenderStyle(vis.RenderStyle, false, false);
 
-	float trans;
 	if (vis.RenderStyle.Flags & STYLEF_TransSoulsAlpha)
 	{
 		trans = transsouls;
@@ -276,7 +328,7 @@ void FGLRenderer::DrawPlayerSprites(sector_t * viewsector, bool hudModelStep)
 	{
 		trans = 1.f;
 	}
-	else
+	else if (trans == 0.f)
 	{
 		trans = FIXED2FLOAT(vis.alpha);
 	}
@@ -287,8 +339,14 @@ void FGLRenderer::DrawPlayerSprites(sector_t * viewsector, bool hudModelStep)
 	{
 		// brighten the weapon to reduce the difference between
 		// normal sprite and fullbright flash.
-		lightlevel = (2*lightlevel+255)/3;
+		if (glset.lightmode != 8) lightlevel = (2*lightlevel+255)/3;
 	}
+	
+	// hack alert! Rather than changing everything in the underlying lighting code let's just temporarily change
+	// light mode here to draw the weapon sprite.
+	int oldlightmode = glset.lightmode;
+	if (glset.lightmode == 8) glset.lightmode = 2;
+	
 	for (i=0, psp=player->psprites; i<=ps_flash; i++,psp++)
 	{
 		if (psp->state) 
@@ -313,10 +371,11 @@ void FGLRenderer::DrawPlayerSprites(sector_t * viewsector, bool hudModelStep)
 			// set the lighting parameters (only calls glColor and glAlphaFunc)
 			gl_SetSpriteLighting(vis.RenderStyle, playermo, statebright[i]? 255 : lightlevel, 
 				0, &cmc, 0xffffff, trans, statebright[i], true);
-			DrawPSprite (player,psp,psp->sx+ofsx, psp->sy+ofsy, cm.colormap, hudModelStep);
+			DrawPSprite (player,psp,psp->sx+ofsx, psp->sy+ofsy, cm.colormap, hudModelStep, OverrideShader);
 		}
 	}
 	gl_RenderState.EnableBrightmap(false);
+	glset.lightmode = oldlightmode;
 }
 
 //==========================================================================
@@ -344,5 +403,5 @@ void FGLRenderer::DrawTargeterSprites()
 
 	// The Targeter's sprites are always drawn normally.
 	for (i=ps_targetcenter, psp = &player->psprites[ps_targetcenter]; i<NUMPSPRITES; i++,psp++)
-		if (psp->state) DrawPSprite (player,psp,psp->sx, psp->sy, CM_DEFAULT, false);
+		if (psp->state) DrawPSprite (player,psp,psp->sx, psp->sy, CM_DEFAULT, false, 0);
 }

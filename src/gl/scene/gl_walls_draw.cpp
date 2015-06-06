@@ -42,7 +42,6 @@
 #include "p_local.h"
 #include "p_lnspec.h"
 #include "a_sharedglobal.h"
-#include "r_blend.h"
 #include "gl/gl_functions.h"
 
 #include "gl/system/gl_cvars.h"
@@ -133,22 +132,22 @@ void GLWall::SetupLights()
 	for(int i=0;i<2;i++)
 	{
 		FLightNode *node;
-		if (!seg->bPolySeg)
+		if (seg->sidedef == NULL)
 		{
-			// Iterate through all dynamic lights which touch this wall and render them
-			if (seg->sidedef)
-			{
-				node = seg->sidedef->lighthead[i];
-			}
-			else node = NULL;
+			node = NULL;
+		}
+		else if (!(seg->sidedef->Flags & WALLF_POLYOBJ))
+		{
+			node = seg->sidedef->lighthead[i];
 		}
 		else if (sub)
 		{
-			// To avoid constant rechecking for polyobjects use the subsector's lightlist instead
+			// Polobject segs cannot be checked per sidedef so use the subsector instead.
 			node = sub->lighthead[i];
 		}
 		else node = NULL;
 
+		// Iterate through all dynamic lights which touch this wall and render them
 		while (node)
 		{
 			if (!(node->lightsource->flags2&MF2_DORMANT))
@@ -224,7 +223,7 @@ void GLWall::RenderWall(int textured, float * color2, ADynamicLight * light)
 {
 	texcoord tcs[4];
 	bool glowing;
-	bool split = (gl_seamless && !(textured&4) && !seg->bPolySeg);
+	bool split = (gl_seamless && !(textured&4) && seg->sidedef != NULL && !(seg->sidedef->Flags & WALLF_POLYOBJ));
 
 	if (!light)
 	{
@@ -242,7 +241,7 @@ void GLWall::RenderWall(int textured, float * color2, ADynamicLight * light)
 
 	if (glowing) gl_RenderState.SetGlowParams(topglowcolor, bottomglowcolor);
 
-	gl_RenderState.Apply(!!(flags & GLWF_NOSHADER));
+	gl_RenderState.Apply();
 
 	// the rest of the code is identical for textured rendering and lights
 
@@ -301,7 +300,7 @@ void GLWall::RenderFogBoundary()
 		// with shaders this can be done properly
 		if (gl.shadermodel == 4 || (gl.shadermodel == 3 && gl_fog_shader))
 		{
-			int rel = rellight + (extralight * gl_weaponlight);
+			int rel = rellight + getExtraLight();
 			gl_SetFog(lightlevel, rel, &Colormap, false);
 			gl_RenderState.SetEffect(EFF_FOGBOUNDARY);
 			gl_RenderState.EnableAlphaTest(false);
@@ -334,6 +333,7 @@ void GLWall::RenderFogBoundary()
 			gl_RenderState.AlphaFunc(GL_GREATER,0);
 			gl.DepthFunc(GL_LEQUAL);
 			gl.Color4f(fc[0],fc[1],fc[2], fogd1);
+			if (glset.lightmode == 8) gl.VertexAttrib1f(VATTR_LIGHTLEVEL, 1.0); // Korshun.
 
 			flags &= ~GLWF_GLOW;
 			RenderWall(4,fc);
@@ -368,7 +368,7 @@ void GLWall::RenderMirrorSurface()
 	gl_RenderState.BlendFunc(GL_SRC_ALPHA,GL_ONE);
 	gl_RenderState.AlphaFunc(GL_GREATER,0);
 	gl.DepthFunc(GL_LEQUAL);
-	gl_SetFog(lightlevel, extralight*gl_weaponlight, &Colormap, true);
+	gl_SetFog(lightlevel, getExtraLight(), &Colormap, true);
 
 	FMaterial * pat=FMaterial::ValidateTexture(GLRenderer->mirrortexture);
 	pat->BindPatch(Colormap.colormap, 0);
@@ -391,7 +391,7 @@ void GLWall::RenderMirrorSurface()
 		gl.Enable(GL_POLYGON_OFFSET_FILL);
 		gl.PolygonOffset(-1.0f, -128.0f);
 		gl.DepthMask(false);
-		DoDrawDecals(seg->sidedef->AttachedDecals, seg);
+		DoDrawDecals();
 		gl.DepthMask(true);
 		gl.PolygonOffset(0.0f, 0.0f);
 		gl.Disable(GL_POLYGON_OFFSET_FILL);
@@ -425,7 +425,7 @@ void GLWall::RenderTranslucentWall()
 		if (flags&GLWF_FOGGY) gl_RenderState.EnableBrightmap(false);
 		gl_RenderState.EnableGlow(!!(flags & GLWF_GLOW));
 		gltexture->Bind(Colormap.colormap, flags, 0);
-		extra = (extralight * gl_weaponlight);
+		extra = getExtraLight();
 	}
 	else 
 	{
@@ -485,7 +485,7 @@ void GLWall::Draw(int pass)
 		SetupLights();
 		// fall through
 	case GLPASS_PLAIN:			// Single-pass rendering
-		rel = rellight + (extralight * gl_weaponlight);
+		rel = rellight + getExtraLight();
 		gl_SetColor(lightlevel, rel, &Colormap,1.0f);
 		if (type!=RENDERWALL_M2SNF) gl_SetFog(lightlevel, rel, &Colormap, false);
 		else gl_SetFog(255, 0, NULL, false);
@@ -499,7 +499,7 @@ void GLWall::Draw(int pass)
 
 	case GLPASS_BASE:			// Base pass for non-masked polygons (all opaque geometry)
 	case GLPASS_BASE_MASKED:	// Base pass for masked polygons (2sided mid-textures and transparent 3D floors)
-		rel = rellight + (extralight * gl_weaponlight);
+		rel = rellight + getExtraLight();
 		gl_SetColor(lightlevel, rel, &Colormap,1.0f);
 		if (!(flags&GLWF_FOGGY)) 
 		{
@@ -529,14 +529,14 @@ void GLWall::Draw(int pass)
 		if (!(flags&GLWF_FOGGY)) gl_SetFog((255+lightlevel)>>1, 0, NULL, false);
 		else gl_SetFog(lightlevel, 0, &Colormap, true);	
 
-		if (!seg->bPolySeg)
+		if (seg->sidedef == NULL)
+		{
+			node = NULL;
+		}
+		else if (!(seg->sidedef->Flags & WALLF_POLYOBJ))
 		{
 			// Iterate through all dynamic lights which touch this wall and render them
-			if (seg->sidedef)
-			{
-				node = seg->sidedef->lighthead[pass==GLPASS_LIGHT_ADDITIVE];
-			}
-			else node = NULL;
+			node = seg->sidedef->lighthead[pass==GLPASS_LIGHT_ADDITIVE];
 		}
 		else if (sub)
 		{
@@ -561,9 +561,9 @@ void GLWall::Draw(int pass)
 		{
 			if (pass==GLPASS_DECALS) 
 			{
-				gl_SetFog(lightlevel, rellight + extralight*gl_weaponlight, &Colormap, false);
+				gl_SetFog(lightlevel, rellight + getExtraLight(), &Colormap, false);
 			}
-			DoDrawDecals(seg->sidedef->AttachedDecals, seg);
+			DoDrawDecals();
 		}
 		break;
 

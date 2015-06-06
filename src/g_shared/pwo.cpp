@@ -7,6 +7,7 @@
 #include "gametype.h"
 #include "gi.h"
 
+/* [BB] FIXME
 #include <cstdlib>
 
 // [ZZ] 2014 - added new CVars to control exact behavior on same weight or if involving unknown weapon.
@@ -67,8 +68,13 @@ bool PWO_WeightByClass(AWeapon* weap, float& weight)
 	return false;
 }
 
+*/
 bool PWO_CheckWeapons(AWeapon* first, AWeapon* pending)
 {
+	// [BB] FIXME
+	return false;
+}
+/* [BB] FIXME
 	if(!first) return true;
 	if(!pending) return false;
 
@@ -406,9 +412,12 @@ void PWO_ParseDef(FScanner& sc)
 		}
 	}
 }
+*/
 
 void PWO_LoadDefs()
 {
+}
+/* [BB] FIXME
 	Printf("PWO_LoadDefs: Loading PWO definitions...\n");
 
 	int lastlump, lump;
@@ -422,6 +431,7 @@ void PWO_LoadDefs()
 	PWO_FinalizeDef();
 }
 
+/* [BB] FIXME
 // Pasted from m_options.cpp
 
 menuitem_t* PWO_MenuOptions = NULL;
@@ -444,7 +454,6 @@ void PWO_GenerateMenu()
 	onoff.c.max = 0.0;
 	onoff.d.graycheck = NULL;
 	onoff.e.values = SwitchOnPickupVals;
-	onoff.f.lServer = 0;
 	Items2.Push(onoff);
 	onoff.label = "Allow switch with no ammo";
 	onoff.b.numvalues = 2.0;
@@ -477,7 +486,6 @@ void PWO_GenerateMenu()
 			classdef.c.max = 0.0;
 			classdef.d.step = 0.0;
 			classdef.e.values = NULL;
-			classdef.f.lServer = 0;
 			Items2.Push(classdef);
 			for(unsigned int j = 0; j < PWODefs[i].ClassChildren.Size(); j++)
 			{
@@ -501,7 +509,6 @@ void PWO_GenerateMenu()
 				itemdef.c.max = 1.0;
 				itemdef.d.step = 0.05;
 				itemdef.e.values = NULL;
-				itemdef.f.lServer = 0;
 				Items2.Push(itemdef);
 			}
 		}
@@ -527,7 +534,6 @@ void PWO_GenerateMenu()
 			itemdef.c.max = 1.0;
 			itemdef.d.step = 0.05;
 			itemdef.e.values = NULL;
-			itemdef.f.lServer = 0;
 			Items2.Push(itemdef);
 		}
 	}
@@ -554,3 +560,4 @@ int PWO_GetNumForName(const char* classname, float weight)
     }
 	return current_index;
 }
+*/
