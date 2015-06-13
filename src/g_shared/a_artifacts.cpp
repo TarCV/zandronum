@@ -19,6 +19,8 @@
 #include "g_level.h"
 #include "doomstat.h"
 #include "v_palette.h"
+#include "farchive.h"
+#include "r_data/colormaps.h"
 // New #includes for ST.
 #include "cl_demo.h"
 #include "cl_main.h"
@@ -46,8 +48,6 @@ static FRandom pr_torch ("Torch");
 
 // [BC] New Skulltag power duration defines.
 #define	TRANSLUCENCY_TICS		( 45 * TICRATE )
-
-EXTERN_CVAR (Bool, r_drawfuzz);
 
 IMPLEMENT_CLASS (APowerup)
 // [BC]
@@ -215,6 +215,8 @@ void APowerup::EndEffect ()
 	if (colormap != NOFIXEDCOLORMAP && Owner && Owner->player && Owner->player->fixedcolormap == colormap)
 	{ // only unset if the fixed colormap comes from this item
 		Owner->player->fixedcolormap = NOFIXEDCOLORMAP;
+		// [BB] Also unset the colormap of the player's body.
+		Owner->lFixedColormap = NOFIXEDCOLORMAP;
 	}
 }
 
@@ -500,7 +502,7 @@ void APowerInvulnerable::EndEffect ()
 //
 //===========================================================================
 
-int APowerInvulnerable::AlterWeaponSprite (vissprite_t *vis)
+int APowerInvulnerable::AlterWeaponSprite (visstyle_t *vis)
 {
 	int changed = Inventory == NULL ? false : Inventory->AlterWeaponSprite(vis);
 	if (Owner != NULL)
@@ -695,7 +697,7 @@ void APowerInvisibility::EndEffect ()
 //
 //===========================================================================
 
-int APowerInvisibility::AlterWeaponSprite (vissprite_t *vis)
+int APowerInvisibility::AlterWeaponSprite (visstyle_t *vis)
 {
 	int changed = Inventory == NULL ? false : Inventory->AlterWeaponSprite(vis);
 	// Blink if the powerup is wearing off
@@ -1146,7 +1148,6 @@ void APowerWeaponLevel2::EndEffect ()
 	Super::EndEffect();
 	if (player != NULL)
 	{
-
 		if (player->ReadyWeapon != NULL &&
 			player->ReadyWeapon->WeaponFlags & WIF_POWERED_UP)
 		{
@@ -1197,14 +1198,35 @@ IMPLEMENT_CLASS (APowerSpeed)
 
 //===========================================================================
 //
+// APowerSpeed :: Serialize
+//
+//===========================================================================
+
+void APowerSpeed::Serialize(FArchive &arc)
+{
+	Super::Serialize (arc);
+	if (SaveVersion < 4146)
+	{
+		SpeedFlags = 0;
+	}
+	else
+	{
+		arc << SpeedFlags;
+	}
+}
+
+//===========================================================================
+//
 // APowerSpeed :: GetSpeedFactor
 //
 //===========================================================================
 
 fixed_t APowerSpeed ::GetSpeedFactor ()
 {
-	if (Inventory != NULL) return FixedMul(Speed, Inventory->GetSpeedFactor());
-	else return Speed;
+	if (Inventory != NULL)
+		return FixedMul(Speed, Inventory->GetSpeedFactor());
+	else
+		return Speed;
 }
 
 //===========================================================================
@@ -1223,18 +1245,25 @@ void APowerSpeed::DoEffect ()
 	if ( CLIENT_PREDICT_IsPredicting( ))
 		return;
 
+	if (SpeedFlags & PSF_NOTRAIL)
+		return;
+
 	if (level.time & 1)
 		return;
 
-	// check if another speed item is present to avoid multiple drawing of the speed trail.
-	if (Inventory != NULL && Inventory->GetSpeedFactor() > FRACUNIT)
-		return;
+	// Check if another speed item is present to avoid multiple drawing of the speed trail.
+	// Only the last PowerSpeed without PSF_NOTRAIL set will actually draw the trail.
+	for (AInventory *item = Inventory; item != NULL; item = item->Inventory)
+	{
+		if (item->IsKindOf(RUNTIME_CLASS(APowerSpeed)) &&
+			!(static_cast<APowerSpeed *>(item)->SpeedFlags & PSF_NOTRAIL))
+		{
+			return;
+		}
+	}
 
 	if (P_AproxDistance (Owner->velx, Owner->vely) <= 12*FRACUNIT)
-	{
-		if (P_AproxDistance (Owner->velx, Owner->vely) <= 12*FRACUNIT)
-			return;
-	}
+		return;
 	// [BC] Skulltag powerups, such as the turbosphere, require to move at least SOME to
 	// create a speed trail.
 	else if (( Owner->velx == 0 ) &&
@@ -1350,8 +1379,8 @@ void APowerTargeter::PositionAccuracy ()
 
 	if (player != NULL)
 	{
-		player->psprites[ps_targetleft].sx = (160-3)*FRACUNIT - ((100 - player->accuracy) << FRACBITS);
-		player->psprites[ps_targetright].sx = (160-3)*FRACUNIT + ((100 - player->accuracy) << FRACBITS);
+		player->psprites[ps_targetleft].sx = (160-3)*FRACUNIT - ((100 - player->mo->accuracy) << FRACBITS);
+		player->psprites[ps_targetright].sx = (160-3)*FRACUNIT + ((100 - player->mo->accuracy) << FRACBITS);
 	}
 }
 
@@ -1405,31 +1434,30 @@ IMPLEMENT_CLASS( APowerTimeFreezer)
 //
 //===========================================================================
 
-void APowerTimeFreezer::InitEffect( )
+void APowerTimeFreezer::InitEffect()
 {
-	ULONG	ulIdx;
+	int freezemask;
 
 	Super::InitEffect();
 
-	if (Owner== NULL || Owner->player == NULL)
+	if (Owner == NULL || Owner->player == NULL)
 		return;
 
 	// When this powerup is in effect, pause the music.
-	S_PauseSound( false, false );
+	S_PauseSound(false, false);
 
 	// Give the player and his teammates the power to move when time is frozen.
-	Owner->player->cheats |= CF_TIMEFREEZE;
-	for ( ulIdx = 0; ulIdx < MAXPLAYERS; ulIdx++ )
+	freezemask = 1 << (Owner->player - players);
+	Owner->player->timefreezer |= freezemask;
+	for (int i = 0; i < MAXPLAYERS; i++)
 	{
-		if (( playeringame[ulIdx] == false ) ||
-			( ulIdx == static_cast<ULONG>( Owner->player - players )) ||
-			( players[ulIdx].mo == NULL ) ||
-			( players[ulIdx].mo->IsTeammate( Owner ) == false ))
+		if (playeringame[i] &&
+			players[i].mo != NULL &&
+			players[i].mo->IsTeammate(Owner)
+		   )
 		{
-			continue;
+			players[i].timefreezer |= freezemask;
 		}
-
-		players[ulIdx].cheats |= CF_TIMEFREEZE;
 	}
 
 	// [RH] The effect ends one tic after the counter hits zero, so make
@@ -1456,12 +1484,14 @@ void APowerTimeFreezer::InitEffect( )
 //
 //===========================================================================
 
-void APowerTimeFreezer::DoEffect( )
+void APowerTimeFreezer::DoEffect()
 {
 	Super::DoEffect();
 	// [RH] Do not change LEVEL_FROZEN on odd tics, or the Revenant's tracer
 	// will get thrown off.
-	if (level.time & 1)
+	// [ED850] Don't change it if the player is predicted either.
+	// [BB] Adapted to Zandronums's prediction.
+	if (level.time & 1 /*|| (Owner != NULL && Owner->player != NULL && Owner->player->cheats & CF_PREDICTING)*/)
 	{
 		return;
 	}
@@ -1484,58 +1514,45 @@ void APowerTimeFreezer::DoEffect( )
 //
 //===========================================================================
 
-void APowerTimeFreezer::EndEffect( )
+void APowerTimeFreezer::EndEffect()
 {
-	ULONG	ulIdx;
+	int	i;
 
 	Super::EndEffect();
 
-	// Allow other actors to move about freely once again.
-	level.flags2 &= ~LEVEL2_FROZEN;
-
-	// Nothing more to do if there's no owner.
-	if (( Owner == NULL ) || ( Owner->player == NULL ))
+	// If there is an owner, remove the timefreeze flag corresponding to
+	// her from all players.
+	if (Owner != NULL && Owner->player != NULL)
 	{
-		return;
-	}
-
-	// Take away the time freeze power, and his teammates.
-	Owner->player->cheats &= ~CF_TIMEFREEZE;
-	for ( ulIdx = 0; ulIdx < MAXPLAYERS; ulIdx++ )
-	{
-		if (( playeringame[ulIdx] == false ) ||
-			( ulIdx == static_cast<ULONG>( Owner->player - players )) ||
-			( players[ulIdx].mo == NULL ) ||
-			( players[ulIdx].mo->IsTeammate( Owner ) == false ))
+		int freezemask = ~(1 << (Owner->player - players));
+		for (i = 0; i < MAXPLAYERS; ++i)
 		{
-			continue;
+			players[i].timefreezer &= freezemask;
 		}
-
-		players[ulIdx].cheats &= ~CF_TIMEFREEZE;
 	}
 
-	// If nobody has a time freeze sphere anymore, turn the music back on.
-	for ( ulIdx = 0; ulIdx < MAXPLAYERS; ulIdx++ )
+	// Are there any players who still have timefreezer bits set?
+	for (i = 0; i < MAXPLAYERS; ++i)
 	{
-		if (( playeringame[ulIdx] == false ) ||
-			(( players[ulIdx].cheats & CF_TIMEFREEZE ) == false ))
+		if (playeringame[i] && players[i].timefreezer != 0)
 		{
-			continue;
+			break;
 		}
-
-		S_ResumeSound( false );
-		break;
 	}
 
-	// Reset the player's view colormap, as well as the colormap that's applied to
-	// his body.
-	Owner->player->fixedcolormap = NOFIXEDCOLORMAP;
-	Owner->lFixedColormap = NOFIXEDCOLORMAP;
+	if (i == MAXPLAYERS)
+	{
+		// No, so allow other actors to move about freely once again.
+		level.flags2 &= ~LEVEL2_FROZEN;
+
+		// Also, turn the music back on.
+		S_ResumeSound(false);
+	}
 }
 
 // Damage powerup ------------------------------------------------------
 
-IMPLEMENT_CLASS( APowerDamage)
+IMPLEMENT_CLASS(APowerDamage)
 
 //===========================================================================
 //
@@ -1566,7 +1583,7 @@ void APowerDamage::EndEffect( )
 
 //===========================================================================
 //
-// APowerDamage :: AbsorbDamage
+// APowerDamage :: ModifyDamage
 //
 //===========================================================================
 
@@ -1579,8 +1596,7 @@ void APowerDamage::ModifyDamage(int damage, FName damageType, int &newdamage, bo
 		DmgFactors * df = GetClass()->ActorInfo->DamageFactors;
 		if (df != NULL && df->CountUsed() != 0)
 		{
-			pdf = df->CheckKey(damageType);
-			if (pdf== NULL && damageType != NAME_None) pdf = df->CheckKey(NAME_None);
+			pdf = df->CheckFactor(damageType);
 		}
 		else
 		{
@@ -1660,8 +1676,7 @@ void APowerProtection::ModifyDamage(int damage, FName damageType, int &newdamage
 		DmgFactors *df = GetClass()->ActorInfo->DamageFactors;
 		if (df != NULL && df->CountUsed() != 0)
 		{
-			pdf = df->CheckKey(damageType);
-			if (pdf == NULL && damageType != NAME_None) pdf = df->CheckKey(NAME_None);
+			pdf = df->CheckFactor(damageType);
 		}
 		else pdf = &def;
 
@@ -1723,35 +1738,26 @@ IMPLEMENT_CLASS(APowerRegeneration)
 
 //===========================================================================
 //
-// ARuneRegeneration :: InitEffect
+// APowerRegeneration :: DoEffect
 //
 //===========================================================================
 
-void APowerRegeneration::InitEffect( )
+void APowerRegeneration::DoEffect()
 {
-	Super::InitEffect();
-
-	if (Owner== NULL || Owner->player == NULL)
+	// [BB] This is server side.
+	if ( NETWORK_InClientMode() )
 		return;
 
-	// Give the player the power to regnerate lost life.
-	Owner->player->cheats |= CF_REGENERATION;
-}
-
-//===========================================================================
-//
-// ARuneRegeneration :: EndEffect
-//
-//===========================================================================
-
-void APowerRegeneration::EndEffect( )
-{
-	Super::EndEffect();
-	// Nothing to do if there's no owner.
-	if (Owner != NULL && Owner->player != NULL)
+	if (Owner != NULL && Owner->health > 0 && (level.time & 31) == 0)
 	{
-		// Take away the regeneration power.
-		Owner->player->cheats &= ~CF_REGENERATION;
+		if (P_GiveBody(Owner, 5))
+		{
+			S_Sound(Owner, CHAN_ITEM, "*regenerate", 1, ATTN_NORM );
+
+			// [BC] If we're the server, play the health sound.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SoundActor( Owner, CHAN_ITEM, "*regenerate", 1, ATTN_NORM );
+		}
 	}
 }
 
@@ -1996,8 +2002,7 @@ void APowerPossessionArtifact::InitEffect( )
 
 	// Tell the possession module that the artifact has been picked up.
 	if (( possession || teampossession ) &&
-		( NETWORK_GetState( ) != NETSTATE_CLIENT ) &&
-		( CLIENTDEMO_IsPlaying( ) == false ))
+		( NETWORK_InClientMode() == false ))
 	{
 		POSSESSION_ArtifactPickedUp( Owner->player, sv_possessionholdtime * TICRATE );
 	}
@@ -2066,8 +2071,7 @@ void APowerTerminatorArtifact::InitEffect( )
 
 	// Also, give the player a megasphere as part of the bonus.
 	// [BB] The server handles giving the megasphere.
-	if ( ( NETWORK_GetState( ) != NETSTATE_CLIENT ) &&
-		 ( CLIENTDEMO_IsPlaying( ) == false ))
+	if ( NETWORK_InClientMode() == false )
 	{
 		AInventory *pGivenInventory = Owner->GiveInventoryType( PClass::FindClass( "Megasphere" ));
 		if ( pGivenInventory && (NETWORK_GetState( ) == NETSTATE_SERVER) )
@@ -2514,7 +2518,7 @@ void ARuneSpread::InitEffect( )
 	}
 
 	// Give the player the power to shoot 3x the number of missiles he normally would.
-	Owner->player->cheats |= CF_SPREAD;
+	Owner->player->cheats2 |= CF2_SPREAD;
 }
 
 //===========================================================================
@@ -2532,7 +2536,7 @@ void ARuneSpread::EndEffect( )
 	}
 
 	// Take away the spread power.
-	Owner->player->cheats &= ~CF_SPREAD;
+	Owner->player->cheats2 &= ~CF2_SPREAD;
 }
 
 // Half damage rune -------------------------------------------------------
@@ -2566,32 +2570,28 @@ IMPLEMENT_CLASS( ARuneRegeneration )
 
 //===========================================================================
 //
-// ARuneRegeneration :: InitEffect
+// ARuneRegeneration :: DoEffect
 //
 //===========================================================================
 
-void ARuneRegeneration::InitEffect( )
+void ARuneRegeneration::DoEffect( )
 {
-	if (Owner== NULL || Owner->player == NULL)
+	Super::DoEffect();
+
+	// [BB] This is server side.
+	if ( NETWORK_InClientMode() )
 		return;
 
-	// Give the player the power to regnerate lost life.
-	Owner->player->cheats |= CF_REGENERATION;
-}
-
-//===========================================================================
-//
-// ARuneRegeneration :: EndEffect
-//
-//===========================================================================
-
-void ARuneRegeneration::EndEffect( )
-{
-	// Nothing to do if there's no owner.
-	if (Owner != NULL && Owner->player != NULL)
+	if (Owner != NULL && Owner->health > 0 && (level.time & 31) == 0)
 	{
-		// Take away the regeneration power.
-		Owner->player->cheats &= ~CF_REGENERATION;
+		if (P_GiveBody(Owner, 5))
+		{
+			S_Sound(Owner, CHAN_ITEM, "*regenerate", 1, ATTN_NORM );
+
+			// [BC] If we're the server, play the health sound.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SoundActor( Owner, CHAN_ITEM, "*regenerate", 1, ATTN_NORM );
+		}
 	}
 }
 

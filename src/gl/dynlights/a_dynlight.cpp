@@ -37,7 +37,6 @@
 
 #include "templates.h"
 #include "m_random.h"
-#include "r_main.h"
 #include "p_local.h"
 #include "c_dispatch.h"
 #include "g_level.h"
@@ -351,7 +350,7 @@ void ADynamicLight::UpdateLocation()
 			angle_t angle = target->angle>>ANGLETOFINESHIFT;
 			PrevX = x = target->x + FixedMul(m_offX, finecosine[angle]) + FixedMul(m_offZ, finesine[angle]);
 			PrevY = y = target->y + FixedMul(m_offX, finesine[angle]) - FixedMul(m_offZ, finecosine[angle]);
-			PrevZ = z = target->z + m_offY;
+			PrevZ = z = target->z + m_offY + target->GetBobOffset();
 			subsector = R_PointInSubsector(x, y);
 			Sector = subsector->sector;
 		}
@@ -548,12 +547,17 @@ void ADynamicLight::CollectWithinRadius(subsector_t *subSec, float radius)
 			}
 		}
 
-		if (seg->PartnerSeg && seg->PartnerSeg->Subsector->validcount!=::validcount)
+		seg_t *partner = seg->PartnerSeg;
+		if (partner)
 		{
-			// check distance from x/y to seg and if within radius add PartnerSeg->Subsector (lather/rinse/repeat)
-			if (DistToSeg(seg) <= radius)
+			subsector_t *sub = partner->Subsector;
+			if (sub != NULL && sub->validcount!=::validcount)
 			{
-				CollectWithinRadius(seg->PartnerSeg->Subsector, radius);
+				// check distance from x/y to seg and if within radius add opposing subsector (lather/rinse/repeat)
+				if (DistToSeg(seg) <= radius)
+				{
+					CollectWithinRadius(sub, radius);
+				}
 			}
 		}
 	}

@@ -8,6 +8,7 @@
 #include <sys/ucontext.h>
 #include <string.h>
 #include <errno.h>
+#include <limits.h>
 
 // [EP] Header for the timestamp appending to crash log filename.
 #include <time.h>
