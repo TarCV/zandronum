@@ -44,15 +44,15 @@ unsigned int GetRevisionNumber();
 
 /** Lots of different version numbers **/
 
-#define GAME_MAJOR_VERSION 2
-#define GAME_MINOR_VERSION 1
-#define GAMEVER_STRING "2.1.1"
+#define GAME_MAJOR_VERSION 3
+#define GAME_MINOR_VERSION 0
+#define GAMEVER_STRING "3.0"
 #define DOTVERSIONSTR GAMEVER_STRING "-alpha"
 #define VERSIONSTR DOTVERSIONSTR
 
-#define ZDVER_STRING "2.5.0"
-#define ZD_SVN_REVISION_STRING "2560"
-#define ZD_SVN_REVISION_NUMBER 2560
+#define ZDVER_STRING "2.7.0"
+#define ZD_SVN_REVISION_STRING "4342"
+#define ZD_SVN_REVISION_NUMBER 4342
 
 // [BB] The version string that includes revision / compatibility data.
 #define DOTVERSIONSTR_REV DOTVERSIONSTR "-r" SVN_REVISION_STRING
@@ -97,28 +97,32 @@ unsigned int GetRevisionNumber();
 // Protocol version used in demos.
 // Bump it if you change existing DEM_ commands or add new ones.
 // Otherwise, it should be safe to leave it alone.
-#define DEMOGAMEVERSION 0x213
+#define DEMOGAMEVERSION 0x219
 
 // Minimum demo version we can play.
 // Bump it whenever you change or remove existing DEM_ commands.
-#define MINDEMOVERSION 0x213
+#define MINDEMOVERSION 0x215
 
 // SAVEVER is the version of the information stored in level snapshots.
 // Note that SAVEVER is not directly comparable to VERSION.
 // SAVESIG should match SAVEVER.
 
 // MINSAVEVER is the minimum level snapshot version that can be loaded.
-#define MINSAVEVER 1848
+#define MINSAVEVER 3100
 
 #if ZD_SVN_REVISION_NUMBER < MINSAVEVER
-// Never write a savegame with a version lower than what we need
-#define SAVEVER			MINSAVEVER
+// If we don't know the current revision write something very high to ensure that
+// the reesulting executable can read its own savegames but no regular engine can.
+#define SAVEVER			999999
 #define SAVESIG			MakeSaveSig()
 static inline const char *MakeSaveSig()
 {
 	static char foo[] = { 'Z','D','O','O','M','S','A','V','E',
+#if SAVEVER > 99999
+		'0' + (SAVEVER / 100000),
+#endif
 #if SAVEVER > 9999
-		'0' + (SAVEVER / 10000),
+		'0' + ((SAVEVER / 10000) % 10),
 #endif
 #if SAVEVER > 999
 		'0' + ((SAVEVER / 1000) % 10),
@@ -153,8 +157,7 @@ static inline const char *MakeSaveSig()
 #define	SERVERCONSOLE_TITLESTRING	GAMENAME " v" DOTVERSIONSTR " Server"
 
 #ifdef unix
-#define HOME_DIR "~/." GAMENAMELOWERCASE
-#define GAME_DIR "." GAMENAMELOWERCASE
+#define GAME_DIR ".config/" GAMENAMELOWERCASE
 #elif defined(__APPLE__)
 #define GAME_DIR GAMENAME
 #else

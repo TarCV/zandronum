@@ -30,6 +30,9 @@ protected:
 	virtual void InitEffect ();
 	virtual void DoEffect ();
 	virtual void EndEffect ();
+
+	friend void EndAllPowerupEffects(AInventory *item);
+	friend void InitAllPowerupEffects(AInventory *item);
 };
 
 // An artifact is an item that gives the player a powerup when activated.
@@ -54,7 +57,7 @@ protected:
 	void InitEffect ();
 	void DoEffect ();
 	void EndEffect ();
-	int AlterWeaponSprite (vissprite_t *vis);
+	int AlterWeaponSprite (visstyle_t *vis);
 };
 
 class APowerStrength : public APowerup
@@ -76,7 +79,7 @@ protected:
 	void InitEffect ();
 	void DoEffect ();
 	void EndEffect ();
-	int AlterWeaponSprite (vissprite_t *vis);
+	int AlterWeaponSprite (visstyle_t *vis);
 //	FRenderStyle OwnersNormalStyle;
 //	fixed_t OwnersNormalAlpha;
 };
@@ -143,8 +146,13 @@ class APowerSpeed : public APowerup
 	DECLARE_CLASS (APowerSpeed, APowerup)
 protected:
 	void DoEffect ();
+	void Serialize(FArchive &arc);
 	fixed_t GetSpeedFactor();
+public:
+	int SpeedFlags;
 };
+
+#define PSF_NOTRAIL		1
 
 class APowerMinotaur : public APowerup
 {
@@ -214,8 +222,7 @@ class APowerRegeneration : public APowerup
 {
 	DECLARE_CLASS( APowerRegeneration, APowerup )
 protected:
-	void InitEffect( );
-	void EndEffect( );
+	void DoEffect();
 };
 
 class APowerHighJump : public APowerup
@@ -367,8 +374,7 @@ class ARuneRegeneration : public ARune
 {
 	DECLARE_CLASS( ARuneRegeneration, ARune )
 protected:
-	void InitEffect( );
-	void EndEffect( );
+	void DoEffect( );
 };
 
 class ARuneProsperity : public ARune

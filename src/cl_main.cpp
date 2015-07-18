@@ -104,7 +104,7 @@
 #include "callvote.h"
 #include "invasion.h"
 #include "r_sky.h"
-#include "r_translate.h"
+#include "r_data/r_translate.h"
 #include "domination.h"
 #include "p_3dmidtex.h"
 #include "a_lightning.h"
@@ -112,6 +112,8 @@
 #include "d_netinf.h"
 #include "po_man.h"
 #include "network/cl_auth.h"
+#include "r_data/colormaps.h"
+#include "r_main.h"
 
 //*****************************************************************************
 //	MISC CRAP THAT SHOULDN'T BE HERE BUT HAS TO BE BECAUSE OF SLOPPY CODING
@@ -119,7 +121,7 @@
 //void	ChangeSpy (bool forward);
 int		D_PlayerClassToInt (const char *classname);
 bool	P_OldAdjustFloorCeil (AActor *thing);
-void	ClientObituary (AActor *self, AActor *inflictor, AActor *attacker, FName MeansOfDeath);
+void	ClientObituary (AActor *self, AActor *inflictor, AActor *attacker, int dmgflags, FName MeansOfDeath);
 void	P_CrouchMove(player_t * player, int direction);
 extern	bool	SpawningMapThing;
 extern FILE *Logfile;
@@ -3170,11 +3172,7 @@ AActor *CLIENT_SpawnThing( const PClass *pType, fixed_t X, fixed_t Y, fixed_t Z,
 	if ( pActor )
 	{
 		pActor->lNetID = lNetID;
-		if ( lNetID != -1 )
-		{
-			g_NetIDList[lNetID].bFree = false;
-			g_NetIDList[lNetID].pActor = pActor;
-		}
+		g_NetIDList.useID ( lNetID, pActor );
 
 		pActor->SpawnPoint[0] = X;
 		pActor->SpawnPoint[1] = Y;
@@ -3250,11 +3248,7 @@ void CLIENT_SpawnMissile( const PClass *pType, fixed_t X, fixed_t Y, fixed_t Z, 
 	pActor->angle = R_PointToAngle2( 0, 0, MomX, MomY );
 
 	pActor->lNetID = lNetID;
-	if ( lNetID != -1 )
-	{
-		g_NetIDList[lNetID].bFree = false;
-		g_NetIDList[lNetID].pActor = pActor;
-	}
+	g_NetIDList.useID ( lNetID, pActor );
 
 	// Play the seesound if this missile has one.
 	if ( pActor->SeeSound )
@@ -3304,7 +3298,7 @@ void CLIENT_AdjustPredictionToServerSideConsolePlayerMove( fixed_t X, fixed_t Y,
 bool CLIENT_CanClipMovement( AActor *pActor )
 {
 	// [WS] If it's not a client, of course clip its movement.
-	if ( !NETWORK_InClientMode( ) )
+	if ( NETWORK_InClientMode() == false )
 		return true;
 
 	// [Dusk] Clients clip missiles the server has no control over.
@@ -3366,13 +3360,7 @@ void CLIENT_DisplayMOTD( void )
 //
 AActor *CLIENT_FindThingByNetID( LONG lNetID )
 {
-	if (( lNetID < 0 ) || ( lNetID >= 65536 ))
-		return ( NULL );
-
-	if (( g_NetIDList[lNetID].bFree == false ) && ( g_NetIDList[lNetID].pActor ))
-		return ( g_NetIDList[lNetID].pActor );
-
-    return ( NULL );
+    return ( g_NetIDList.findPointerByID ( lNetID ) );
 }
 
 //*****************************************************************************
@@ -3568,8 +3556,6 @@ void PLAYER_ResetPlayerData( player_t *pPlayer )
 	pPlayer->respawn_time = 0;
 	pPlayer->camera = 0;
 	pPlayer->air_finished = 0;
-	pPlayer->accuracy = 0;
-	pPlayer->stamina = 0;
 	pPlayer->BlendR = 0;
 	pPlayer->BlendG = 0;
 	pPlayer->BlendB = 0;
@@ -3613,9 +3599,7 @@ void PLAYER_ResetPlayerData( player_t *pPlayer )
 	memset( &pPlayer->cmd, 0, sizeof( pPlayer->cmd ));
 	if (( pPlayer - players ) != consoleplayer )
 	{
-		memset( &pPlayer->userinfo, 0, sizeof( pPlayer->userinfo ));
-		// [BB] For now Zandronum doesn't let the player use the color sets.
-		pPlayer->userinfo.colorset = -1;
+		pPlayer->userinfo.Reset();
 	}
 	memset( pPlayer->psprites, 0, sizeof( pPlayer->psprites ));
 
@@ -3929,11 +3913,12 @@ static void client_SpawnPlayer( BYTESTREAM_s *pByteStream, bool bMorph )
 	if (( ulPlayer >= MAXPLAYERS ) || ( gamestate != GS_LEVEL ))
 		return;
 
+	AActor *pOldNetActor = g_NetIDList.findPointerByID ( lID );
 	// If there's already an actor with this net ID, kill it!
-	if ( g_NetIDList[lID].pActor != NULL )
+	if ( pOldNetActor != NULL )
 	{
 /*
-		if ( g_NetIDList[lID].pActor == players[consoleplayer].mo )
+		if ( pOldActor == players[consoleplayer].mo )
 		{
 #ifdef CLIENT_WARNING_MESSAGES
 			Printf( "client_SpawnPlayer: WARNING! Tried to delete console player's body!\n" );
@@ -3941,9 +3926,8 @@ static void client_SpawnPlayer( BYTESTREAM_s *pByteStream, bool bMorph )
 			return;
 		}
 */
-		g_NetIDList[lID].pActor->Destroy( );
-		g_NetIDList[lID].pActor = NULL;
-		g_NetIDList[lID].bFree = true;
+		pOldNetActor->Destroy( );
+		g_NetIDList.freeID ( lID );
 	}
 
 	// [BB] Remember if we were already ignoring WeaponSelect commands. If so, the server
@@ -4050,11 +4034,7 @@ static void client_SpawnPlayer( BYTESTREAM_s *pByteStream, bool bMorph )
 
 	// Set the network ID.
 	pPlayer->mo->lNetID = lID;
-	if ( lID != -1 )
-	{
-		g_NetIDList[lID].bFree = false;
-		g_NetIDList[lID].pActor = pPlayer->mo;
-	}
+	g_NetIDList.useID ( lID, pPlayer->mo );
 
 	// Set the spectator variables [after G_PlayerReborn so our data doesn't get lost] [BB] Why?.
 	// [BB] To properly handle that spectators don't get default inventory, we need to set this
@@ -4105,7 +4085,7 @@ static void client_SpawnPlayer( BYTESTREAM_s *pByteStream, bool bMorph )
 		PLAYER_ClearWeapon ( pPlayer );
 
 	// [GRB] Reset skin
-	pPlayer->userinfo.skin = R_FindSkin (skins[pPlayer->userinfo.skin].name, pPlayer->CurrentPlayerClass);
+	pPlayer->userinfo.SkinNumChanged ( R_FindSkin (skins[pPlayer->userinfo.GetSkin()].name, pPlayer->CurrentPlayerClass) );
 
 	// [WS] Don't set custom skin color when the player is morphed.
 	// [BB] In team games (where we assume that all players are on a team), we allow the team color for morphed players.
@@ -4134,16 +4114,16 @@ static void client_SpawnPlayer( BYTESTREAM_s *pByteStream, bool bMorph )
 	}
 	else if ( cl_skins >= 2 )
 	{
-		if ( skins[pPlayer->userinfo.skin].bCheat )
+		if ( skins[pPlayer->userinfo.GetSkin()].bCheat )
 		{
 			lSkin = R_FindSkin( "base", pPlayer->CurrentPlayerClass );
 			pActor->flags4 |= MF4_NOSKIN;
 		}
 		else
-			lSkin = pPlayer->userinfo.skin;
+			lSkin = pPlayer->userinfo.GetSkin();
 	}
 	else
-		lSkin = pPlayer->userinfo.skin;
+		lSkin = pPlayer->userinfo.GetSkin();
 
 	if (( lSkin < 0 ) || ( lSkin >= static_cast<LONG>(skins.Size()) ))
 		lSkin = R_FindSkin( "base", pPlayer->CurrentPlayerClass );
@@ -4190,7 +4170,7 @@ static void client_SpawnPlayer( BYTESTREAM_s *pByteStream, bool bMorph )
 		players[consoleplayer].camera = players[consoleplayer].mo;
 */
 	// setup gun psprite
-	P_SetupPsprites (pPlayer);
+	P_SetupPsprites (pPlayer, false);
 
 	// If this console player is looking through this player's eyes, attach the status
 	// bar to this player.
@@ -4532,7 +4512,7 @@ static void client_KillPlayer( BYTESTREAM_s *pByteStream )
 	players[ulPlayer].mo->DamageType = DamageType;
 
 	// Kill the player.
-	players[ulPlayer].mo->Die( pSource, pInflictor );
+	players[ulPlayer].mo->Die( pSource, pInflictor, 0 );
 
 	// [BB] Set the attacker, necessary to let the death view follow the killer.
 	players[ulPlayer].attacker = pSource;
@@ -4596,7 +4576,7 @@ static void client_KillPlayer( BYTESTREAM_s *pByteStream )
 	}
 
 	// Finally, print the obituary string.
-	ClientObituary( players[ulPlayer].mo, pInflictor, pSource, MOD );
+	ClientObituary( players[ulPlayer].mo, pInflictor, pSource, ( ulSourcePlayer < MAXPLAYERS ) ? DMG_PLAYERATTACK : 0, MOD );
 
 	// [BB] Restore the weapon the player actually is using now.
 	if ( ( ulSourcePlayer < MAXPLAYERS ) && ( players[ulSourcePlayer].ReadyWeapon != pSavedReadyWeapon ) )
@@ -4820,29 +4800,21 @@ static void client_SetPlayerUserInfo( BYTESTREAM_s *pByteStream )
 	{
 		if ( strlen( szName ) > MAXPLAYERNAME )
 			szName[MAXPLAYERNAME] = '\0';
-		strcpy( pPlayer->userinfo.netname, szName );
-
-		// Remove % signs from names.
-		for ( ulIdx = 0; ulIdx < strlen( pPlayer->userinfo.netname ); ulIdx++ )
-		{
-			if ( pPlayer->userinfo.netname[ulIdx] == '%' )
-				pPlayer->userinfo.netname[ulIdx] = ' ';
-		}
+		pPlayer->userinfo.NameChanged ( szName );
 	}
 
 	// Other info.
-	// [BB] Make sure that the gender is valid.
 	if ( ulFlags & USERINFO_GENDER )
-		pPlayer->userinfo.gender = clamp ( static_cast<int>(lGender), 0, 2 );
+		pPlayer->userinfo.GenderNumChanged ( static_cast<int>(lGender) );
 	if ( ulFlags & USERINFO_COLOR )
-	    pPlayer->userinfo.color = lColor;
+	    pPlayer->userinfo.ColorChanged ( lColor );
 	if ( ulFlags & USERINFO_RAILCOLOR )
-		pPlayer->userinfo.lRailgunTrailColor = lRailgunTrailColor;
+		pPlayer->userinfo.RailColorChanged ( lRailgunTrailColor );
 
 	// Make sure the skin is valid.
 	if ( ulFlags & USERINFO_SKIN )
 	{
-		pPlayer->userinfo.skin = R_FindSkin( pszSkin, pPlayer->CurrentPlayerClass );
+		pPlayer->userinfo.SkinNumChanged ( R_FindSkin( pszSkin, pPlayer->CurrentPlayerClass ) );
 
 		// [BC] Handle cl_skins here.
 		if ( cl_skins <= 0 )
@@ -4853,17 +4825,17 @@ static void client_SetPlayerUserInfo( BYTESTREAM_s *pByteStream )
 		}
 		else if ( cl_skins >= 2 )
 		{
-			if ( skins[pPlayer->userinfo.skin].bCheat )
+			if ( skins[pPlayer->userinfo.GetSkin()].bCheat )
 			{
 				lSkin = R_FindSkin( "base", pPlayer->CurrentPlayerClass );
 				if ( pPlayer->mo )
 					pPlayer->mo->flags4 |= MF4_NOSKIN;
 			}
 			else
-				lSkin = pPlayer->userinfo.skin;
+				lSkin = pPlayer->userinfo.GetSkin();
 		}
 		else
-			lSkin = pPlayer->userinfo.skin;
+			lSkin = pPlayer->userinfo.GetSkin();
 
 		if (( lSkin < 0 ) || ( lSkin >= static_cast<LONG>(skins.Size()) ))
 			lSkin = R_FindSkin( "base", pPlayer->CurrentPlayerClass );
@@ -4878,23 +4850,17 @@ static void client_SetPlayerUserInfo( BYTESTREAM_s *pByteStream )
 
 	// Read in the player's handicap.
 	if ( ulFlags & USERINFO_HANDICAP )
-	{
-		pPlayer->userinfo.lHandicap = lHandicap;
-		if ( pPlayer->userinfo.lHandicap < 0 )
-			pPlayer->userinfo.lHandicap = 0;
-		else if ( pPlayer->userinfo.lHandicap > deh.MaxSoulsphere )
-			pPlayer->userinfo.lHandicap = deh.MaxSoulsphere;
-	}
+		pPlayer->userinfo.HandicapChanged ( lHandicap );
 
 	if ( ulFlags & USERINFO_TICSPERUPDATE )
-		pPlayer->userinfo.ulTicsPerUpdate = ulTicsPerUpdate;
+		pPlayer->userinfo.TicsPerUpdateChanged ( ulTicsPerUpdate );
 
 	if ( ulFlags & USERINFO_CONNECTIONTYPE )
-		pPlayer->userinfo.ulConnectionType = ulConnectionType;
+		pPlayer->userinfo.ConnectionTypeChanged ( ulConnectionType );
 
 	// [CK] We do compressed bitfields now.
 	if ( ulFlags & USERINFO_CLIENTFLAGS )
-		pPlayer->userinfo.clientFlags = clientFlags;
+		pPlayer->userinfo.ClientFlagsChanged ( clientFlags );
 
 	// Build translation tables, always gotta do this!
 	R_BuildPlayerTranslation( ulPlayer );
@@ -8066,6 +8032,10 @@ static void client_SetGameDMFlags( BYTESTREAM_s *pByteStream )
 	Value.Int = NETWORK_ReadLong( pByteStream );
 	compatflags.ForceSet( Value, CVAR_Int );
 
+	// ... and compatflags.
+	Value.Int = NETWORK_ReadLong( pByteStream );
+	compatflags2.ForceSet( Value, CVAR_Int );
+
 	// [BB] ... and zacompatflags.
 	Value.Int = NETWORK_ReadLong( pByteStream );
 	zacompatflags.ForceSet( Value, CVAR_Int );
@@ -9368,8 +9338,8 @@ static void client_SetSectorReflection( BYTESTREAM_s *pByteStream )
 	}
 
 	// Set the sector's reflection.
-	pSector->ceiling_reflect = fCeilingReflect;
-	pSector->floor_reflect = fFloorReflect;
+	pSector->reflect[sector_t::ceiling] = fCeilingReflect;
+	pSector->reflect[sector_t::floor] = fFloorReflect;
 }
 
 //*****************************************************************************
@@ -9941,7 +9911,7 @@ static void client_ACSScriptExecute( BYTESTREAM_s *pByteStream )
 	else
 		pLine = &lines[lLineIdx];
 
-	P_StartScript( pActor, pLine, ulScript, mapname, bBackSide, args[0], args[1], args[2], bAlways, false );
+	P_StartScript( pActor, pLine, ulScript, mapname, args, 3, ( bBackSide ? ACS_BACKSIDE : 0 ) | ( bAlways ? ACS_ALWAYS : 0 ) );
 }
 
 //*****************************************************************************
@@ -10691,7 +10661,7 @@ static void client_DestroyAllInventory( BYTESTREAM_s *pByteStream )
 	// Finally, destroy the player's inventory.
 	// [BB] Be careful here, we may not use mo->DestroyAllInventory( ), otherwise
 	// AHexenArmor messes up.
-	DoClearInv ( players[ulPlayer].mo );
+	players[ulPlayer].mo->ClearInventory();
 }
 
 //*****************************************************************************
@@ -12453,7 +12423,7 @@ static void client_IgnorePlayer( BYTESTREAM_s *pByteStream )
 		players[ulPlayer].bIgnoreChat = true;
 		players[ulPlayer].lIgnoreChatTicks = lTicks;
 
-		Printf( "%s\\c- will be ignored, because you're ignoring %s IP.\n", players[ulPlayer].userinfo.netname, players[ulPlayer].userinfo.gender == GENDER_MALE ? "his" : players[ulPlayer].userinfo.gender == GENDER_FEMALE ? "her" : "its" );
+		Printf( "%s\\c- will be ignored, because you're ignoring %s IP.\n", players[ulPlayer].userinfo.GetName(), players[ulPlayer].userinfo.GetGender() == GENDER_MALE ? "his" : players[ulPlayer].userinfo.GetGender() == GENDER_FEMALE ? "her" : "its" );
 	}
 }
 

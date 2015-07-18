@@ -87,6 +87,7 @@ struct FPolyObj
 	bool RotatePolyobj (angle_t angle);
 	void ClosestPoint(fixed_t fx, fixed_t fy, fixed_t &ox, fixed_t &oy, side_t **side) const;
 	void LinkPolyobj ();
+	void RecalcActorFloorCeil(FBoundingBox bounds) const;
 	void CreateSubsectorLinks();
 	void ClearSubsectorLinks();
 	void CalcCenter();
@@ -103,16 +104,6 @@ private:
 };
 extern FPolyObj *polyobjs;		// list of all poly-objects on the level
 
-inline FArchive &operator<< (FArchive &arc, FPolyObj *&poly)
-{
-	return arc.SerializePointer (polyobjs, (BYTE **)&poly, sizeof(FPolyObj));
-}
-
-inline FArchive &operator<< (FArchive &arc, const FPolyObj *&poly)
-{
-	return arc.SerializePointer (polyobjs, (BYTE **)&poly, sizeof(FPolyObj));
-}
-
 struct polyblock_t
 {
 	FPolyObj *polyobj;
@@ -122,6 +113,8 @@ struct polyblock_t
 
 
 void PO_LinkToSubsectors();
+FArchive &operator<< (FArchive &arc, FPolyObj *&poly);
+FArchive &operator<< (FArchive &arc, const FPolyObj *&poly);
 
 
 #endif
