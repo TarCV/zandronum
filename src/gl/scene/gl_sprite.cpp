@@ -39,11 +39,13 @@
 */
 #include "gl/system/gl_system.h"
 #include "p_local.h"
-#include "r_translate.h"
+#include "p_effect.h"
 #include "g_level.h"
 #include "doomstat.h"
 #include "gl/gl_functions.h"
+#include "r_defs.h"
 #include "r_sky.h"
+#include "r_utility.h"
 
 #include "gl/system/gl_framebuffer.h"
 #include "gl/system/gl_cvars.h"
@@ -68,7 +70,12 @@ CVAR(Float, gl_sclipthreshold, 10.0, CVAR_ARCHIVE)
 CVAR(Float, gl_sclipfactor, 1.8, CVAR_ARCHIVE)
 CVAR(Int, gl_particles_style, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // 0 = square, 1 = round, 2 = smooth
 CVAR(Int, gl_billboard_mode, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, gl_billboard_particles, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, gl_enhanced_nv_stealth, 3, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Int, gl_fuzztype, 0, CVAR_ARCHIVE)
+{
+	if (self < 0 || self > 7) self = 0;
+}
 
 extern bool r_showviewer;
 EXTERN_CVAR (Float, transsouls)
@@ -111,7 +118,7 @@ void GLSprite::Draw(int pass)
 
 
 	bool additivefog = false;
-	int rel = extralight*gl_weaponlight;
+	int rel = getExtraLight();
 
 	if (pass==GLPASS_TRANSLUCENT)
 	{
@@ -138,7 +145,7 @@ void GLSprite::Draw(int pass)
 			gl_RenderState.AlphaFunc(GL_GEQUAL,trans*gl_mask_sprite_threshold);
 		}
 
-		if (RenderStyle.BlendOp == STYLEOP_Fuzz)
+		if (RenderStyle.BlendOp == STYLEOP_Shadow)
 		{
 			float fuzzalpha=0.44f;
 			float minalpha=0.1f;
@@ -168,7 +175,7 @@ void GLSprite::Draw(int pass)
 			additivefog = true;
 		}
 	}
-	if (RenderStyle.BlendOp!=STYLEOP_Fuzz)
+	if (RenderStyle.BlendOp!=STYLEOP_Shadow)
 	{
 		if (actor)
 		{
@@ -205,15 +212,15 @@ void GLSprite::Draw(int pass)
 
 	gl_SetFog(foglevel, rel, &Colormap, additivefog);
 
-	if (gltexture) gltexture->BindPatch(Colormap.colormap,translation);
+	if (gltexture) gltexture->BindPatch(Colormap.colormap, translation, OverrideShader);
 	else if (!modelframe) gl_RenderState.EnableTexture(false);
 
 	if (!modelframe)
 	{
 		// [BB] Billboard stuff
-		const bool drawWithXYBillboard = ( !(actor && actor->renderflags & RF_FORCEYBILLBOARD)
+		const bool drawWithXYBillboard = ( (particle && gl_billboard_particles) || (!(actor && actor->renderflags & RF_FORCEYBILLBOARD)
 		                                   //&& GLRenderer->mViewActor != NULL
-		                                   && (gl_billboard_mode == 1 || (actor && actor->renderflags & RF_FORCEXYBILLBOARD )) );
+		                                   && (gl_billboard_mode == 1 || (actor && actor->renderflags & RF_FORCEXYBILLBOARD ))) );
 		gl_RenderState.Apply();
 		gl.Begin(GL_TRIANGLE_STRIP);
 		if ( drawWithXYBillboard )
@@ -299,6 +306,7 @@ void GLSprite::Draw(int pass)
 		Colormap.FadeColor = backupfade;
 
 	gl_RenderState.EnableTexture(true);
+	gl_RenderState.SetDynLight(0,0,0);
 }
 
 
@@ -439,8 +447,19 @@ void GLSprite::Process(AActor* thing,sector_t * sector)
 	// don't draw the thing that's used as camera (for viewshifts during quakes!)
 	if (thing==GLRenderer->mViewActor) return;
 
- 	// invisible things
-	if (thing->sprite==0) return;
+	// Don't waste time projecting sprites that are definitely not visible.
+	if (thing == NULL || thing->sprite == 0 || !thing->IsVisibleToPlayer())
+	{
+		return;
+	}
+
+	int spritenum = thing->sprite;
+	fixed_t spritescaleX = thing->scaleX;
+	fixed_t spritescaleY = thing->scaleY;
+	if (thing->player != NULL)
+	{
+		P_CheckPlayerSprite(thing, spritenum, spritescaleX, spritescaleY);
+	}
 
 	if (thing->renderflags & RF_INVISIBLE || !thing->RenderStyle.IsVisible(thing->alpha)) 
 	{
@@ -448,8 +467,11 @@ void GLSprite::Process(AActor* thing,sector_t * sector)
 			return; 
 	}
 
+	// If this thing is in a map section that's not in view it can't possibly be visible
+	if (!(currentmapsection[thing->subsector->mapsection>>3] & (1 << (thing->subsector->mapsection & 7)))) return;
+
 	// [BB] If the actor is supposed to be invisible to the player, skip it here.
-	if ( GAMEMODE_IsActorVisibleToConsoleplayersCamera( thing ) == false )
+	if ( !thing->IsVisibleToPlayer() )
 		return;
 
 	// [RH] Interpolate the sprite's position to make it look smooth
@@ -457,13 +479,13 @@ void GLSprite::Process(AActor* thing,sector_t * sector)
 	fixed_t thingy = thing->PrevY + FixedMul (r_TicFrac, thing->y - thing->PrevY);
 	fixed_t thingz = thing->PrevZ + FixedMul (r_TicFrac, thing->z - thing->PrevZ);
 
-	// too close to the camera. This doesn't look good if it is a sprite.
+	// Too close to the camera. This doesn't look good if it is a sprite.
 	if (P_AproxDistance(thingx-viewx, thingy-viewy)<2*FRACUNIT)
 	{
 		// exclude vertically moving objects from this check.
 		if (!(thing->velx==0 && thing->vely==0 && thing->velz!=0))
 		{
-			if (!gl_FindModelFrame(RUNTIME_TYPE(thing), thing->sprite, thing->frame /*, thing->state*/))
+			if (!gl_FindModelFrame(RUNTIME_TYPE(thing), spritenum, thing->frame, false))
 			{
 				return;
 			}
@@ -498,56 +520,61 @@ void GLSprite::Process(AActor* thing,sector_t * sector)
 	x = FIXED2FLOAT(thingx);
 	z = FIXED2FLOAT(thingz-thing->floorclip);
 	y = FIXED2FLOAT(thingy);
+
+	// [RH] Make floatbobbing a renderer-only effect.
+	if (thing->flags2 & MF2_FLOATBOB)
+	{
+		float fz = FIXED2FLOAT(thing->GetBobOffset(r_TicFrac));
+		z += fz;
+	}
 	
-	modelframe = gl_FindModelFrame(RUNTIME_TYPE(thing), thing->sprite, thing->frame /*, thing->state*/);
+	modelframe = gl_FindModelFrame(RUNTIME_TYPE(thing), spritenum, thing->frame, !!(thing->flags & MF_DROPPED));
 	if (!modelframe)
 	{
 		angle_t ang = R_PointToAngle(thingx, thingy);
 
 		bool mirror;
-		FTextureID patch = gl_GetSpriteFrame(thing->sprite, thing->frame, -1, ang - thing->angle, &mirror);
+		FTextureID patch = gl_GetSpriteFrame(spritenum, thing->frame, -1, ang - thing->angle, &mirror);
 		if (!patch.isValid()) return;
 		gltexture=FMaterial::ValidateTexture(patch, false);
 		if (!gltexture) return;
 
-		const PatchTextureInfo * pti = gltexture->GetPatchTextureInfo();
-
 		if (gl.flags & RFL_NPOT_TEXTURE)	// trimming only works if non-power-of-2 textures are supported
 		{
-			vt=pti->GetSpriteVT();
-			vb=pti->GetSpriteVB();
+			vt = gltexture->GetSpriteVT();
+			vb = gltexture->GetSpriteVB();
 			gltexture->GetRect(&r, GLUSE_SPRITE);
 			if (mirror)
 			{
 				r.left=-r.width-r.left;	// mirror the sprite's x-offset
-				ul=pti->GetSpriteUL();
-				ur=pti->GetSpriteUR();
+				ul = gltexture->GetSpriteUL();
+				ur = gltexture->GetSpriteUR();
 			}
 			else
 			{
-				ul=pti->GetSpriteUR();
-				ur=pti->GetSpriteUL();
+				ul = gltexture->GetSpriteUR();
+				ur = gltexture->GetSpriteUL();
 			}
 		}
 		else
 		{
-			vt=pti->GetVT();
-			vb=pti->GetVB();
+			vt = gltexture->GetVT();
+			vb = gltexture->GetVB();
 			gltexture->GetRect(&r, GLUSE_PATCH);
 			if (mirror)
 			{
 				r.left=-r.width-r.left;	// mirror the sprite's x-offset
-				ul=pti->GetUL();
-				ur=pti->GetUR();
+				ul = gltexture->GetUL();
+				ur = gltexture->GetUR();
 			}
 			else
 			{
-				ul=pti->GetUR();
-				ur=pti->GetUL();
+				ul = gltexture->GetUR();
+				ur = gltexture->GetUL();
 			}
 		}
 
-		r.Scale(FIXED2FLOAT(thing->scaleX),FIXED2FLOAT(thing->scaleY));
+		r.Scale(FIXED2FLOAT(spritescaleX),FIXED2FLOAT(spritescaleY));
 
 		float rightfac=-r.left;
 		float leftfac=rightfac-r.width;
@@ -555,7 +582,7 @@ void GLSprite::Process(AActor* thing,sector_t * sector)
 		z1=z-r.top;
 		z2=z1-r.height;
 
-		float spriteheight = FIXED2FLOAT(thing->scaleY) * pti->GetHeight();
+		float spriteheight = FIXED2FLOAT(spritescaleY) * gltexture->GetScaledHeightFloat(GLUSE_SPRITE);
 		
 		// Tests show that this doesn't look good for many decorations and corpses
 		if (spriteheight>0 && gl_spriteclip>0)
@@ -616,22 +643,25 @@ void GLSprite::Process(AActor* thing,sector_t * sector)
 						float ratio = clamp<float>((abs(diffb) * (float)gl_sclipfactor/(spriteheight+1)), 0.5, 1.0);
 						diffb*=ratio;
 					}
-					if (difft <= 0) difft = 0;
-					if (difft >= (float)gl_sclipthreshold) 
+					if (!diffb)
 					{
-						// dumb copy of the above.
-						if (!(thing->flags3&MF3_ISMONSTER) || (thing->flags&MF_NOGRAVITY) || (thing->flags&MF_CORPSE) || difft > (float)gl_sclipthreshold)
+						if (difft <= 0) difft = 0;
+						if (difft >= (float)gl_sclipthreshold) 
 						{
-							difft=0;
+							// dumb copy of the above.
+							if (!(thing->flags3&MF3_ISMONSTER) || (thing->flags&MF_NOGRAVITY) || (thing->flags&MF_CORPSE) || difft > (float)gl_sclipthreshold)
+							{
+								difft=0;
+							}
 						}
+						if (spriteheight > abs(difft))
+						{
+							float ratio = clamp<float>((abs(difft) * (float)gl_sclipfactor/(spriteheight+1)), 0.5, 1.0);
+							difft*=ratio;
+						}
+						z2-=difft;
+						z1-=difft;
 					}
-					if (spriteheight > abs(difft))
-					{
-						float ratio = clamp<float>((abs(difft) * (float)gl_sclipfactor/(spriteheight+1)), 0.5, 1.0);
-						difft*=ratio;
-					}
-					z2-=difft;
-					z1-=difft;
 				}
 				if (diffb <= (0 - (float)gl_sclipthreshold))	// such a large displacement can't be correct! 
 				{
@@ -651,7 +681,7 @@ void GLSprite::Process(AActor* thing,sector_t * sector)
 		x1=x-viewvecY*leftfac;
 		x2=x-viewvecY*rightfac;
 		y1=y+viewvecX*leftfac;
-		y2=y+viewvecX*rightfac;
+		y2=y+viewvecX*rightfac;		
 	}
 	else 
 	{
@@ -669,15 +699,15 @@ void GLSprite::Process(AActor* thing,sector_t * sector)
 
 	// allow disabling of the fullbright flag by a brightmap definition
 	// (e.g. to do the gun flashes of Doom's zombies correctly.
-	fullbright = 
-		(thing->renderflags & RF_FULLBRIGHT) &&
-		(!gl_BrightmapsActive() || !gltexture || !gltexture->tex->gl_info.bBrightmapDisablesFullbright);
+	fullbright = (thing->flags5 & MF5_BRIGHT) ||
+		((thing->renderflags & RF_FULLBRIGHT) && (!gl_BrightmapsActive() || !gltexture || !gltexture->tex->gl_info.bBrightmapDisablesFullbright));
 
-	lightlevel=fullbright? 255 : rendersector->GetTexture(sector_t::ceiling) == skyflatnum ? 
-			GetCeilingLight(rendersector) : GetFloorLight(rendersector); //rendersector->lightlevel;
-	foglevel = rendersector->lightlevel;
+	lightlevel=fullbright? 255 : 
+		gl_ClampLight(rendersector->GetTexture(sector_t::ceiling) == skyflatnum ? 
+			rendersector->GetCeilingLight() : rendersector->GetFloorLight());
+	foglevel = (BYTE)clamp<short>(rendersector->lightlevel, 0, 255);
 
-	lightlevel = (byte)gl_CheckSpriteGlow(rendersector->GetTexture(sector_t::floor), lightlevel, thingz-thing->floorz);
+	lightlevel = (byte)gl_CheckSpriteGlow(rendersector, lightlevel, thingx, thingy, thingz);
 
 	// colormap stuff is a little more complicated here...
 	if (gl_fixedcolormap) 
@@ -735,34 +765,31 @@ void GLSprite::Process(AActor* thing,sector_t * sector)
 
 	translation=thing->Translation;
 
-	// Since it is easy to get the blood color's RGB value
-	// there is no need to create multiple textures for this.
-	if (GetTranslationType(translation) == TRANSLATION_Blood)
-	{
-		if (Colormap.colormap < CM_FIRSTSPECIALCOLORMAP || 
-			Colormap.colormap >= CM_FIRSTSPECIALCOLORMAP+SpecialColormaps.Size())
-		{
-
-
-			ThingColor = BloodTranslationColors[GetTranslationIndex(translation)];
-			ThingColor.a=0;
-			// This is to apply desaturation to the color
-			gl_ModifyColor(ThingColor.r, ThingColor.g, ThingColor.b, Colormap.colormap);
-			translation = TRANSLATION(TRANSLATION_Standard, 8);
-		}
-		else 
-		{
-			// Blood color must be disabled when using any monochrome colormap
-			ThingColor = 0xffffff;
-			translation = 0;
-		}
-	}
-	else ThingColor=0xffffff;
-
+	ThingColor=0xffffff;
 	RenderStyle = thing->RenderStyle;
-	RenderStyle.CheckFuzz();
+	OverrideShader = 0;
 	trans = FIXED2FLOAT(thing->alpha);
 	hw_styleflags = STYLEHW_Normal;
+
+	if (RenderStyle.BlendOp >= STYLEOP_Fuzz && RenderStyle.BlendOp <= STYLEOP_FuzzOrRevSub)
+	{
+		RenderStyle.CheckFuzz();
+		if (RenderStyle.BlendOp == STYLEOP_Fuzz)
+		{
+			if (gl.shadermodel >= 4 && gl_fuzztype != 0)
+			{
+				// Todo: implement shader selection here
+				RenderStyle = LegacyRenderStyles[STYLE_Translucent];
+				OverrideShader = gl_fuzztype + 4;
+				trans = 0.99f;	// trans may not be 1 here
+				hw_styleflags |= STYLEHW_NoAlphaTest;
+			}
+			else
+			{
+				RenderStyle.BlendOp = STYLEOP_Shadow;
+			}
+		}
+	}
 
 	if (RenderStyle.Flags & STYLEF_TransSoulsAlpha)
 	{
@@ -773,7 +800,7 @@ void GLSprite::Process(AActor* thing,sector_t * sector)
 		trans = 1.f;
 	}
 
-	if (trans >= 1.f-FLT_EPSILON && RenderStyle.BlendOp != STYLEOP_Fuzz && (
+	if (trans >= 1.f-FLT_EPSILON && RenderStyle.BlendOp != STYLEOP_Shadow && (
 			(RenderStyle.SrcAlpha == STYLEALPHA_One && RenderStyle.DestAlpha == STYLEALPHA_Zero) ||
 			(RenderStyle.SrcAlpha == STYLEALPHA_Src && RenderStyle.DestAlpha == STYLEALPHA_InvSrc)
 			))
@@ -808,7 +835,7 @@ void GLSprite::Process(AActor* thing,sector_t * sector)
 
 	if (enhancedvision && gl_enhanced_nightvision)
 	{
-		if (RenderStyle.BlendOp == STYLEOP_Fuzz)
+		if (RenderStyle.BlendOp == STYLEOP_Shadow)
 		{
 			// enhanced vision makes them more visible!
 			trans=0.5f;
@@ -869,15 +896,15 @@ void GLSprite::ProcessParticle (particle_t *particle, sector_t *sector)//, int s
 	
 	if (particle->trans==0) return;
 
-	lightlevel = sector->GetTexture(sector_t::ceiling) == skyflatnum ? 
-					GetCeilingLight(sector) : GetFloorLight(sector);
+	lightlevel = gl_ClampLight(sector->GetTexture(sector_t::ceiling) == skyflatnum ? 
+		sector->GetCeilingLight() : sector->GetFloorLight());
 	foglevel = sector->lightlevel;
 
 	if (gl_fixedcolormap) 
 	{
 		Colormap.GetFixedColormap();
 	}
-	else
+	else if (!particle->bright)
 	{
 		TArray<lightlist_t> & lightlist=sector->e->XFloor.lightlist;
 		int lightbottom;
@@ -896,11 +923,18 @@ void GLSprite::ProcessParticle (particle_t *particle, sector_t *sector)//, int s
 			}
 		}
 	}
+	else
+	{
+		lightlevel = 255;
+		Colormap = sector->ColorMap;
+		Colormap.ClearColor();
+	}
 
 	trans=particle->trans/255.0f;
 	RenderStyle = STYLE_Translucent;
+	OverrideShader = 0;
 
-	ThingColor = GPalette.BaseColors[particle->color];
+	ThingColor = particle->color; //GPalette.BaseColors[particle->color];
 	ThingColor.a=0;
 
 	modelframe=NULL;
@@ -923,14 +957,13 @@ void GLSprite::ProcessParticle (particle_t *particle, sector_t *sector)//, int s
 		{
 			gltexture=FMaterial::ValidateTexture(lump);
 			translation = 0;
-			const PatchTextureInfo * pti = gltexture->GetPatchTextureInfo();
 
-			vt=0.0f;
-			vb=pti->GetVB();
+			ul = gltexture->GetUL();
+			ur = gltexture->GetUR();
+			vt = gltexture->GetVT();
+			vb = gltexture->GetVB();
 			FloatRect r;
 			gltexture->GetRect(&r, GLUSE_PATCH);
-			ul=pti->GetUR();
-			ur=0.0f;
 		}
 	}
 

@@ -2,12 +2,11 @@
 #include "actor.h"
 #include "p_enemy.h"
 #include "a_action.h"
-#include "r_draw.h"
 #include "m_random.h"
 #include "p_local.h"
 #include "a_doomglobal.h"
 #include "s_sound.h"
-#include "r_translate.h"
+#include "r_data/r_translate.h"
 #include "thingdef/thingdef.h"
 #include "g_level.h"
 */
@@ -166,11 +165,13 @@ void AScriptedMarine::Tick ()
 //
 //============================================================================
 
-DEFINE_ACTION_FUNCTION(AActor, A_M_Refire)
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_M_Refire)
 {
+	ACTION_PARAM_START(1);
+	ACTION_PARAM_BOOL(ignoremissile, 0);
+
 	// [BC] Let the server do this.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -192,7 +193,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_M_Refire)
 		self->SetState (self->state + 1);
 		return;
 	}
-	if ((self->MissileState == NULL && !self->CheckMeleeRange ()) ||
+	if (((ignoremissile || self->MissileState == NULL) && !self->CheckMeleeRange ()) ||
 		!P_CheckSight (self, self->target) ||
 		pr_m_refire() < 4)	// Small chance of stopping even when target not dead
 	{
@@ -213,8 +214,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_M_Refire)
 DEFINE_ACTION_FUNCTION(AActor, A_M_SawRefire)
 {
 	// [BC] Let the server do this.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -247,8 +247,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_M_SawRefire)
 DEFINE_ACTION_FUNCTION(AActor, A_MarineNoise)
 {
 	// [BC] Don't do this in client mode.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -302,8 +301,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_M_Saw)
 	ACTION_PARAM_CLASS(pufftype, 3);
 
 	// [BC] Don't do this in client mode.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -384,8 +382,7 @@ static void MarinePunch(AActor *self, int damagemul)
 	AActor		*linetarget;
 
 	// [BC] Don't do this in client mode.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -437,8 +434,7 @@ void P_GunShot2 (AActor *mo, bool accurate, int pitch, const PClass *pufftype)
 	int 		damage;
 		
 	// [BC] Don't do this in client mode.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -451,7 +447,7 @@ void P_GunShot2 (AActor *mo, bool accurate, int pitch, const PClass *pufftype)
 		angle += pr_m_gunshot.Random2 () << 18;
 	}
 
-	P_LineAttack (mo, angle, MISSILERANGE, pitch, damage, NAME_None, pufftype);
+	P_LineAttack (mo, angle, MISSILERANGE, pitch, damage, NAME_Hitscan, pufftype);
 }
 
 //============================================================================
@@ -463,8 +459,7 @@ void P_GunShot2 (AActor *mo, bool accurate, int pitch, const PClass *pufftype)
 DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_M_FirePistol)
 {
 	// [BC] Don't do this in client mode.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -497,8 +492,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_M_FireShotgun)
 	int pitch;
 
 	// [BC] Don't do this in client mode.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -530,8 +524,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_M_FireShotgun)
 DEFINE_ACTION_FUNCTION(AActor, A_M_CheckAttack)
 {
 	// [BC] Don't do this in client mode.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -561,8 +554,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_M_FireShotgun2)
 	int pitch;
 
 	// [BC] Don't do this in client mode.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -585,7 +577,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_M_FireShotgun2)
 
 		P_LineAttack (self, angle, MISSILERANGE,
 					  pitch + (pr_m_fireshotgun2.Random2() * 332063), damage,
-					  NAME_None, NAME_BulletPuff);
+					  NAME_Hitscan, NAME_BulletPuff);
 	}
 	self->special1 = level.maptime;
 }
@@ -599,8 +591,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_M_FireShotgun2)
 DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_M_FireCGun)
 {
 	// [BC] Don't do this in client mode.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -638,8 +629,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_M_FireMissile)
 	AActor	*pMissile;
 
 	// [BC] Don't do this in client mode.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -671,8 +661,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_M_FireMissile)
 DEFINE_ACTION_FUNCTION(AActor, A_M_FireRailgun)
 {
 	// [BC] Don't do this in client mode.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -696,8 +685,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_M_FirePlasma)
 	AActor	*pMissile;
 
 	// [BC] Don't do this in client mode.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -723,8 +711,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_M_FirePlasma)
 DEFINE_ACTION_FUNCTION(AActor, A_M_BFGsound)
 {
 	// [BC] Don't do this in client mode.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -765,8 +752,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_M_FireBFG)
 	AActor	*pMissile;
 
 	// [BC] Don't do this in client mode.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
