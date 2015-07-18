@@ -41,9 +41,12 @@
 */
 #include "gl/system/gl_system.h"
 #include "r_sky.h"
-#include "r_main.h"
+#include "r_utility.h"
+#include "r_state.h"
+#include "doomstat.h"
 
 #include "gl/system/gl_cvars.h"
+#include "gl/data/gl_data.h"
 #include "gl/scene/gl_drawinfo.h"
 #include "gl/scene/gl_portal.h"
 #include "gl/dynlights/gl_lightbuffer.h"
@@ -852,6 +855,7 @@ void GLDrawList::Sort()
 //==========================================================================
 void GLDrawList::AddWall(GLWall * wall)
 {
+	//@sync-drawinfo
 	drawitems.Push(GLDrawItem(GLDIT_WALL,walls.Push(*wall)));
 }
 
@@ -862,6 +866,7 @@ void GLDrawList::AddWall(GLWall * wall)
 //==========================================================================
 void GLDrawList::AddFlat(GLFlat * flat)
 {
+	//@sync-drawinfo
 	drawitems.Push(GLDrawItem(GLDIT_FLAT,flats.Push(*flat)));
 }
 
@@ -872,6 +877,7 @@ void GLDrawList::AddFlat(GLFlat * flat)
 //==========================================================================
 void GLDrawList::AddSprite(GLSprite * sprite)
 {	
+	//@sync-drawinfo
 	drawitems.Push(GLDrawItem(GLDIT_SPRITE,sprites.Push(*sprite)));
 }
 
@@ -936,9 +942,11 @@ void FDrawInfo::StartScene()
 
 	sectorrenderflags.Resize(numsectors);
 	ss_renderflags.Resize(numsubsectors);
+	no_renderflags.Resize(numsubsectors);
 
 	memset(&sectorrenderflags[0], 0, numsectors*sizeof(sectorrenderflags[0]));
 	memset(&ss_renderflags[0], 0, numsubsectors*sizeof(ss_renderflags[0]));
+	memset(&no_renderflags[0], 0, numnodes*sizeof(no_renderflags[0]));
 
 	next=gl_drawinfo;
 	gl_drawinfo=this;
@@ -981,7 +989,7 @@ void FDrawInfo::SetupFloodStencil(wallseg * ws)
 	gl.Enable(GL_DEPTH_TEST);
 	gl.DepthMask(true);
 
-	gl_RenderState.Apply(true);
+	gl_RenderState.Apply();
 	gl.Begin(GL_TRIANGLE_FAN);
 	gl.Vertex3f(ws->x1, ws->z1, ws->y1);
 	gl.Vertex3f(ws->x1, ws->z2, ws->y1);
@@ -1007,7 +1015,7 @@ void FDrawInfo::ClearFloodStencil(wallseg * ws)
 	gl.ColorMask(0,0,0,0);						// don't write to the graphics buffer
 	gl.Color3f(1,1,1);
 
-	gl_RenderState.Apply(true);
+	gl_RenderState.Apply();
 	gl.Begin(GL_TRIANGLE_FAN);
 	gl.Vertex3f(ws->x1, ws->z1, ws->y1);
 	gl.Vertex3f(ws->x1, ws->z2, ws->y1);
@@ -1054,10 +1062,10 @@ void FDrawInfo::DrawFloodedPlane(wallseg * ws, float planez, sector_t * sec, boo
 			Colormap.LightColor.r = Colormap.LightColor.g = Colormap.LightColor.b = 0xff;
 			lightlevel=255;
 		}
-		else lightlevel=abs(ceiling? GetCeilingLight(sec) : GetFloorLight(sec));
+		else lightlevel=abs(ceiling? sec->GetCeilingLight() : sec->GetFloorLight());
 	}
 
-	int rel = extralight * gl_weaponlight;
+	int rel = getExtraLight();
 	gl_SetColor(lightlevel, rel, &Colormap, 1.0f);
 	gl_SetFog(lightlevel, rel, &Colormap, false);
 	gltexture->Bind(Colormap.colormap);

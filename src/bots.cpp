@@ -71,7 +71,6 @@
 #include "p_acs.h"
 #include "p_lnspec.h"
 #include "p_local.h"
-#include "r_data.h"
 #include "r_main.h"
 #include "r_sky.h"
 #include "s_sound.h"
@@ -609,9 +608,9 @@ void BOTS_RemoveBot( ULONG ulPlayerIdx, bool bExitMsg )
 	if ( bExitMsg )
 	{
 		if ( NETWORK_GetState( ) != NETSTATE_SERVER )
-			Printf( PRINT_HIGH, "%s \\c-left the game.\n", players[ulPlayerIdx].userinfo.netname );
+			Printf( PRINT_HIGH, "%s \\c-left the game.\n", players[ulPlayerIdx].userinfo.GetName() );
 		else
-			SERVER_Printf( PRINT_HIGH, "%s \\c-left the game.\n", players[ulPlayerIdx].userinfo.netname );
+			SERVER_Printf( PRINT_HIGH, "%s \\c-left the game.\n", players[ulPlayerIdx].userinfo.GetName() );
 	}
 
 	// [BB] Morphed bots need to be unmorphed before disconnecting.
@@ -1714,14 +1713,12 @@ CSkullBot::CSkullBot( char *pszName, char *pszTeamName, ULONG ulPlayerNum )
 
 	// Setup the player's userinfo based on the bot's botinfo.
 	// [BB] First clear the userinfo.
-	memset (&m_pPlayer->userinfo, 0, sizeof(m_pPlayer->userinfo));
-	// [BB] For now Zandronum doesn't let the player use the color sets.
-	m_pPlayer->userinfo.colorset = -1;
-	strncpy( m_pPlayer->userinfo.netname, g_BotInfo[m_ulBotInfoIdx]->szName, MAXPLAYERNAME );
-	m_pPlayer->userinfo.netname[MAXPLAYERNAME] = 0;
+	m_pPlayer->userinfo.Reset();
+	FString botname = g_BotInfo[m_ulBotInfoIdx]->szName;
+	V_ColorizeString( botname );
+	m_pPlayer->userinfo.NameChanged ( botname );
 
-	V_ColorizeString( m_pPlayer->userinfo.netname );
-	m_pPlayer->userinfo.color = V_GetColorFromString( NULL, g_BotInfo[m_ulBotInfoIdx]->szColor );
+	m_pPlayer->userinfo.ColorChanged ( V_GetColorFromString( NULL, g_BotInfo[m_ulBotInfoIdx]->szColor ) );
 	if ( g_BotInfo[m_ulBotInfoIdx]->szSkinName )
 	{
 		LONG	lSkin;
@@ -1732,7 +1729,7 @@ CSkullBot::CSkullBot( char *pszName, char *pszTeamName, ULONG ulPlayerNum )
 			strncpy( SERVER_GetClient( ulPlayerNum )->szSkin, g_BotInfo[m_ulBotInfoIdx]->szSkinName, MAX_SKIN_NAME + 1 );
 
 		lSkin = R_FindSkin( g_BotInfo[m_ulBotInfoIdx]->szSkinName, 0 );
-		m_pPlayer->userinfo.skin = lSkin;
+		m_pPlayer->userinfo.SkinNumChanged ( lSkin );
 
 		// If the skin was hidden, reveal it!
 		if ( skins[lSkin].bRevealed == false )
@@ -1749,14 +1746,14 @@ CSkullBot::CSkullBot( char *pszName, char *pszTeamName, ULONG ulPlayerNum )
 		{
 			if ( stricmp( g_BotInfo[m_ulBotInfoIdx]->szClassName, PlayerClasses[ulIdx].Type->Meta.GetMetaString (APMETA_DisplayName)) == 0 )
 			{
-				m_pPlayer->userinfo.PlayerClass = ( ulIdx );
+				m_pPlayer->userinfo.PlayerClassNumChanged ( ulIdx );
 				break;
 			}
 		}
 	}
 
-	m_pPlayer->userinfo.lRailgunTrailColor = g_BotInfo[m_ulBotInfoIdx]->ulRailgunColor;
-	m_pPlayer->userinfo.gender = D_GenderToInt( g_BotInfo[m_ulBotInfoIdx]->szGender );
+	m_pPlayer->userinfo.RailColorChanged ( g_BotInfo[m_ulBotInfoIdx]->ulRailgunColor );
+	m_pPlayer->userinfo.GenderNumChanged ( D_GenderToInt( g_BotInfo[m_ulBotInfoIdx]->szGender ) );
 	if ( pszTeamName )
 	{
 		// If we're in teamgame mode, put the bot on a defined team.
@@ -1778,9 +1775,9 @@ CSkullBot::CSkullBot( char *pszName, char *pszTeamName, ULONG ulPlayerNum )
 	}
 
 	// For now, bots always switch weapons on pickup.
-	m_pPlayer->userinfo.switchonpickup = 2;
-	m_pPlayer->userinfo.StillBob = 0;
-	m_pPlayer->userinfo.MoveBob = static_cast<fixed_t>(65536.f * 0.25);
+	m_pPlayer->userinfo.SwitchOnPickupChanged ( 2 );
+	*static_cast<FIntCVar *>(m_pPlayer->userinfo[NAME_StillBob]) = 0;
+	*static_cast<FIntCVar *>(m_pPlayer->userinfo[NAME_MoveBob]) = static_cast<fixed_t>(65536.f * 0.25);
 
 	// If we've added the bot to a single player game, enable "fake multiplayer" mode.
 	if ( NETWORK_GetState( ) == NETSTATE_SINGLE )
@@ -1871,7 +1868,7 @@ CSkullBot::CSkullBot( char *pszName, char *pszTeamName, ULONG ulPlayerNum )
 		}
 
 		if ( ulIdx == MAX_NUM_STATES )
-			I_Error( "Could not find spawn state in bot %s's script!", m_pPlayer->userinfo.netname );
+			I_Error( "Could not find spawn state in bot %s's script!", m_pPlayer->userinfo.GetName() );
 
 		m_ScriptData.lStackPosition = 0;
 		m_ScriptData.lStringStackPosition = 0;
@@ -1884,7 +1881,7 @@ CSkullBot::CSkullBot( char *pszName, char *pszTeamName, ULONG ulPlayerNum )
 	}
 	else
 	{
-		Printf( "%s does not have a script specified. %s will not do anything.\n", players[ulPlayerNum].userinfo.netname, players[ulPlayerNum].userinfo.gender == GENDER_MALE ? "He" : players[ulPlayerNum].userinfo.gender == GENDER_FEMALE ? "She" : "It" );
+		Printf( "%s does not have a script specified. %s will not do anything.\n", players[ulPlayerNum].userinfo.GetName(), players[ulPlayerNum].userinfo.GetGender() == GENDER_MALE ? "He" : players[ulPlayerNum].userinfo.GetGender() == GENDER_FEMALE ? "She" : "It" );
 	}
 
 	// Check and see if this bot should spawn as a spectator.
@@ -1918,18 +1915,18 @@ CSkullBot::CSkullBot( char *pszName, char *pszTeamName, ULONG ulPlayerNum )
 	}
 	catch (CRecoverableError &/*error*/)
 	{
-		Printf("Unable to spawn bot %s.\n", players[ulPlayerNum].userinfo.netname);
+		Printf("Unable to spawn bot %s.\n", players[ulPlayerNum].userinfo.GetName());
 		g_bBotIsInitialized[ulPlayerNum] = true;
 		m_pPlayer->bSpectating = true;
 		return;
 	}
 
 	if ( NETWORK_GetState( ) != NETSTATE_SERVER )
-		Printf( "%s \\c-entered the game.\n", players[ulPlayerNum].userinfo.netname );
+		Printf( "%s \\c-entered the game.\n", players[ulPlayerNum].userinfo.GetName() );
 	else
 	{
 		// Let the other players know that this bot has entered the game.
-		SERVER_Printf( PRINT_HIGH, "%s \\c-entered the game.\n", players[ulPlayerNum].userinfo.netname );
+		SERVER_Printf( PRINT_HIGH, "%s \\c-entered the game.\n", players[ulPlayerNum].userinfo.GetName() );
 
 		// Redo the scoreboard.
 		SERVERCONSOLE_ReListPlayers( );
@@ -1948,7 +1945,7 @@ CSkullBot::CSkullBot( char *pszName, char *pszTeamName, ULONG ulPlayerNum )
 
 	g_bBotIsInitialized[ulPlayerNum] = true;
 
-	BOTCMD_SetLastJoinedPlayer( GetPlayer( )->userinfo.netname );
+	BOTCMD_SetLastJoinedPlayer( GetPlayer( )->userinfo.GetName() );
 
 	// Tell the bots that a new players has joined the game!
 	{
@@ -1991,8 +1988,7 @@ void CSkullBot::Tick( void )
 	g_BotCycles.Clock();
 
 	// Don't execute bot logic during demos, or if the console player is a client.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )) ||
+	if ( NETWORK_InClientMode() ||
 		( demoplayback ))
 	{
 		return;
@@ -2064,7 +2060,7 @@ void CSkullBot::EndTick( void )
 	g_BotCycles.Unclock();
 
 	if ( botdebug_states && ( m_pPlayer->mo->CheckLocalView( consoleplayer )) && ( NETWORK_GetState( ) != NETSTATE_SERVER ))
-		Printf( "%s: %s\n", m_pPlayer->userinfo.netname, m_ScriptData.szStateName[m_ScriptData.lCurrentStateIdx] );
+		Printf( "%s: %s\n", m_pPlayer->userinfo.GetName(), m_ScriptData.szStateName[m_ScriptData.lCurrentStateIdx] );
 }
 
 //*****************************************************************************
@@ -2079,7 +2075,7 @@ void CSkullBot::PostEvent( BOTEVENT_e Event )
 		return;
 
 //	if ( botdebug_showevents )
-//		Printf( "%s: %s\n", GetPlayer( )->userinfo.netname, g_pszEventNames[Event] );
+//		Printf( "%s: %s\n", GetPlayer( )->userinfo.GetName(), g_pszEventNames[Event] );
 
 	Skill = BOTS_AdjustSkill( this, BOTINFO_GetReactionTime( m_ulBotInfoIdx ));
 	switch ( Skill )
@@ -2199,7 +2195,7 @@ void CSkullBot::ParseScript( void )
 			Printf( "%s\n", g_pszDataHeaders[sdwCommandHeader] );
 
 		if ( lNumOperations++ >= 8192 )
-			I_Error( "ParseScript: Infinite loop detected in bot %s's script!", GetPlayer( )->userinfo.netname );
+			I_Error( "ParseScript: Infinite loop detected in bot %s's script!", GetPlayer( )->userinfo.GetName() );
 
 //		lExpectedStackPosition = m_ScriptData.lStackPosition + g_lExpectedStackChange[sdwCommandHeader];
 //		g_lLastHeader = sdwCommandHeader;
@@ -2495,7 +2491,7 @@ void CSkullBot::ParseScript( void )
 		case DH_DIVIDE:
 
 			if ( m_ScriptData.alStack[m_ScriptData.lStackPosition - 1] == 0 )
-				I_Error( "ParseScript: Illegal divide by 0 in bot %s's script!", m_pPlayer->userinfo.netname );
+				I_Error( "ParseScript: Illegal divide by 0 in bot %s's script!", m_pPlayer->userinfo.GetName() );
 
 			m_ScriptData.alStack[m_ScriptData.lStackPosition - 2] = ( m_ScriptData.alStack[m_ScriptData.lStackPosition - 2] / m_ScriptData.alStack[m_ScriptData.lStackPosition - 1] );
 			PopStack( );
@@ -2563,7 +2559,7 @@ void CSkullBot::ParseScript( void )
 			m_ScriptData.lScriptPos += sizeof( SDWORD );
 
 			if ( m_ScriptData.alStack[m_ScriptData.lStackPosition - 1] == 0 )
-				I_Error( "ParseScript: Illegal divide by 0 occured while trying to divide global variable in bot %s's script!!", m_pPlayer->userinfo.netname );
+				I_Error( "ParseScript: Illegal divide by 0 occured while trying to divide global variable in bot %s's script!!", m_pPlayer->userinfo.GetName() );
 
 			m_ScriptData.alScriptVariables[sdwVariable] /= m_ScriptData.alStack[m_ScriptData.lStackPosition - 1];
 			PopStack( );
@@ -2628,7 +2624,7 @@ void CSkullBot::ParseScript( void )
 			m_ScriptData.lScriptPos += sizeof( SDWORD );
 
 			if ( m_ScriptData.alStack[m_ScriptData.lStackPosition - 1] == 0 )
-				I_Error( "ParseScript: Illegal divide by 0 occured while trying to divide local variable in bot %s's script!", m_pPlayer->userinfo.netname );
+				I_Error( "ParseScript: Illegal divide by 0 occured while trying to divide local variable in bot %s's script!", m_pPlayer->userinfo.GetName() );
 
 			m_ScriptData.alStateVariables[m_ScriptData.lCurrentStateIdx][sdwVariable] /= m_ScriptData.alStack[m_ScriptData.lStackPosition - 1];
 			PopStack( );
@@ -2731,7 +2727,7 @@ void CSkullBot::ParseScript( void )
 			m_ScriptData.lScriptPos += sizeof( SDWORD );
 
 			if ( m_ScriptData.alStack[m_ScriptData.lStackPosition - 1] == 0 )
-				I_Error( "ParseScript: Illegal divide by 0 occured while trying to divide array in bot %s's script!", m_pPlayer->userinfo.netname );
+				I_Error( "ParseScript: Illegal divide by 0 occured while trying to divide array in bot %s's script!", m_pPlayer->userinfo.GetName() );
 
 			m_ScriptData.alScriptArrays[sdwVariable][m_ScriptData.alStack[m_ScriptData.lStackPosition - 2]] /= m_ScriptData.alStack[m_ScriptData.lStackPosition - 1];
 			PopStack( );
@@ -2882,7 +2878,7 @@ void CSkullBot::GetStatePositions( void )
 			if ( m_ScriptData.lCurrentStateIdx == -1 )
 			{
 				if ( m_ScriptData.lNumGlobalEvents == MAX_NUM_GLOBAL_EVENTS )
-					I_Error( "GetStatePositions: Too many global events in bot %s's script!", GetPlayer( )->userinfo.netname );
+					I_Error( "GetStatePositions: Too many global events in bot %s's script!", GetPlayer( )->userinfo.GetName() );
 
 				m_ScriptData.GlobalEventPositions[m_ScriptData.lNumGlobalEvents].lPos = m_ScriptData.lScriptPos;
 				m_ScriptData.GlobalEventPositions[m_ScriptData.lNumGlobalEvents].Event = (BOTEVENT_e)sdwBuffer;
@@ -2891,7 +2887,7 @@ void CSkullBot::GetStatePositions( void )
 			else
 			{
 				if ( m_ScriptData.lNumEvents[m_ScriptData.lCurrentStateIdx] == MAX_NUM_EVENTS )
-					I_Error( "GetStatePositions: Too many events in bot %s's state, %s!", GetPlayer( )->userinfo.netname, m_ScriptData.szStateName[m_ScriptData.lCurrentStateIdx] );
+					I_Error( "GetStatePositions: Too many events in bot %s's state, %s!", GetPlayer( )->userinfo.GetName(), m_ScriptData.szStateName[m_ScriptData.lCurrentStateIdx] );
 
 				m_ScriptData.EventPositions[m_ScriptData.lCurrentStateIdx][m_ScriptData.lNumEvents[m_ScriptData.lCurrentStateIdx]].lPos = m_ScriptData.lScriptPos;
 				m_ScriptData.EventPositions[m_ScriptData.lCurrentStateIdx][m_ScriptData.lNumEvents[m_ScriptData.lCurrentStateIdx]].Event = (BOTEVENT_e)sdwBuffer;
@@ -3187,7 +3183,7 @@ void CSkullBot::GetStatePositions( void )
 			break;
 		default:
 
-			I_Error( "GetStatePositions: Unknown header, %d in bot %s's script at position, %d! (Last known header: %d)", sdwCommandHeader, m_pPlayer->userinfo.netname, static_cast<int> (m_ScriptData.lScriptPos - sizeof( SDWORD )), sdwLastCommandHeader );
+			I_Error( "GetStatePositions: Unknown header, %d in bot %s's script at position, %d! (Last known header: %d)", sdwCommandHeader, m_pPlayer->userinfo.GetName(), static_cast<int> (m_ScriptData.lScriptPos - sizeof( SDWORD )), sdwLastCommandHeader );
 			break;
 		}
 	}
@@ -3279,10 +3275,10 @@ void CSkullBot::PushToStack( LONG lValue )
 	m_ScriptData.alStack[m_ScriptData.lStackPosition++] = lValue;
 	
 	if ( botdebug_showstackpushes )
-		Printf( "%s: PushToStack: pos %d val %d\n", m_pPlayer->userinfo.netname, static_cast<int> (m_ScriptData.lStackPosition), static_cast<int> (lValue) );
+		Printf( "%s: PushToStack: pos %d val %d\n", m_pPlayer->userinfo.GetName(), static_cast<int> (m_ScriptData.lStackPosition), static_cast<int> (lValue) );
 
 	if ( m_ScriptData.lStackPosition >= BOTSCRIPT_STACK_SIZE )
-		I_Error( "PushToStack: Stack size exceeded in bot %s's script!", m_pPlayer->userinfo.netname );
+		I_Error( "PushToStack: Stack size exceeded in bot %s's script!", m_pPlayer->userinfo.GetName() );
 }
 
 //*****************************************************************************
@@ -3292,10 +3288,10 @@ void CSkullBot::PopStack( void )
 	m_ScriptData.lStackPosition--;
 	
 	if ( botdebug_showstackpushes )
-		Printf( "%s: PopStack: %d\n", m_pPlayer->userinfo.netname, static_cast<int> (m_ScriptData.lStackPosition) );
+		Printf( "%s: PopStack: %d\n", m_pPlayer->userinfo.GetName(), static_cast<int> (m_ScriptData.lStackPosition) );
 
 	if ( m_ScriptData.lStackPosition < 0 )
-		I_Error( "PopStack: Bot stack position went below 0 in bot %s's script!", m_pPlayer->userinfo.netname );
+		I_Error( "PopStack: Bot stack position went below 0 in bot %s's script!", m_pPlayer->userinfo.GetName() );
 }
 
 //*****************************************************************************
@@ -3725,7 +3721,7 @@ void CSkullBot::DeleteEventFromQueue( void )
 	m_lQueueHead = m_lQueueHead % MAX_STORED_EVENTS;
 
 	if ( botdebug_showevents )
-		Printf( "%s: %s\n", GetPlayer( )->userinfo.netname, g_pszEventNames[Event] );
+		Printf( "%s: %s\n", GetPlayer( )->userinfo.GetName(), g_pszEventNames[Event] );
 
 	// First, scan global events.
 	for ( lIdx = 0; lIdx < m_ScriptData.lNumGlobalEvents; lIdx++ )
@@ -3847,8 +3843,7 @@ CCMD( addbot )
 	}
 
 	// Don't allow bots in network mode, unless we're the host.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		Printf( "Only the host can add bots!\n" );
 		return;
@@ -3858,7 +3853,7 @@ CCMD( addbot )
 	{
 		if ( sv_disallowbots )
 			Printf( "The bot pathing nodes have not been set up. Please set \"sv_disallowbots\" to \"false\" if you wish to use bots.\n" );
-		else if ( level.flags2 & LEVEL2_NOBOTNODES )
+		else if ( level.flagsZA & LEVEL_ZA_NOBOTNODES )
 			Printf( "The bot pathing nodes have not been set up. This level has disabled the ability to do so.\n" );
 		else
 			Printf( "The bot pathing nodes have not been set up. Please reload the level if you wish to use bots.\n" );
@@ -3966,7 +3961,7 @@ CCMD( removebot )
 			if (( playeringame[ulIdx] == false ) || ( players[ulIdx].pSkullBot == NULL ))
 				continue;
 
-			sprintf( szName, "%s", players[ulIdx].userinfo.netname );
+			sprintf( szName, "%s", players[ulIdx].userinfo.GetName() );
 			V_RemoveColorCodes( szName );
 			if ( stricmp( szName, argv[1] ) == 0 )
 			{
@@ -4014,7 +4009,7 @@ CCMD( listbots )
 	{
 		if ( playeringame[ulIdx] && players[ulIdx].pSkullBot )
 		{
-			Printf( "%s\n", players[ulIdx].userinfo.netname );
+			Printf( "%s\n", players[ulIdx].userinfo.GetName() );
 			ulNumBots++;
 		}
 	}
