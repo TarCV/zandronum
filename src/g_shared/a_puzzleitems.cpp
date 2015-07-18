@@ -7,6 +7,7 @@
 #include "c_console.h"
 #include "doomstat.h"
 #include "v_font.h"
+#include "farchive.h"
 // [BB] New #includes.
 #include "cl_demo.h"
 #include "deathmatch.h"
@@ -35,7 +36,7 @@ bool APuzzleItem::Use (bool pickup)
 {
 	// [BC] Puzzle item usage is done server-side.
 	// [Dusk] If we got here as the client, the puzzle item was used successfully.
-	if ( NETWORK_InClientMode( ) )
+	if ( NETWORK_InClientMode() )
 		return true;
 
 	if (P_UsePuzzleItem (Owner, PuzzleItemNumber))

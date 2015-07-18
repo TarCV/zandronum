@@ -69,12 +69,62 @@
 #include <time.h>
 #include <zlib.h>
 
+// [BB]
 #define USE_WINDOWS_DWORD
 #include "c_cvars.h"
 #include "cmdlib.h"
 
+// [BB]
 CVAR(Int, crashlogs, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(String, crashlog_dir, "", CVAR_ARCHIVE|CVAR_GLOBALCONFIG);
+
+#if defined(_WIN64) && defined(__GNUC__)
+struct KNONVOLATILE_CONTEXT_POINTERS {
+    union {
+        PDWORD64 IntegerContext[16];
+        struct {
+            PDWORD64 Rax;
+            PDWORD64 Rcx;
+            PDWORD64 Rdx;
+            PDWORD64 Rbx;
+            PDWORD64 Rsp;
+            PDWORD64 Rbp;
+            PDWORD64 Rsi;
+            PDWORD64 Rdi;
+            PDWORD64 R8;
+            PDWORD64 R9;
+            PDWORD64 R10;
+            PDWORD64 R11;
+            PDWORD64 R12;
+            PDWORD64 R13;
+            PDWORD64 R14;
+            PDWORD64 R15;
+        };
+    };
+};
+typedef
+EXCEPTION_DISPOSITION
+NTAPI
+EXCEPTION_ROUTINE (
+    struct _EXCEPTION_RECORD *ExceptionRecord,
+    PVOID EstablisherFrame,
+    struct _CONTEXT *ContextRecord,
+    PVOID DispatcherContext
+    );
+NTSYSAPI
+EXCEPTION_ROUTINE *
+NTAPI
+RtlVirtualUnwind (
+    DWORD HandlerType,
+    DWORD64 ImageBase,
+    DWORD64 ControlPc,
+    PRUNTIME_FUNCTION FunctionEntry,
+    PCONTEXT ContextRecord,
+    PVOID *HandlerData,
+    PDWORD64 EstablisherFrame,
+    KNONVOLATILE_CONTEXT_POINTERS *ContextPointers
+    );
+#endif
 
 // MACROS ------------------------------------------------------------------
 
@@ -663,17 +713,17 @@ HANDLE WriteTextReport ()
 		{ EXCEPTION_ARRAY_BOUNDS_EXCEEDED, "Array Bounds Exceeded" },
 		{ EXCEPTION_BREAKPOINT, "Breakpoint" },
 		{ EXCEPTION_DATATYPE_MISALIGNMENT, "Data Type Misalignment" },
-		{ EXCEPTION_FLT_DENORMAL_OPERAND, "Float: Denormal Operand." },
-		{ EXCEPTION_FLT_DIVIDE_BY_ZERO, "Float: Divide By Zero" },
-		{ EXCEPTION_FLT_INEXACT_RESULT, "Float: Inexact Result" },
-		{ EXCEPTION_FLT_INVALID_OPERATION, "Float: Invalid Operation" },
-		{ EXCEPTION_FLT_OVERFLOW, "Float: Overflow" },
-		{ EXCEPTION_FLT_STACK_CHECK, "Float: Stack Check" },
-		{ EXCEPTION_FLT_UNDERFLOW, "Float: Underflow" },
+		{ EXCEPTION_FLT_DENORMAL_OPERAND, "Floating Point Denormal Operand." },
+		{ EXCEPTION_FLT_DIVIDE_BY_ZERO, "Floating Point Divide By Zero" },
+		{ EXCEPTION_FLT_INEXACT_RESULT, "Floating Point Inexact Result" },
+		{ EXCEPTION_FLT_INVALID_OPERATION, "Floating Point Invalid Operation" },
+		{ EXCEPTION_FLT_OVERFLOW, "Floating Point Overflow" },
+		{ EXCEPTION_FLT_STACK_CHECK, "Floating Point Stack Check" },
+		{ EXCEPTION_FLT_UNDERFLOW, "Floating Point Underflow" },
 		{ EXCEPTION_ILLEGAL_INSTRUCTION, "Illegal Instruction" },
 		{ EXCEPTION_IN_PAGE_ERROR, "In Page Error" },
-		{ EXCEPTION_INT_DIVIDE_BY_ZERO, "Int: Divide By Zero" },
-		{ EXCEPTION_INT_OVERFLOW, "Int: Overflow" },
+		{ EXCEPTION_INT_DIVIDE_BY_ZERO, "Integer Divide By Zero" },
+		{ EXCEPTION_INT_OVERFLOW, "Integer Overflow" },
 		{ EXCEPTION_INVALID_DISPOSITION, "Invalid Disposition" },
 		{ EXCEPTION_NONCONTINUABLE_EXCEPTION, "Noncontinuable Exception" },
 		{ EXCEPTION_PRIV_INSTRUCTION, "Priviledged Instruction" },
@@ -1319,7 +1369,7 @@ static void StackWalk (HANDLE file, void *dumpaddress, DWORD *topOfStack, DWORD 
 		}
 		// If we reach a RIP of zero, this means we've walked off the end of
 		// the call stack and are done.
-		if (context.Rip == NULL)
+		if (context.Rip == 0)
 		{
 			break;
 		}

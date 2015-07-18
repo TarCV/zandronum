@@ -42,14 +42,14 @@
 #include "gl/system/gl_system.h"
 #include "files.h"
 #include "m_swap.h"
-#include "r_draw.h"
 #include "v_video.h"
-#include "r_main.h"
+#include "doomstat.h"
 #include "m_png.h"
 #include "m_crc32.h"
 #include "vectors.h"
 #include "v_palette.h"
 #include "templates.h"
+#include "farchive.h"
 
 #include "gl/system/gl_framebuffer.h"
 #include "gl/renderer/gl_renderer.h"
@@ -63,17 +63,16 @@
 #include "gl/utility/gl_templates.h"
 #include "gl/gl_functions.h"
 
-// [BB]
-CVAR( Bool, cl_disallowfullpitch, false, CVAR_ARCHIVE )
-
 IMPLEMENT_CLASS(OpenGLFrameBuffer)
 EXTERN_CVAR (Float, vid_brightness)
 EXTERN_CVAR (Float, vid_contrast)
 EXTERN_CVAR (Bool, vid_vsync)
 
-void gl_SetupMenu();
+CVAR(Bool, gl_aalines, false, CVAR_ARCHIVE)
 
 FGLRenderer *GLRenderer;
+
+void gl_SetupMenu();
 
 //==========================================================================
 //
@@ -91,6 +90,7 @@ OpenGLFrameBuffer::OpenGLFrameBuffer(void *hMonitor, int width, int height, int 
 	LastCamera = NULL;
 
 	InitializeState();
+	gl_SetupMenu();
 	gl_GenerateGlobalBrightmapFromColormap();
 	DoSetGamma();
 	needsetgamma = true;
@@ -117,7 +117,6 @@ void OpenGLFrameBuffer::InitializeState()
 
 	gl.LoadExtensions();
 	Super::InitializeState();
-	gl_SetupMenu();
 	if (first)
 	{
 		first=false;
@@ -288,13 +287,6 @@ bool OpenGLFrameBuffer::SetContrast(float contrast)
 	return true;
 }
 
-bool OpenGLFrameBuffer::UsesColormap() const
-{
-	// The GL renderer has no use for colormaps so let's
-	// not create them and save us some time.
-	return false;
-}
-
 //===========================================================================
 //
 //
@@ -376,75 +368,6 @@ void OpenGLFrameBuffer::GetHitlist(BYTE *hitlist)
 
 //==========================================================================
 //
-// DFrameBuffer :: PrecacheTexture
-//
-//==========================================================================
-
-void OpenGLFrameBuffer::PrecacheTexture(FTexture *tex, int cache)
-{
-	if (tex != NULL)
-	{
-		if (cache)
-		{
-			tex->PrecacheGL();
-		}
-		else
-		{
-			tex->UncacheGL();
-		}
-	}
-}
-
-
-//==========================================================================
-//
-// DFrameBuffer :: StateChanged
-//
-//==========================================================================
-
-void OpenGLFrameBuffer::StateChanged(AActor *actor)
-{
-	gl_SetActorLights(actor);
-}
-
-//===========================================================================
-//
-// notify the renderer that serialization of the curent level is about to start/end
-//
-//===========================================================================
-
-void OpenGLFrameBuffer::StartSerialize(FArchive &arc)
-{
-	gl_DeleteAllAttachedLights();
-	if (SaveVersion >= 2058)
-	{
-		arc << fogdensity << outsidefogdensity << skyfog;
-	}
-}
-
-void OpenGLFrameBuffer::EndSerialize(FArchive &arc)
-{
-	gl_RecreateAllAttachedLights();
-	if (arc.IsLoading()) gl_InitPortals();
-}
-
-//===========================================================================
-//
-// Get max. view angle (renderer specific information so it goes here now)
-//
-//===========================================================================
-
-EXTERN_CVAR(Float, maxviewpitch)
-
-int OpenGLFrameBuffer::GetMaxViewPitch(bool down)
-{
-	// [BB]
-	if (cl_disallowfullpitch) return Super::GetMaxViewPitch(down);
-	else return (down? maxviewpitch : -maxviewpitch) * ANGLE_1;
-}
-
-//==========================================================================
-//
 // DFrameBuffer :: CreatePalette
 //
 // Creates a native palette from a remap table, if supported.
@@ -476,8 +399,19 @@ bool OpenGLFrameBuffer::Begin2D(bool)
 		(GLdouble) 1.0 
 		);
 	gl.Disable(GL_DEPTH_TEST);
-	gl.Disable(GL_MULTISAMPLE);
-	if (GLRenderer != NULL) GLRenderer->Begin2D();
+
+	// Korshun: ENABLE AUTOMAP ANTIALIASING!!!
+	if (gl_aalines)
+		gl.Enable(GL_LINE_SMOOTH);
+	else
+	{
+		gl.Disable(GL_MULTISAMPLE);
+		gl.Disable(GL_LINE_SMOOTH);
+		glLineWidth(1.0);
+	}
+
+	if (GLRenderer != NULL)
+			GLRenderer->Begin2D();
 	return true;
 }
 
@@ -560,6 +494,26 @@ void OpenGLFrameBuffer::Clear(int left, int top, int right, int bottom, int palc
 		GLRenderer->Clear(left, top, right, bottom, palcolor, color);
 }
 
+//==========================================================================
+//
+// D3DFB :: FillSimplePoly
+//
+// Here, "simple" means that a simple triangle fan can draw it.
+//
+//==========================================================================
+
+void OpenGLFrameBuffer::FillSimplePoly(FTexture *texture, FVector2 *points, int npoints,
+	double originx, double originy, double scalex, double scaley,
+	angle_t rotation, FDynamicColormap *colormap, int lightlevel)
+{
+	if (GLRenderer != NULL)
+	{
+		GLRenderer->FillSimplePoly(texture, points, npoints, originx, originy, scalex, scaley,
+			rotation, colormap, lightlevel);
+	}
+}
+
+
 //===========================================================================
 // 
 //	Takes a screenshot
@@ -595,18 +549,11 @@ void OpenGLFrameBuffer::ReleaseScreenshotBuffer()
 }
 
 
-void OpenGLFrameBuffer::WriteSavePic (player_t *player, FILE *file, int width, int height)
+void OpenGLFrameBuffer::GameRestart()
 {
-	GLRenderer->WriteSavePic(player, file, width, height);
-}
-
-void OpenGLFrameBuffer::RenderView (player_t* player)
-{
-	GLRenderer->RenderView(player);
-}
-
-
-void OpenGLFrameBuffer::DrawRemainingPlayerSprites()
-{
-	// not used by hardware renderer
+	memcpy (SourcePalette, GPalette.BaseColors, sizeof(PalEntry)*256);
+	UpdatePalette ();
+	ScreenshotBuffer = NULL;
+	LastCamera = NULL;
+	gl_GenerateGlobalBrightmapFromColormap();
 }

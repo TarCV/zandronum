@@ -63,8 +63,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_Srcr1Attack)
 	angle_t angle;
 
 	// [BC] In client mode, just play the attack sound and get out.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		S_Sound (self, CHAN_BODY, self->AttackSound, 1, ATTN_NORM);
 		return;
@@ -78,8 +77,8 @@ DEFINE_ACTION_FUNCTION(AActor, A_Srcr1Attack)
 	if (self->CheckMeleeRange ())
 	{
 		int damage = pr_scrc1atk.HitDice (8);
-		P_DamageMobj (self->target, self, self, damage, NAME_Melee);
-		P_TraceBleed (damage, self->target, self);
+		int newdam = P_DamageMobj (self->target, self, self, damage, NAME_Melee);
+		P_TraceBleed (newdam > 0 ? newdam : damage, self->target, self);
 		return;
 	}
 
@@ -149,13 +148,13 @@ DEFINE_ACTION_FUNCTION(AActor, A_SorcererRise)
 	self->flags &= ~MF_SOLID;
 
 	// [BC] Let the server spawn this in client mode.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
 
 	mo = Spawn("Sorcerer2", self->x, self->y, self->z, ALLOW_REPLACE);
+	mo->Translation = self->Translation;
 	mo->SetState (mo->FindState("Rise"));
 	mo->angle = self->angle;
 	mo->CopyFriendliness (self, true);
@@ -183,8 +182,7 @@ void P_DSparilTeleport (AActor *actor)
 	AActor *spot;
 
 	// [BC] Don't do this in client mode.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -201,6 +199,7 @@ void P_DSparilTeleport (AActor *actor)
 	if (P_TeleportMove (actor, spot->x, spot->y, spot->z, false))
 	{
 		mo = Spawn("Sorcerer2Telefade", prevX, prevY, prevZ, ALLOW_REPLACE);
+		if (mo) mo->Translation = actor->Translation;
 		S_Sound (mo, CHAN_BODY, "misc/teleport", 1, ATTN_NORM);
 
 		// [BC] Spawn the actor to clients and play the sound.
@@ -241,8 +240,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_Srcr2Decide)
 	};
 
 	// [BC] Don't do this in client mode.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -272,8 +270,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_Srcr2Attack)
 	int chance;
 
 	// [BC] Don't do this in client mode.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		S_Sound (self, CHAN_BODY, self->AttackSound, 1, ATTN_NONE);
 		return;
@@ -287,8 +284,8 @@ DEFINE_ACTION_FUNCTION(AActor, A_Srcr2Attack)
 	if (self->CheckMeleeRange())
 	{
 		int damage = pr_s2a.HitDice (20);
-		P_DamageMobj (self->target, self, self, damage, NAME_Melee);
-		P_TraceBleed (damage, self->target, self);
+		int newdam = P_DamageMobj (self->target, self, self, damage, NAME_Melee);
+		P_TraceBleed (newdam > 0 ? newdam : damage, self->target, self);
 		return;
 	}
 	chance = self->health < self->SpawnHealth()/2 ? 96 : 48;
@@ -334,8 +331,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_BlueSpark)
 	AActor *mo;
 
 	// [BC] Don't do this in client mode.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -364,8 +360,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_GenWizard)
 	AActor *mo;
 
 	// [BC] Don't do this in client mode.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -376,8 +371,8 @@ DEFINE_ACTION_FUNCTION(AActor, A_GenWizard)
 		mo->z -= mo->GetDefault()->height/2;
 		if (!P_TestMobjLocation (mo))
 		{ // Didn't fit
+			mo->ClearCounters();
 			mo->Destroy ();
-			level.total_monsters--;
 		}
 		else
 		{ // [RH] Make the new wizards inherit D'Sparil's target
