@@ -55,8 +55,7 @@ void A_Fire(AActor *self, int height)
 	angle_t an;
 				
 	// [BC] Fire movement is server-side.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -93,8 +92,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_VileTarget)
 	AActor *fog;
 		
 	// [BC] Fire movement is server-side.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -136,8 +134,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_VileAttack)
 	AActor *fire, *target;
 	angle_t an;
 		
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -151,8 +148,8 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_VileAttack)
 		return;
 
 	S_Sound (self, CHAN_WEAPON, snd, 1, ATTN_NORM);
-	P_TraceBleed (dmg, target);
-	P_DamageMobj (target, self, self, dmg, NAME_None);
+	int newdam = P_DamageMobj (target, self, self, dmg, NAME_None);
+	P_TraceBleed (newdam > 0 ? newdam : dmg, target);
 		
 	// [BC] Tell clients to play the arch-vile sound on their end.
 	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
@@ -172,7 +169,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_VileAttack)
 		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
 			SERVERCOMMANDS_MoveThingExact( fire, CM_X|CM_Y|CM_Z );
 
-		P_RadiusAttack (fire, self, blastdmg, blastrad, dmgtype, false);
+		P_RadiusAttack (fire, self, blastdmg, blastrad, dmgtype, 0);
 	}
 	target->velz = Scale(thrust, 1000, target->Mass);
 }

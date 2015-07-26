@@ -39,6 +39,7 @@
 */
 
 #include "gl/system/gl_system.h"
+#include "gl/data/gl_data.h"
 #include "gl/system/gl_cvars.h"
 #include "gl/shaders/gl_shader.h"
 #include "gl/renderer/gl_renderer.h"
@@ -103,14 +104,12 @@ int FRenderState::SetupShader(bool cameratexture, int &shaderindex, int &cm, flo
 
 	if (gl.shadermodel == 4)
 	{
-		usecmshader = cm > CM_DEFAULT && cm < CM_FIRSTSPECIALCOLORMAP + SpecialColormaps.Size() && 
-			mTextureMode != TM_MASK;
+		usecmshader = cm > CM_DEFAULT && cm < CM_MAXCOLORMAP && mTextureMode != TM_MASK;
 	}
 	else if (gl.shadermodel == 3)
 	{
 		usecmshader = (cameratexture || gl_colormap_shader) && 
-			cm > CM_DEFAULT && cm < CM_FIRSTSPECIALCOLORMAP + SpecialColormaps.Size() && 
-			mTextureMode != TM_MASK;
+			cm > CM_DEFAULT && cm < CM_MAXCOLORMAP && mTextureMode != TM_MASK;
 
 		if (!gl_brightmap_shader && shaderindex == 3) 
 		{
@@ -246,6 +245,10 @@ bool FRenderState::ApplyShader()
 		{
 			gl.Uniform3iv(activeShader->lightrange_index, 1, mNumLights);
 			gl.Uniform4fv(activeShader->lights_index, mNumLights[2], mLightData);
+		}
+		if (glset.lightmode == 8)
+		{
+			gl.Uniform3fv(activeShader->dlightcolor_index, 1, mDynLight);
 		}
 
 		return true;

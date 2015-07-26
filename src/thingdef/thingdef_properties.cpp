@@ -45,7 +45,6 @@
 #include "w_wad.h"
 #include "templates.h"
 #include "r_defs.h"
-#include "r_draw.h"
 #include "a_pickups.h"
 #include "s_sound.h"
 #include "cmdlib.h"
@@ -64,10 +63,12 @@
 #include "v_text.h"
 #include "thingdef.h"
 #include "a_sharedglobal.h"
-#include "r_translate.h"
+#include "r_data/r_translate.h"
 #include "a_morph.h"
 #include "colormatcher.h"
 #include "teaminfo.h"
+#include "v_video.h"
+#include "r_data/colormaps.h"
 
 
 //==========================================================================
@@ -92,6 +93,91 @@ static const PClass *FindClassTentative(const char *name, const char *ancestor)
 		I_Error("%s does not inherit from %s\n", name, ancestor);
 	}
 	return cls;
+}
+
+//==========================================================================
+//
+// Sets or clears a flag, taking field width into account.
+//
+//==========================================================================
+void ModActorFlag(AActor *actor, FFlagDef *fd, bool set)
+{
+	// Little-Endian machines only need one case, because all field sizes
+	// start at the same address. (Unless the machine has unaligned access
+	// exceptions, in which case you'll need multiple cases for it too.)
+#ifdef __BIG_ENDIAN__
+	if (fd->fieldsize == 4)
+#endif
+	{
+		DWORD *flagvar = (DWORD *)((char *)actor + fd->structoffset);
+		if (set)
+		{
+			*flagvar |= fd->flagbit;
+		}
+		else
+		{
+			*flagvar &= ~fd->flagbit;
+		}
+	}
+#ifdef __BIG_ENDIAN__
+	else if (fd->fieldsize == 2)
+	{
+		WORD *flagvar = (WORD *)((char *)actor + fd->structoffset);
+		if (set)
+		{
+			*flagvar |= fd->flagbit;
+		}
+		else
+		{
+			*flagvar &= ~fd->flagbit;
+		}
+	}
+	else
+	{
+		assert(fd->fieldsize == 1);
+		BYTE *flagvar = (BYTE *)((char *)actor + fd->structoffset);
+		if (set)
+		{
+			*flagvar |= fd->flagbit;
+		}
+		else
+		{
+			*flagvar &= ~fd->flagbit;
+		}
+	}
+#endif
+}
+
+//==========================================================================
+//
+// Returns whether an actor flag is true or not.
+//
+//==========================================================================
+
+INTBOOL CheckActorFlag(const AActor *owner, FFlagDef *fd)
+{
+	if (fd->structoffset == -1)
+	{
+		return CheckDeprecatedFlags(owner, owner->GetClass()->ActorInfo, fd->flagbit);
+	}
+	else
+#ifdef __BIG_ENDIAN__
+	if (fd->fieldsize == 4)
+#endif
+	{
+		return fd->flagbit & *(DWORD *)(((char*)owner) + fd->structoffset);
+	}
+#ifdef __BID_ENDIAN__
+	else if (fd->fieldsize == 2)
+	{
+		return fd->flagbit & *(WORD *)(((char*)owner) + fd->structoffset);
+	}
+	else
+	{
+		assert(fd->fieldsize == 1);
+		return fd->flagbit & *(BYTE *)(((char*)owner) + fd->structoffset);
+	}
+#endif
 }
 
 //===========================================================================
@@ -169,7 +255,7 @@ void HandleDeprecatedFlags(AActor *defaults, FActorInfo *info, bool set, int ind
 //
 //===========================================================================
 
-bool CheckDeprecatedFlags(AActor *actor, FActorInfo *info, int index)
+bool CheckDeprecatedFlags(const AActor *actor, FActorInfo *info, int index)
 {
 	// A deprecated flag is false if
 	// a) it hasn't been added here
@@ -210,11 +296,11 @@ bool CheckDeprecatedFlags(AActor *actor, FActorInfo *info, int index)
 		return (actor->BounceFlags & (BOUNCE_TypeMask|BOUNCE_UseSeeSound)) == BOUNCE_DoomCompat;
 
 	case DEPF_PICKUPFLASH:
-		return static_cast<AInventory*>(actor)->PickupFlash == PClass::FindClass("PickupFlash");
+		return static_cast<const AInventory*>(actor)->PickupFlash == PClass::FindClass("PickupFlash");
 		// A pure name lookup may or may not be more efficient, but I know no static identifier for PickupFlash.
 
 	case DEPF_INTERHUBSTRIP:
-		return !(static_cast<AInventory*>(actor)->InterHubAmount);
+		return !(static_cast<const AInventory*>(actor)->InterHubAmount);
 	}
 
 	return false; // Any entirely unknown flag is not set
@@ -317,13 +403,10 @@ DEFINE_INFO_PROPERTY(conversationid, IiI, Actor)
 		if ((gameinfo.flags & (GI_SHAREWARE|GI_TEASER2)) == (GI_SHAREWARE|GI_TEASER2))
 			convid=id2;
 
-		if (convid==-1) return;
 	}
-	if (convid<0 || convid>1000)
-	{
-		I_Error ("ConversationID must be in the range [0,1000]");
-	}
-	else StrifeTypes[convid] = info->Class;
+
+	if (convid <= 0) return;	// 0 is not usable because the dialogue scripts use it as 'no object'.
+	SetStrifeType(convid, info->Class);
 }
 
 //==========================================================================
@@ -364,7 +447,7 @@ DEFINE_PROPERTY(skip_super, 0, Actor)
 DEFINE_PROPERTY(tag, S, Actor)
 {
 	PROP_STRING_PARM(str, 0);
-	defaults->Tag = str;
+	defaults->SetTag(str);
 }
 
 //==========================================================================
@@ -453,6 +536,16 @@ DEFINE_PROPERTY(damage, X, Actor)
 //==========================================================================
 //
 //==========================================================================
+DEFINE_PROPERTY(projectilekickback, I, Actor)
+{
+	PROP_INT_PARM(id, 0);
+
+	defaults->projectileKickback = id;
+}
+
+//==========================================================================
+//
+//==========================================================================
 DEFINE_PROPERTY(speed, F, Actor)
 {
 	PROP_FIXED_PARM(id, 0);
@@ -529,6 +622,16 @@ DEFINE_PROPERTY(scale, F, Actor)
 {
 	PROP_FIXED_PARM(id, 0);
 	defaults->scaleX = defaults->scaleY = id;
+}
+
+//==========================================================================
+//
+//==========================================================================
+DEFINE_PROPERTY(floatbobphase, I, Actor)
+{
+	PROP_INT_PARM(id, 0);
+	if (id < -1 || id >= 64) I_Error ("FloatBobPhase must be in range [-1,63]");
+	defaults->FloatBobPhase = id;
 }
 
 //==========================================================================
@@ -943,6 +1046,11 @@ DEFINE_PROPERTY(bouncetype, S, Actor)
 	}
 	defaults->BounceFlags &= ~(BOUNCE_TypeMask | BOUNCE_UseSeeSound);
 	defaults->BounceFlags |= flags[match];
+	if (defaults->BounceFlags & (BOUNCE_Actors | BOUNCE_AllActors))
+	{
+		// PASSMOBJ is irrelevant for normal missiles, but not for bouncers.
+		defaults->flags2 |= MF2_PASSMOBJ;
+	}
 }
 
 //==========================================================================
@@ -1007,6 +1115,26 @@ DEFINE_PROPERTY(damagetype, S, Actor)
 	PROP_STRING_PARM(str, 0);
 	if (!stricmp(str, "Normal")) defaults->DamageType = NAME_None;
 	else defaults->DamageType=str;
+}
+
+//==========================================================================
+
+//==========================================================================
+DEFINE_PROPERTY(paintype, S, Actor)
+{
+	PROP_STRING_PARM(str, 0);
+	if (!stricmp(str, "Normal")) defaults->PainType = NAME_None;
+	else defaults->PainType=str;
+}
+
+//==========================================================================
+
+//==========================================================================
+DEFINE_PROPERTY(deathtype, S, Actor)
+{
+	PROP_STRING_PARM(str, 0);
+	if (!stricmp(str, "Normal")) defaults->DeathType = NAME_None;
+	else defaults->DeathType=str;
 }
 
 //==========================================================================
@@ -1081,6 +1209,16 @@ DEFINE_PROPERTY(poisondamage, Iii, Actor)
 		else
 			defaults->PoisonPeriod = 0;
 	}
+}
+
+//==========================================================================
+//
+//==========================================================================
+DEFINE_PROPERTY(poisondamagetype, S, Actor)
+{
+	PROP_STRING_PARM(poisondamagetype, 0);
+
+	defaults->PoisonDamageType = poisondamagetype;
 }
 
 //==========================================================================
@@ -1195,7 +1333,7 @@ DEFINE_PROPERTY(activation, N, Actor)
 DEFINE_PROPERTY(designatedteam, I, Actor)
 {
 	PROP_INT_PARM(val, 0);
-	// [BL] We need to use the actual number of teams not the sv_maxteams limit.
+	// [BB] Zandronum handles teams differently.
 	if(val < 0 || (val >= (signed) teams.Size() && val != TEAM_None))
 		I_Error("Invalid team designation.\n");
 	defaults->DesignatedTeam = val;
@@ -1216,16 +1354,39 @@ DEFINE_PROPERTY(limitedtoteam, I, Actor)
 DEFINE_PROPERTY(visibletoteam, I, Actor)
 {
 	PROP_INT_PARM(i, 0);
-	defaults->ulVisibleToTeam=i+1;
+	defaults->VisibleToTeam=i+1;
 }
 
 //==========================================================================
 // [BB]
 //==========================================================================
-DEFINE_PROPERTY(visibletoplayerclass, S, Actor)
+DEFINE_PROPERTY(visibletoplayerclass, Ssssssssssssssssssss, Actor)
 {
-	PROP_STRING_PARM(n, 0);
-	defaults->VisibleToPlayerClass = n;
+	info->VisibleToPlayerClass.Clear();
+	for(int i = 0;i < PROP_PARM_COUNT;++i)
+	{
+		PROP_STRING_PARM(n, i);
+		if (*n != 0)
+			info->VisibleToPlayerClass.Push(FindClassTentative(n, "PlayerPawn"));
+	}
+}
+
+//==========================================================================
+//
+//==========================================================================
+DEFINE_PROPERTY(accuracy, I, Actor)
+{
+	PROP_INT_PARM(i, 0);
+	defaults->accuracy = i;
+}
+
+//==========================================================================
+//
+//==========================================================================
+DEFINE_PROPERTY(stamina, I, Actor)
+{
+	PROP_INT_PARM(i, 0);
+	defaults->stamina = i;
 }
 
 //==========================================================================
@@ -1233,6 +1394,34 @@ DEFINE_PROPERTY(visibletoplayerclass, S, Actor)
 // Special inventory properties
 //
 //==========================================================================
+
+//==========================================================================
+//
+//==========================================================================
+DEFINE_CLASS_PROPERTY(restrictedto, Ssssssssssssssssssss, Inventory)
+{
+	info->RestrictedToPlayerClass.Clear();
+	for(int i = 0;i < PROP_PARM_COUNT;++i)
+	{
+		PROP_STRING_PARM(n, i);
+		if (*n != 0)
+			info->RestrictedToPlayerClass.Push(FindClassTentative(n, "PlayerPawn"));
+	}
+}
+
+//==========================================================================
+//
+//==========================================================================
+DEFINE_CLASS_PROPERTY(forbiddento, Ssssssssssssssssssss, Inventory)
+{
+	info->ForbiddenToPlayerClass.Clear();
+	for(int i = 0;i < PROP_PARM_COUNT;++i)
+	{
+		PROP_STRING_PARM(n, i);
+		if (*n != 0)
+			info->ForbiddenToPlayerClass.Push(FindClassTentative(n, "PlayerPawn"));
+	}
+}
 
 //==========================================================================
 //
@@ -1393,16 +1582,23 @@ DEFINE_CLASS_PROPERTY(icon, S, Inventory)
 {
 	PROP_STRING_PARM(i, 0);
 
-	defaults->Icon = TexMan.CheckForTexture(i, FTexture::TEX_MiscPatch);
-	if (!defaults->Icon.isValid())
+	if (i == NULL || i[0] == '\0')
 	{
-		// Don't print warnings if the item is for another game or if this is a shareware IWAD. 
-		// Strife's teaser doesn't contain all the icon graphics of the full game.
-		if ((info->GameFilter == GAME_Any || info->GameFilter & gameinfo.gametype) &&
-			!(gameinfo.flags&GI_SHAREWARE) && Wads.GetLumpFile(bag.Lumpnum) != 0)
+		defaults->Icon.SetNull();
+	}
+	else
+	{
+		defaults->Icon = TexMan.CheckForTexture(i, FTexture::TEX_MiscPatch);
+		if (!defaults->Icon.isValid())
 		{
-			bag.ScriptPosition.Message(MSG_WARNING,
-				"Icon '%s' for '%s' not found\n", i, info->Class->TypeName.GetChars());
+			// Don't print warnings if the item is for another game or if this is a shareware IWAD. 
+			// Strife's teaser doesn't contain all the icon graphics of the full game.
+			if ((info->GameFilter == GAME_Any || info->GameFilter & gameinfo.gametype) &&
+				!(gameinfo.flags&GI_SHAREWARE) && Wads.GetLumpFile(bag.Lumpnum) != 0)
+			{
+				bag.ScriptPosition.Message(MSG_WARNING,
+					"Icon '%s' for '%s' not found\n", i, info->Class->TypeName.GetChars());
+			}
 		}
 	}
 }
@@ -1658,6 +1854,24 @@ DEFINE_CLASS_PROPERTY(selectionorder, I, Weapon)
 //==========================================================================
 //
 //==========================================================================
+DEFINE_CLASS_PROPERTY(minselectionammo1, I, Weapon)
+{
+	PROP_INT_PARM(i, 0);
+	defaults->MinSelAmmo1 = i;
+}
+
+//==========================================================================
+//
+//==========================================================================
+DEFINE_CLASS_PROPERTY(minselectionammo2, I, Weapon)
+{
+	PROP_INT_PARM(i, 0);
+	defaults->MinSelAmmo2 = i;
+}
+
+//==========================================================================
+//
+//==========================================================================
 DEFINE_CLASS_PROPERTY(sisterweapon, S, Weapon)
 {
 	PROP_STRING_PARM(str, 0);
@@ -1680,6 +1894,52 @@ DEFINE_CLASS_PROPERTY(yadjust, F, Weapon)
 {
 	PROP_FIXED_PARM(i, 0);
 	defaults->YAdjust = i;
+}
+
+//==========================================================================
+//
+//==========================================================================
+DEFINE_CLASS_PROPERTY(bobstyle, S, Weapon)
+{
+	static const char *names[] = { "Normal", "Inverse", "Alpha", "InverseAlpha", "Smooth", "InverseSmooth", NULL };
+	static const int styles[] = { AWeapon::BobNormal,
+		AWeapon::BobInverse, AWeapon::BobAlpha, AWeapon::BobInverseAlpha,
+		AWeapon::BobSmooth, AWeapon::BobInverseSmooth, };
+	PROP_STRING_PARM(id, 0);
+	int match = MatchString(id, names);
+	if (match < 0)
+	{
+		I_Error("Unknown bobstyle %s", id);
+		match = 0;
+	}
+	defaults->BobStyle = styles[match];
+}
+
+//==========================================================================
+//
+//==========================================================================
+DEFINE_CLASS_PROPERTY(bobspeed, F, Weapon)
+{
+	PROP_FIXED_PARM(i, 0);
+	defaults->BobSpeed = i;
+}
+
+//==========================================================================
+//
+//==========================================================================
+DEFINE_CLASS_PROPERTY(bobrangex, F, Weapon)
+{
+	PROP_FIXED_PARM(i, 0);
+	defaults->BobRangeX = i;
+}
+
+//==========================================================================
+//
+//==========================================================================
+DEFINE_CLASS_PROPERTY(bobrangey, F, Weapon)
+{
+	PROP_FIXED_PARM(i, 0);
+	defaults->BobRangeY = i;
 }
 
 //==========================================================================
@@ -2018,7 +2278,7 @@ DEFINE_CLASS_PROPERTY_PREFIX(player, colorrange, I_I, PlayerPawn)
 //==========================================================================
 //
 //==========================================================================
-DEFINE_CLASS_PROPERTY_PREFIX(player, colorset, ISIII, PlayerPawn)
+DEFINE_CLASS_PROPERTY_PREFIX(player, colorset, ISIIIiiiiiiiiiiiiiiiiiiiiiiii, PlayerPawn)
 {
 	PROP_INT_PARM(setnum, 0);
 	PROP_STRING_PARM(setname, 1);
@@ -2032,6 +2292,34 @@ DEFINE_CLASS_PROPERTY_PREFIX(player, colorset, ISIII, PlayerPawn)
 	color.FirstColor = rangestart;
 	color.LastColor = rangeend;
 	color.RepresentativeColor = representative_color;
+	color.NumExtraRanges = 0;
+
+	if (PROP_PARM_COUNT > 5)
+	{
+		int count = PROP_PARM_COUNT - 5;
+		int start = 5;
+
+		while (count >= 4)
+		{
+			PROP_INT_PARM(range_start, start+0);
+			PROP_INT_PARM(range_end, start+1);
+			PROP_INT_PARM(first_color, start+2);
+			PROP_INT_PARM(last_color, start+3);
+			int extra = color.NumExtraRanges++;
+			assert (extra < (int)countof(color.Extra));
+
+			color.Extra[extra].RangeStart = range_start;
+			color.Extra[extra].RangeEnd = range_end;
+			color.Extra[extra].FirstColor = first_color;
+			color.Extra[extra].LastColor = last_color;
+			count -= 4;
+			start += 4;
+		}
+		if (count != 0)
+		{
+			bag.ScriptPosition.Message(MSG_WARNING, "Extra ranges require 4 parameters each.\n");
+		}
+	}
 
 	if (setnum < 0)
 	{
@@ -2057,6 +2345,8 @@ DEFINE_CLASS_PROPERTY_PREFIX(player, colorsetfile, ISSI, PlayerPawn)
 	color.Name = setname;
 	color.Lump = Wads.CheckNumForName(rangefile);
 	color.RepresentativeColor = representative_color;
+	color.NumExtraRanges = 0;
+
 	if (setnum < 0)
 	{
 		bag.ScriptPosition.Message(MSG_WARNING, "Color set number must not be negative.\n");
@@ -2100,6 +2390,26 @@ DEFINE_CLASS_PROPERTY_PREFIX(player, jumpz, F, PlayerPawn)
 {
 	PROP_FIXED_PARM(z, 0);
 	defaults->JumpZ = z;
+}
+
+//==========================================================================
+//
+//==========================================================================
+DEFINE_CLASS_PROPERTY_PREFIX(player, GruntSpeed, F, PlayerPawn)
+{
+	PROP_FIXED_PARM(z, 0);
+	defaults->GruntSpeed = z;
+}
+
+//==========================================================================
+//
+//==========================================================================
+DEFINE_CLASS_PROPERTY_PREFIX(player, FallingScreamSpeed, FF, PlayerPawn)
+{
+	PROP_FIXED_PARM(minz, 0);
+	PROP_FIXED_PARM(maxz, 0);
+	defaults->FallingScreamMinSpeed = minz;
+	defaults->FallingScreamMaxSpeed = maxz;
 }
 
 //==========================================================================
@@ -2209,6 +2519,15 @@ DEFINE_CLASS_PROPERTY_PREFIX(player, morphweapon, S, PlayerPawn)
 //==========================================================================
 //
 //==========================================================================
+DEFINE_CLASS_PROPERTY_PREFIX(player, flechettetype, S, PlayerPawn)
+{
+	PROP_STRING_PARM(str, 0);
+	defaults->FlechetteType = FindClassTentative(str, "ArtiPoisonBag");
+}
+
+//==========================================================================
+//
+//==========================================================================
 DEFINE_CLASS_PROPERTY_PREFIX(player, scoreicon, S, PlayerPawn)
 {
 	PROP_STRING_PARM(z, 0);
@@ -2243,18 +2562,31 @@ DEFINE_CLASS_PROPERTY_PREFIX(player, crouchsprite, S, PlayerPawn)
 //==========================================================================
 //
 //==========================================================================
-DEFINE_CLASS_PROPERTY_PREFIX(player, damagescreencolor, Cf, PlayerPawn)
+DEFINE_CLASS_PROPERTY_PREFIX(player, damagescreencolor, Cfs, PlayerPawn)
 {
 	PROP_COLOR_PARM(c, 0);
-	defaults->DamageFade = c;
+
+	PalEntry color = c;
+
 	if (PROP_PARM_COUNT < 3)		// Because colors count as 2 parms
 	{
-		defaults->DamageFade.a = 255;
+		color.a = 255;
+		defaults->DamageFade = color;
+	}
+	else if (PROP_PARM_COUNT < 4)
+	{
+		PROP_FLOAT_PARM(a, 2);
+
+		color.a = BYTE(255 * clamp(a, 0.f, 1.f));
+		defaults->DamageFade = color;
 	}
 	else
 	{
 		PROP_FLOAT_PARM(a, 2);
-		defaults->DamageFade.a = BYTE(255 * clamp(a, 0.f, 1.f));
+		PROP_STRING_PARM(type, 3);
+
+		color.a = BYTE(255 * clamp(a, 0.f, 1.f));
+		info->SetPainFlash(type, color);
 	}
 }
 
@@ -2316,6 +2648,15 @@ DEFINE_CLASS_PROPERTY_PREFIX(player, hexenarmor, FFFFF, PlayerPawn)
 		PROP_FIXED_PARM(val, i);
 		info->Class->Meta.SetMetaFixed (APMETA_Hexenarmor0+i, val);
 	}
+}
+
+//==========================================================================
+//
+//==========================================================================
+DEFINE_CLASS_PROPERTY_PREFIX(player, portrait, S, PlayerPawn)
+{
+	PROP_STRING_PARM(val, 0);
+	info->Class->Meta.SetMetaString (APMETA_Portrait, val);
 }
 
 //==========================================================================
