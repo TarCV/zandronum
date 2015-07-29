@@ -27,6 +27,10 @@
 
 #include "doomdef.h"
 #include "p_local.h"
+// [BB] New #includes.
+#include "network.h"
+#include "sv_commands.h"
+#include "g_level.h"
 
 #include "p_lnspec.h"
 
@@ -50,12 +54,17 @@ IMPLEMENT_CLASS (DLighting)
 
 DLighting::DLighting ()
 {
+	// [BB] Workaround to save whether this lighting was created by the map.
+	bNotMapSpawned = ( level.time > 0 );
 }
 
 DLighting::DLighting (sector_t *sector)
 	: DSectorEffect (sector)
 {
 	ChangeStatNum (STAT_LIGHT);
+
+	// [BB] Workaround to save whether this lighting was created by the map.
+	bNotMapSpawned = ( level.time > 0 );
 }
 
 //-----------------------------------------------------------------------------
@@ -101,6 +110,12 @@ void DFireFlicker::Tick ()
 	}
 }
 
+// [BC]
+void DFireFlicker::UpdateToClient( ULONG ulClient )
+{
+	SERVERCOMMANDS_DoSectorLightFireFlicker( ULONG( m_Sector - sectors ), m_MaxLight, m_MinLight, ulClient, SVCF_ONLYTHISCLIENT );
+}
+
 //-----------------------------------------------------------------------------
 //
 // P_SpawnFireFlicker
@@ -113,6 +128,10 @@ DFireFlicker::DFireFlicker (sector_t *sector)
 	m_MaxLight = sector->lightlevel;
 	m_MinLight = sector_t::ClampLight(sector->FindMinSurroundingLight(sector->lightlevel) + 16);
 	m_Count = 4;
+
+	// [BC] If we're the server, tell clients to create the fire flicker.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_DoSectorLightFireFlicker( ULONG( sector - sectors ), m_MaxLight, m_MinLight );
 }
 
 DFireFlicker::DFireFlicker (sector_t *sector, int upper, int lower)
@@ -121,6 +140,10 @@ DFireFlicker::DFireFlicker (sector_t *sector, int upper, int lower)
 	m_MaxLight = sector_t::ClampLight(upper);
 	m_MinLight = sector_t::ClampLight(lower);
 	m_Count = 4;
+
+	// [BC] If we're the server, tell clients to create the fire flicker.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_DoSectorLightFireFlicker( ULONG( sector - sectors ), m_MaxLight, m_MinLight );
 }
 
 //-----------------------------------------------------------------------------
@@ -165,6 +188,12 @@ void DFlicker::Tick ()
 	}
 }
 
+// [BC]
+void DFlicker::UpdateToClient( ULONG ulClient )
+{
+	SERVERCOMMANDS_DoSectorLightFlicker( ULONG( m_Sector - sectors ), m_MaxLight, m_MinLight, ulClient, SVCF_ONLYTHISCLIENT );
+}
+
 //-----------------------------------------------------------------------------
 //
 //
@@ -178,6 +207,10 @@ DFlicker::DFlicker (sector_t *sector, int upper, int lower)
 	m_MinLight = lower;
 	sector->lightlevel = upper;
 	m_Count = (pr_flicker()&64)+1;
+
+	// [BC] If we're the server, tell clients to create the flicker.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_DoSectorLightFlicker( ULONG( sector - sectors ), m_MaxLight, m_MinLight );
 }
 
 //-----------------------------------------------------------------------------
@@ -240,6 +273,12 @@ void DLightFlash::Tick ()
 	}
 }
 
+// [BC]
+void DLightFlash::UpdateToClient( ULONG ulClient )
+{
+	SERVERCOMMANDS_DoSectorLightLightFlash( ULONG( m_Sector - sectors ), m_MaxLight, m_MinLight, ulClient, SVCF_ONLYTHISCLIENT ); 
+}
+
 //-----------------------------------------------------------------------------
 //
 // P_SpawnLightFlash
@@ -255,6 +294,10 @@ DLightFlash::DLightFlash (sector_t *sector)
 	m_MaxTime = 64;
 	m_MinTime = 7;
 	m_Count = (pr_lightflash() & m_MaxTime) + 1;
+
+	// [BC] If we're the server, tell clients to create the light flash.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_DoSectorLightLightFlash( ULONG( sector - sectors ), m_MaxLight, m_MinLight );
 }
 	
 DLightFlash::DLightFlash (sector_t *sector, int min, int max)
@@ -266,6 +309,10 @@ DLightFlash::DLightFlash (sector_t *sector, int min, int max)
 	m_MaxTime = 64;
 	m_MinTime = 7;
 	m_Count = (pr_lightflash() & m_MaxTime) + 1;
+
+	// [BC] If we're the server, tell clients to create the light flash.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_DoSectorLightLightFlash( ULONG( sector - sectors ), m_MaxLight, m_MinLight );
 }
 
 
@@ -310,6 +357,18 @@ void DStrobe::Tick ()
 	}
 }
 
+// [BC]
+void DStrobe::UpdateToClient( ULONG ulClient )
+{
+	SERVERCOMMANDS_DoSectorLightStrobe( ULONG( m_Sector - sectors ), m_DarkTime, m_BrightTime, m_MaxLight, m_MinLight, m_Count, ulClient, SVCF_ONLYTHISCLIENT ); 
+}
+
+// [BC]
+void DStrobe::SetCount( LONG lCount )
+{
+	m_Count = lCount;
+}
+
 //-----------------------------------------------------------------------------
 //
 // Hexen-style constructor
@@ -324,6 +383,10 @@ DStrobe::DStrobe (sector_t *sector, int upper, int lower, int utics, int ltics)
 	m_MaxLight = sector_t::ClampLight(upper);
 	m_MinLight = sector_t::ClampLight(lower);
 	m_Count = 1;	// Hexen-style is always in sync
+
+	// [BC] If we're the server, tell clients to create the strobe light.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_DoSectorLightStrobe( ULONG( sector - sectors ), m_DarkTime, m_BrightTime, m_MaxLight, m_MinLight, m_Count );
 }
 
 //-----------------------------------------------------------------------------
@@ -345,6 +408,10 @@ DStrobe::DStrobe (sector_t *sector, int utics, int ltics, bool inSync)
 		m_MinLight = 0;
 
 	m_Count = inSync ? 1 : (pr_strobeflash() & 7) + 1;
+
+	// [BC] If we're the server, tell clients to create the strobe light.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_DoSectorLightStrobe( ULONG( sector - sectors ), m_DarkTime, m_BrightTime, m_MaxLight, m_MinLight, m_Count );
 }
 
 
@@ -414,6 +481,14 @@ void EV_TurnTagLightsOff (int tag)
 				min = tsec->lightlevel;
 		}
 		sector->SetLightLevel(min);
+
+		// [BC] Flag the sector as having its light level altered. That way, when clients
+		// connect, we can tell them about the updated light level.
+		sector->bLightChange = true;
+
+		// [BC] If we're the server, tell clients about the light level change.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetSectorLightLevel( secnum );
 	}
 }
 
@@ -461,6 +536,14 @@ void EV_LightTurnOn (int tag, int bright)
 		{
 			bright = tbright;
 		}
+
+		// [BC] Flag the sector as having its light level altered. That way, when clients
+		// connect, we can tell them about the updated light level.
+		sector->bLightChange = true;
+
+		// [BC] If we're the server, tell clients about the light level change.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetSectorLightLevel( secnum );
 	}
 }
 
@@ -525,6 +608,14 @@ void EV_LightChange (int tag, int value)
 	while ((secnum = P_FindSectorFromTag (tag, secnum)) >= 0)
 	{
 		sectors[secnum].SetLightLevel(sectors[secnum].lightlevel + value);
+
+		// [BC] Flag the sector as having its light level altered. That way, when clients
+		// connect, we can tell them about the updated light level.
+		sectors[secnum].bLightChange = true;
+
+		// [BC] If we're the server, tell clients about the light level change.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetSectorLightLevel( secnum );
 	}
 }
 
@@ -582,6 +673,12 @@ void DGlow::Tick ()
 	m_Sector->SetLightLevel(newlight);
 }
 
+// [BC]
+void DGlow::UpdateToClient( ULONG ulClient )
+{
+	SERVERCOMMANDS_DoSectorLightGlow( ULONG( m_Sector - sectors ), ulClient, SVCF_ONLYTHISCLIENT );
+}
+
 //-----------------------------------------------------------------------------
 //
 //
@@ -594,6 +691,10 @@ DGlow::DGlow (sector_t *sector)
 	m_MinLight = sector->FindMinSurroundingLight (sector->lightlevel);
 	m_MaxLight = sector->lightlevel;
 	m_Direction = -1;
+
+	// [BC] If we're the server, tell clients to create the glow light.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_DoSectorLightGlow( ULONG( sector - sectors ));
 }
 
 //-----------------------------------------------------------------------------
@@ -627,6 +728,15 @@ void DGlow2::Tick ()
 		if (m_OneShot)
 		{
 			m_Sector->SetLightLevel(m_End);
+
+			// [BC] Flag the sector as having its light level altered. That way, when clients
+			// connect, we can tell them about the updated light level.
+			m_Sector->bLightChange = true;
+
+			// [BC] If we're the server, tell clients about the light level change.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetSectorLightLevel( ULONG( m_Sector - sectors ));
+
 			Destroy ();
 			return;
 		}
@@ -640,6 +750,18 @@ void DGlow2::Tick ()
 	}
 
 	m_Sector->SetLightLevel(((m_End - m_Start) * m_Tics) / m_MaxTics + m_Start);
+}
+
+// [BC]
+void DGlow2::UpdateToClient( ULONG ulClient )
+{
+	SERVERCOMMANDS_DoSectorLightGlow2( ULONG( m_Sector - sectors ), m_Start, m_End, m_Tics, m_MaxTics, m_OneShot );
+}
+
+// [BC]
+void DGlow2::SetTics( LONG lTics )
+{
+	m_Tics = lTics;
 }
 
 //-----------------------------------------------------------------------------
@@ -656,6 +778,10 @@ DGlow2::DGlow2 (sector_t *sector, int start, int end, int tics, bool oneshot)
 	m_MaxTics = tics;
 	m_Tics = -1;
 	m_OneShot = oneshot;
+
+	// [BC] If we're the server, tell clients to create the glow light.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_DoSectorLightGlow2( ULONG( sector - sectors ), m_Start, m_End, m_Tics, m_MaxTics, m_OneShot );
 }
 
 //-----------------------------------------------------------------------------
@@ -711,7 +837,18 @@ void EV_StartLightFading (int tag, int value, int tics)
 
 		if (tics <= 0)
 		{
-			sec->SetLightLevel(value);
+			// [CK] Only update if the values are not the same, since this is
+			// an instant function with zero tics.
+			if ( sec->GetLightLevel() != value )
+			{
+				sec->SetLightLevel(value);
+				sec->bLightChange = true;
+
+				// [CK] Since we know it's instant, this is a simple light level
+				// change and not a fade.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_SetSectorLightLevel( secnum );
+			}
 		}
 		else
 		{
@@ -801,6 +938,10 @@ int DPhased::PhaseHelper (sector_t *sector, int index, int light, sector_t *prev
 
 		sector->special &= 0xff00;
 
+		// [BC] If we're the server, tell clients to create the phased light.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_DoSectorLightPhased( ULONG( sector - sectors ), m_BaseLevel, m_Phase );
+
 		return numsteps;
 	}
 }
@@ -810,6 +951,12 @@ int DPhased::PhaseHelper (sector_t *sector, int index, int light, sector_t *prev
 //
 //
 //-----------------------------------------------------------------------------
+
+// [BC]
+void DPhased::UpdateToClient( ULONG ulClient )
+{
+	SERVERCOMMANDS_DoSectorLightPhased( ULONG( m_Sector - sectors ), m_BaseLevel, m_Phase, ulClient, SVCF_ONLYTHISCLIENT );
+}
 
 DPhased::DPhased (sector_t *sector, int baselevel)
 	: DLighting (sector)
@@ -829,6 +976,10 @@ DPhased::DPhased (sector_t *sector, int baselevel, int phase)
 	m_BaseLevel = baselevel;
 	m_Phase = phase;
 	sector->special &= 0xff00;
+
+	// [BC] If we're the server, tell clients to create the phased light.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_DoSectorLightPhased( ULONG( sector - sectors ), m_BaseLevel, m_Phase );
 }
 
 //============================================================================
@@ -849,6 +1000,17 @@ void EV_StopLightEffect (int tag)
 		if (effect->GetSector()->tag == tag)
 		{
 			effect->Destroy();
+
+			// [BC] Since this sector's light level most likely changed, mark it as such so
+			// that we can tell clients when they come in.
+			effect->GetSector( )->bLightChange = true;
+
+			// [BC] If we're the server, tell clients to stop this light effect.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			{
+				SERVERCOMMANDS_StopSectorLightEffect( ULONG( effect->GetSector( ) - sectors ));
+				SERVERCOMMANDS_SetSectorLightLevel( ULONG( effect->GetSector( ) - sectors ));
+			}
 		}
 	}
 }

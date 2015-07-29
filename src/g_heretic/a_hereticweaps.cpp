@@ -81,17 +81,36 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_StaffAttack)
 		if (!weapon->DepleteAmmo (weapon->bAltFire))
 			return;
 	}
+
+	// [BC] Weapons are handled by the server.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (puff == NULL) puff = PClass::FindClass(NAME_BulletPuff);	// just to be sure
 	angle = self->angle;
 	angle += pr_sap.Random2() << 18;
 	slope = P_AimLineAttack (self, angle, MELEERANGE, &linetarget);
 	P_LineAttack (self, angle, MELEERANGE, slope, damage, NAME_Melee, puff, true, &linetarget);
+
+	// [BC] Apply spread.
+	if ( player->cheats2 & CF2_SPREAD )
+	{
+		P_LineAttack(self, angle + ( ANGLE_45 / 3 ), MELEERANGE, slope, damage, NAME_Melee, puff, true);
+		P_LineAttack(self, angle - ( ANGLE_45 / 3 ), MELEERANGE, slope, damage, NAME_Melee, puff, true);
+	}
+
 	if (linetarget)
 	{
 		//S_StartSound(player->mo, sfx_stfhit);
 		// turn to face target
 		self->angle = R_PointToAngle2 (self->x,
 			self->y, linetarget->x, linetarget->y);
+
+		// [BC] If we're the server, tell clients to adjust the player's angle.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingAngleExact( player->mo );
 	}
 }
 
@@ -119,6 +138,14 @@ DEFINE_ACTION_FUNCTION(AActor, A_FireGoldWandPL1)
 		if (!weapon->DepleteAmmo (weapon->bAltFire))
 			return;
 	}
+
+	// [BC] If we're the client, just play the sound and get out.
+	if ( NETWORK_InClientMode() )
+	{
+		S_Sound( player->mo, CHAN_WEAPON, "weapons/wandhit", 1, ATTN_NORM );
+		return;
+	}
+
 	angle_t pitch = P_BulletSlope(self);
 	damage = 7+(pr_fgw()&7);
 	angle = self->angle;
@@ -127,7 +154,33 @@ DEFINE_ACTION_FUNCTION(AActor, A_FireGoldWandPL1)
 		angle += pr_fgw.Random2() << 18;
 	}
 	P_LineAttack (self, angle, PLAYERMISSILERANGE, pitch, damage, NAME_Hitscan, "GoldWandPuff1");
+
+	// [BC] Apply spread.
+	if ( player->cheats2 & CF2_SPREAD )
+	{
+		angle = self->angle;
+		if (player->refire)
+		{
+			angle += pr_fgw.Random2() << 18;
+		}
+		P_LineAttack(self, angle + ( ANGLE_45 / 3 ), PLAYERMISSILERANGE, pitch, damage, NAME_Hitscan, "GoldWandPuff1");
+
+		angle = self->angle;
+		if (player->refire)
+		{
+			angle += pr_fgw.Random2() << 18;
+		}
+		P_LineAttack(self, angle - ( ANGLE_45 / 3 ), PLAYERMISSILERANGE, pitch, damage, NAME_Hitscan, "GoldWandPuff1");
+	}
+
+	// [BB] If the player hit a player with his attack, potentially give him a medal.
+	PLAYER_CheckStruckPlayer ( self );
+
 	S_Sound (self, CHAN_WEAPON, "weapons/wandhit", 1, ATTN_NORM);
+
+	// [BC] If we're the server, tell clients that a weapon is being fired.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_WeaponSound( ULONG( player - players ), "weapons/wandhit", ULONG( player - players ), SVCF_SKIPTHISCLIENT );
 }
 
 //----------------------------------------------------------------------------
@@ -143,6 +196,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_FireGoldWandPL2)
 	int damage;
 	fixed_t velz;
 	player_t *player;
+	AActor	*pMissile;
 
 	if (NULL == (player = self->player))
 	{
@@ -155,19 +209,74 @@ DEFINE_ACTION_FUNCTION(AActor, A_FireGoldWandPL2)
 		if (!weapon->DepleteAmmo (weapon->bAltFire))
 			return;
 	}
+
+	// [BC] If we're the client, just play the sound and get out.
+	if ( NETWORK_InClientMode() )
+	{
+		S_Sound( player->mo, CHAN_WEAPON, "weapons/wandhit", 1, ATTN_NORM );
+		return;
+	}
+
 	angle_t pitch = P_BulletSlope(self);
 	velz = FixedMul (GetDefaultByName("GoldWandFX2")->Speed,
 		finetangent[FINEANGLES/4-((signed)pitch>>ANGLETOFINESHIFT)]);
-	P_SpawnMissileAngle (self, PClass::FindClass("GoldWandFX2"), self->angle-(ANG45/8), velz);
-	P_SpawnMissileAngle (self, PClass::FindClass("GoldWandFX2"), self->angle+(ANG45/8), velz);
+	pMissile = P_SpawnMissileAngle (self, PClass::FindClass("GoldWandFX2"), self->angle-(ANG45/8), velz);
+	if ( pMissile && NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SpawnMissileExact( pMissile );
+	pMissile = P_SpawnMissileAngle (self, PClass::FindClass("GoldWandFX2"), self->angle+(ANG45/8), velz);
+	if ( pMissile && NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SpawnMissileExact( pMissile );
+
 	angle = self->angle-(ANG45/8);
+
 	for(i = 0; i < 5; i++)
 	{
 		damage = 1+(pr_fgw2()&7);
-		P_LineAttack (self, angle, PLAYERMISSILERANGE, pitch, damage, NAME_Hitscan, "GoldWandPuff2");
+		P_LineAttack (self, angle, PLAYERMISSILERANGE, pitch, damage, NAME_None, "GoldWandPuff2");
 		angle += ((ANG45/8)*2)/4;
 	}
+
+	// [BC] Apply spread.
+	if ( player->cheats2 & CF2_SPREAD )
+	{
+		pMissile = P_SpawnMissileAngle( self, PClass::FindClass("GoldWandFX2"), self->angle - ( ANG45 / 8 ) + ( ANGLE_45 / 3 ), velz );
+		if ( pMissile && NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SpawnMissileExact( pMissile );
+
+		pMissile = P_SpawnMissileAngle( self, PClass::FindClass("GoldWandFX2"), self->angle + ( ANG45 / 8 ) + ( ANGLE_45 / 3 ), velz );
+		if ( pMissile && NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SpawnMissileExact( pMissile );
+
+		angle = self->angle - ( ANG45 / 8 ) + ( ANGLE_45 / 3 );
+		for ( i = 0; i < 5; i++ )
+		{
+			damage = 1+(pr_fgw2()&7);
+			P_LineAttack (self, angle, PLAYERMISSILERANGE, pitch, damage, NAME_None, "GoldWandPuff2");
+			angle += ((ANG45/8)*2)/4;
+		}
+
+		pMissile = P_SpawnMissileAngle( self, PClass::FindClass("GoldWandFX2"), self->angle - ( ANG45 / 8 ) - ( ANGLE_45 / 3 ), velz );
+		if ( pMissile && NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SpawnMissileExact( pMissile );
+
+		pMissile = P_SpawnMissileAngle( self, PClass::FindClass("GoldWandFX2"), self->angle + ( ANG45 / 8 ) - ( ANGLE_45 / 3 ), velz );
+		if ( pMissile && NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SpawnMissileExact( pMissile );
+
+		angle = self->angle - ( ANG45 / 8 ) - ( ANGLE_45 / 3 );
+		for ( i = 0; i < 5; i++ )
+		{
+			damage = 1+(pr_fgw2()&7);
+			P_LineAttack (self, angle, PLAYERMISSILERANGE, pitch, damage, NAME_Hitscan, "GoldWandPuff2");
+			angle += ((ANG45/8)*2)/4;
+		}
+	}
 	S_Sound (self, CHAN_WEAPON, "weapons/wandhit", 1, ATTN_NORM);
+
+
+	// [BC] If we're the server, tell clients that a weapon is being fired.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_WeaponSound( ULONG( player - players ), "weapons/wandhit", ULONG( player - players ), SVCF_SKIPTHISCLIENT );
 }
 
 //----------------------------------------------------------------------------
@@ -191,9 +300,27 @@ DEFINE_ACTION_FUNCTION(AActor, A_FireCrossbowPL1)
 		if (!weapon->DepleteAmmo (weapon->bAltFire))
 			return;
 	}
+	// [BC] Weapons are handled by the server.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	P_SpawnPlayerMissile (self, PClass::FindClass("CrossbowFX1"));
 	P_SpawnPlayerMissile (self, PClass::FindClass("CrossbowFX3"), self->angle-(ANG45/10));
 	P_SpawnPlayerMissile (self, PClass::FindClass("CrossbowFX3"), self->angle+(ANG45/10));
+
+	// [BC] Apply spread.
+	if ( player->cheats2 & CF2_SPREAD )
+	{
+		P_SpawnPlayerMissile (self, PClass::FindClass("CrossbowFX1"), self->angle + ( ANGLE_45 / 3 ));
+		P_SpawnPlayerMissile (self, PClass::FindClass("CrossbowFX3"), self->angle-(ANG45/10) + ( ANGLE_45 / 3 ));
+		P_SpawnPlayerMissile (self, PClass::FindClass("CrossbowFX3"), self->angle+(ANG45/10) + ( ANGLE_45 / 3 ));
+
+		P_SpawnPlayerMissile (self, PClass::FindClass("CrossbowFX1"), self->angle - ( ANGLE_45 / 3 ));
+		P_SpawnPlayerMissile (self, PClass::FindClass("CrossbowFX3"), self->angle-(ANG45/10) - ( ANGLE_45 / 3 ));
+		P_SpawnPlayerMissile (self, PClass::FindClass("CrossbowFX3"), self->angle+(ANG45/10) - ( ANGLE_45 / 3 ));
+	}
 }
 
 //----------------------------------------------------------------------------
@@ -217,11 +344,34 @@ DEFINE_ACTION_FUNCTION(AActor, A_FireCrossbowPL2)
 		if (!weapon->DepleteAmmo (weapon->bAltFire))
 			return;
 	}
+
+	// [BC] Weapons are handled by the server.
+	if ( NETWORK_InClientMode() )
+	{		
+		return;
+	}
+
 	P_SpawnPlayerMissile (self, PClass::FindClass("CrossbowFX2"));
 	P_SpawnPlayerMissile (self, PClass::FindClass("CrossbowFX2"), self->angle-(ANG45/10));
 	P_SpawnPlayerMissile (self, PClass::FindClass("CrossbowFX2"), self->angle+(ANG45/10));
 	P_SpawnPlayerMissile (self, PClass::FindClass("CrossbowFX3"), self->angle-(ANG45/5));
 	P_SpawnPlayerMissile (self, PClass::FindClass("CrossbowFX3"), self->angle+(ANG45/5));
+
+	// [BC] Apply spread.
+	if ( player->cheats2 & CF2_SPREAD )
+	{
+		P_SpawnPlayerMissile (self, PClass::FindClass("CrossbowFX2"), self->angle + ( ANGLE_45 / 3 ));
+		P_SpawnPlayerMissile (self, PClass::FindClass("CrossbowFX2"), self->angle-(ANG45/10) + ( ANGLE_45 / 3 ));
+		P_SpawnPlayerMissile (self, PClass::FindClass("CrossbowFX2"), self->angle+(ANG45/10) + ( ANGLE_45 / 3 ));
+		P_SpawnPlayerMissile (self, PClass::FindClass("CrossbowFX3"), self->angle-(ANG45/5) + ( ANGLE_45 / 3 ));
+		P_SpawnPlayerMissile (self, PClass::FindClass("CrossbowFX3"), self->angle+(ANG45/5) + ( ANGLE_45 / 3 ));
+
+		P_SpawnPlayerMissile (self, PClass::FindClass("CrossbowFX2"), self->angle - ( ANGLE_45 / 3 ));
+		P_SpawnPlayerMissile (self, PClass::FindClass("CrossbowFX2"), self->angle-(ANG45/10) - ( ANGLE_45 / 3 ));
+		P_SpawnPlayerMissile (self, PClass::FindClass("CrossbowFX2"), self->angle+(ANG45/10) - ( ANGLE_45 / 3 ));
+		P_SpawnPlayerMissile (self, PClass::FindClass("CrossbowFX3"), self->angle-(ANG45/5) - ( ANGLE_45 / 3 ));
+		P_SpawnPlayerMissile (self, PClass::FindClass("CrossbowFX3"), self->angle+(ANG45/5) - ( ANGLE_45 / 3 ));
+	}
 }
 
 //---------------------------------------------------------------------------
@@ -383,6 +533,13 @@ void FireMacePL1B (AActor *actor)
 		if (!weapon->DepleteAmmo (weapon->bAltFire))
 			return;
 	}
+
+	// [BC] Weapons are handled by the server.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	ball = Spawn("MaceFX2", actor->x, actor->y, actor->z + 28*FRACUNIT 
 		- actor->floorclip, ALLOW_REPLACE);
 	ball->velz = 2*FRACUNIT+/*((player->lookdir)<<(FRACBITS-5))*/
@@ -395,6 +552,58 @@ void FireMacePL1B (AActor *actor)
 	ball->velx = (actor->velx>>1) + FixedMul(ball->Speed, finecosine[angle]);
 	ball->vely = (actor->vely>>1) + FixedMul(ball->Speed, finesine[angle]);
 	S_Sound (ball, CHAN_BODY, "weapons/maceshoot", 1, ATTN_NORM);
+
+	// [BC] If we're the server, spawn the ball and play the sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		SERVERCOMMANDS_SpawnMissileExact( ball );
+		SERVERCOMMANDS_SoundActor( ball, CHAN_BODY, "weapons/maceshoot", 1, ATTN_NORM );
+	}
+
+	// [BC] Apply spread.
+	if ( player->cheats2 & CF2_SPREAD )
+	{
+		ball = Spawn("MaceFX2", actor->x, actor->y, actor->z + 28*FRACUNIT 
+			- actor->floorclip, ALLOW_REPLACE);
+		ball->velz = 2*FRACUNIT+/*((player->lookdir)<<(FRACBITS-5))*/
+			finetangent[FINEANGLES/4-(actor->pitch>>ANGLETOFINESHIFT)];
+		angle = actor->angle + ( ANGLE_45 / 3 );
+		ball->target = actor;
+		ball->angle = angle;
+		ball->z += 2*finetangent[FINEANGLES/4-(actor->pitch>>ANGLETOFINESHIFT)];
+		angle >>= ANGLETOFINESHIFT;
+		ball->velx = (actor->velx>>1)+FixedMul(ball->Speed, finecosine[angle]);
+		ball->vely = (actor->vely>>1)+FixedMul(ball->Speed, finesine[angle]);
+		S_Sound (ball, CHAN_BODY, "weapons/maceshoot", 1, ATTN_NORM);
+
+		// [BC] If we're the server, spawn the ball and play the sound.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			SERVERCOMMANDS_SpawnMissileExact( ball );
+			SERVERCOMMANDS_SoundActor( ball, CHAN_BODY, "weapons/maceshoot", 1, ATTN_NORM );
+		}
+
+		ball = Spawn("MaceFX2", actor->x, actor->y, actor->z + 28*FRACUNIT 
+			- actor->floorclip, ALLOW_REPLACE);
+		ball->velz = 2*FRACUNIT+/*((player->lookdir)<<(FRACBITS-5))*/
+			finetangent[FINEANGLES/4-(actor->pitch>>ANGLETOFINESHIFT)];
+		angle = actor->angle - ( ANGLE_45 / 3 );
+		ball->target = actor;
+		ball->angle = angle;
+		ball->z += 2*finetangent[FINEANGLES/4-(actor->pitch>>ANGLETOFINESHIFT)];
+		angle >>= ANGLETOFINESHIFT;
+		ball->velx = (actor->velx>>1)+FixedMul(ball->Speed, finecosine[angle]);
+		ball->vely = (actor->vely>>1)+FixedMul(ball->Speed, finesine[angle]);
+		S_Sound (ball, CHAN_BODY, "weapons/maceshoot", 1, ATTN_NORM);
+
+		// [BC] If we're the server, spawn the ball and play the sound.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			SERVERCOMMANDS_SpawnMissileExact( ball );
+			SERVERCOMMANDS_SoundActor( ball, CHAN_BODY, "weapons/maceshoot", 1, ATTN_NORM );
+		}
+	}
+
 	P_CheckMissileSpawn (ball, actor->radius);
 }
 
@@ -427,11 +636,36 @@ DEFINE_ACTION_FUNCTION(AActor, A_FireMacePL1)
 	}
 	player->psprites[ps_weapon].sx = ((pr_maceatk()&3)-2)*FRACUNIT;
 	player->psprites[ps_weapon].sy = WEAPONTOP+(pr_maceatk()&3)*FRACUNIT;
+
+	// [BC] Weapons are handled by the server.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	ball = P_SpawnPlayerMissile (self, PClass::FindClass("MaceFX1"),
 		self->angle+(((pr_maceatk()&7)-4)<<24));
 	if (ball)
 	{
 		ball->special1 = 16; // tics till dropoff
+	}
+
+	// [BC] Apply spread.
+	if ( player->cheats2 & CF2_SPREAD )
+	{
+		ball = P_SpawnPlayerMissile (self, PClass::FindClass("MaceFX1"),
+			self->angle+(((pr_maceatk()&7)-4)<<24) + ( ANGLE_45 / 3 ));
+		if (ball)
+		{
+			ball->special1 = 16; // tics till dropoff
+		}
+
+		ball = P_SpawnPlayerMissile (self, PClass::FindClass("MaceFX1"),
+			self->angle+(((pr_maceatk()&7)-4)<<24) - ( ANGLE_45 / 3 ));
+		if (ball)
+		{
+			ball->special1 = 16; // tics till dropoff
+		}
 	}
 }
 
@@ -443,6 +677,12 @@ DEFINE_ACTION_FUNCTION(AActor, A_FireMacePL1)
 
 DEFINE_ACTION_FUNCTION(AActor, A_MacePL1Check)
 {
+	// [BC] Let the server handle this.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (self->special1 == 0)
 	{
 		return;
@@ -469,6 +709,15 @@ DEFINE_ACTION_FUNCTION(AActor, A_MacePL1Check)
 	self->vely = (int)(self->vely * velscale);
 #endif
 	self->velz -= self->velz >> 1;
+
+	// [BC] If we're the server, tell clients to move the object.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		SERVERCOMMANDS_SetThingFlags( self, FLAGSET_FLAGS );
+		SERVERCOMMANDS_SetThingFlags( self, FLAGSET_FLAGS2 );
+		SERVERCOMMANDS_MoveThingExact( self, CM_X|CM_Y|CM_Z|CM_MOMX|CM_MOMY|CM_MOMZ );
+		SERVERCOMMANDS_SetThingGravity( self );
+	}
 }
 
 //----------------------------------------------------------------------------
@@ -479,11 +728,31 @@ DEFINE_ACTION_FUNCTION(AActor, A_MacePL1Check)
 
 DEFINE_ACTION_FUNCTION(AActor, A_MaceBallImpact)
 {
+	// [BC] Let the server handle this.
+	if ( NETWORK_InClientMode() )
+	{
+		// We need to make sure the ball doesn't temporary go into it's death frame.
+		if ( self->flags & MF_INBOUNCE )
+			self->SetState (self->SpawnState);
+
+		return;
+	}
+
 	if ((self->health != MAGIC_JUNK) && (self->flags & MF_INBOUNCE))
 	{ // Bounce
 		self->health = MAGIC_JUNK;
 		self->velz = (self->velz * 192) >> 8;
 		self->BounceFlags = BOUNCE_None;
+
+		// [BC] If we're the server, tell clients to move the object.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			SERVERCOMMANDS_SetThingFlags( self, FLAGSET_FLAGS2 );
+			SERVERCOMMANDS_SetThingState( self, STATE_SPAWN );
+			SERVERCOMMANDS_MoveThingExact( self, CM_X|CM_Y|CM_Z|CM_MOMX|CM_MOMY|CM_MOMZ );
+			SERVERCOMMANDS_SoundActor( self, CHAN_BODY, "weapons/macebounce", 1, ATTN_NORM );
+		}
+
 		self->SetState (self->SpawnState);
 		S_Sound (self, CHAN_BODY, "weapons/macebounce", 1, ATTN_NORM);
 	}
@@ -493,6 +762,16 @@ DEFINE_ACTION_FUNCTION(AActor, A_MaceBallImpact)
 		self->flags |= MF_NOGRAVITY;
 		self->gravity = FRACUNIT;
 		S_Sound (self, CHAN_BODY, "weapons/macehit", 1, ATTN_NORM);
+
+		// [BC] If we're the server, tell clients to move the object.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			SERVERCOMMANDS_SetThingFlags( self, FLAGSET_FLAGS );
+			SERVERCOMMANDS_SetThingFlags( self, FLAGSET_FLAGS2 );
+			SERVERCOMMANDS_MoveThingExact( self, CM_X|CM_Y|CM_Z|CM_MOMX|CM_MOMY|CM_MOMZ );
+			SERVERCOMMANDS_SetThingGravity( self );
+			SERVERCOMMANDS_SoundActor( self, CHAN_BODY, "weapons/macebounce", 1, ATTN_NORM );
+		}
 	}
 }
 
@@ -506,6 +785,31 @@ DEFINE_ACTION_FUNCTION(AActor, A_MaceBallImpact2)
 {
 	AActor *tiny;
 	angle_t angle;
+
+	// [BC] Let the server handle this.
+	if ( NETWORK_InClientMode() )
+	{
+		// We need to make sure the ball doesn't temporary go into it's death frame.
+		if ( self->flags & MF_INBOUNCE )
+		{
+			fixed_t floordist = self->z - self->floorz;
+			fixed_t ceildist = self->ceilingz - self->z;
+			fixed_t vel;
+
+			if (floordist <= ceildist)
+			{
+				vel = MulScale32 (self->velz, self->Sector->floorplane.c);
+			}
+			else
+			{
+				vel = MulScale32 (self->velz, self->Sector->ceilingplane.c);
+			}
+			if (vel >= 2)
+				self->SetState (self->SpawnState);
+		}
+
+		return;
+	}
 
 	if (self->flags & MF_INBOUNCE)
 	{
@@ -530,6 +834,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_MaceBallImpact2)
 		self->velz = (self->velz * 192) >> 8;
 		self->SetState (self->SpawnState);
 
+		// [BC] If we're the server, send the state change and move it.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_MoveThingExact( self, CM_X|CM_Y|CM_Z|CM_MOMX|CM_MOMY|CM_MOMZ );
+
 		tiny = Spawn("MaceFX3", self->x, self->y, self->z, ALLOW_REPLACE);
 		angle = self->angle+ANG90;
 		tiny->target = self->target;
@@ -538,6 +846,11 @@ DEFINE_ACTION_FUNCTION(AActor, A_MaceBallImpact2)
 		tiny->velx = (self->velx>>1) + FixedMul(self->velz-FRACUNIT, finecosine[angle]);
 		tiny->vely = (self->vely>>1) + FixedMul(self->velz-FRACUNIT, finesine[angle]);
 		tiny->velz = self->velz;
+
+		// [BC] If we're the server, spawn this missile.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SpawnMissileExact( tiny );
+
 		P_CheckMissileSpawn (tiny, self->radius);
 
 		tiny = Spawn("MaceFX3", self->x, self->y, self->z, ALLOW_REPLACE);
@@ -548,6 +861,11 @@ DEFINE_ACTION_FUNCTION(AActor, A_MaceBallImpact2)
 		tiny->velx = (self->velx>>1) + FixedMul(self->velz-FRACUNIT, finecosine[angle]);
 		tiny->vely = (self->vely>>1) + FixedMul(self->velz-FRACUNIT, finesine[angle]);
 		tiny->velz = self->velz;
+
+		// [BC] If we're the server, spawn this missile.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SpawnMissileExact( tiny );
+
 		P_CheckMissileSpawn (tiny, self->radius);
 	}
 	else
@@ -557,6 +875,16 @@ boom:
 		self->flags |= MF_NOGRAVITY;
 		self->BounceFlags = BOUNCE_None;
 		self->gravity = FRACUNIT;
+
+		// [BC] If we're the server, tell clients to move the object.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			SERVERCOMMANDS_SetThingState( self, STATE_DEATH );
+			SERVERCOMMANDS_MoveThingExact( self, CM_X|CM_Y|CM_Z|CM_MOMX|CM_MOMY|CM_MOMZ );
+			SERVERCOMMANDS_SetThingFlags( self, FLAGSET_FLAGS );
+			SERVERCOMMANDS_SetThingFlags( self, FLAGSET_FLAGS2 );
+			SERVERCOMMANDS_SetThingGravity( self );
+		}
 	}
 }
 
@@ -583,6 +911,14 @@ DEFINE_ACTION_FUNCTION(AActor, A_FireMacePL2)
 		if (!weapon->DepleteAmmo (weapon->bAltFire))
 			return;
 	}
+
+	// [BC] If we're the client, play the sound and get out.
+	if ( NETWORK_InClientMode() )
+	{
+		S_Sound( player->mo, CHAN_WEAPON, "weapons/maceshoot", 1, ATTN_NORM );
+		return;
+	}
+
 	mo = P_SpawnPlayerMissile (self, 0,0,0, RUNTIME_CLASS(AMaceFX4), self->angle, &linetarget);
 	if (mo)
 	{
@@ -596,6 +932,50 @@ DEFINE_ACTION_FUNCTION(AActor, A_FireMacePL2)
 		}
 	}
 	S_Sound (self, CHAN_WEAPON, "weapons/maceshoot", 1, ATTN_NORM);
+
+	// [BC] If we're the server, play the sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		SERVERCOMMANDS_MoveThingExact( mo, CM_X|CM_Y|CM_Z|CM_MOMX|CM_MOMY|CM_MOMZ );
+		SERVERCOMMANDS_WeaponSound( ULONG( player - players ), "weapons/maceshoot", ULONG( player - players ), SVCF_SKIPTHISCLIENT );
+	}
+
+	if ( player->cheats2 & CF2_SPREAD )
+	{
+		mo = P_SpawnPlayerMissile (self, 0,0,0, RUNTIME_CLASS(AMaceFX4), self->angle + ( ANGLE_45 / 3 ), &linetarget);
+		if (mo)
+		{
+			mo->velx += self->velx;
+			mo->vely += self->vely;
+			mo->velz = 2*FRACUNIT+
+				clamp<fixed_t>(finetangent[FINEANGLES/4-(self->pitch>>ANGLETOFINESHIFT)], -5*FRACUNIT, 5*FRACUNIT);
+			if (linetarget)
+			{
+				mo->tracer = linetarget;
+			}
+
+			// [BC] If we're the server, play the sound.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_MoveThingExact( mo, CM_X|CM_Y|CM_Z|CM_MOMX|CM_MOMY|CM_MOMZ );
+		}
+
+		mo = P_SpawnPlayerMissile (self, 0,0,0, RUNTIME_CLASS(AMaceFX4), self->angle - ( ANGLE_45 / 3 ), &linetarget);
+		if (mo)
+		{
+			mo->velx += self->velx;
+			mo->vely += self->vely;
+			mo->velz = 2*FRACUNIT+
+				clamp<fixed_t>(finetangent[FINEANGLES/4-(self->pitch>>ANGLETOFINESHIFT)], -5*FRACUNIT, 5*FRACUNIT);
+			if (linetarget)
+			{
+				mo->tracer = linetarget;
+			}
+
+			// [BC] If we're the server, play the sound.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_MoveThingExact( mo, CM_X|CM_Y|CM_Z|CM_MOMX|CM_MOMY|CM_MOMZ );
+		}
+	}
 }
 
 //----------------------------------------------------------------------------
@@ -611,6 +991,31 @@ DEFINE_ACTION_FUNCTION(AActor, A_DeathBallImpact)
 	angle_t angle = 0;
 	bool newAngle;
 	AActor *linetarget;
+
+	// [BC] Let the server handle this.
+	if ( NETWORK_InClientMode() )
+	{
+		// We need to make sure the self doesn't temporary go into it's death frame.
+		if ( self->flags & MF_INBOUNCE )
+		{
+			fixed_t floordist = self->z - self->floorz;
+			fixed_t ceildist = self->ceilingz - self->z;
+			fixed_t vel;
+
+			if (floordist <= ceildist)
+			{
+				vel = MulScale32 (self->velz, self->Sector->floorplane.c);
+			}
+			else
+			{
+				vel = MulScale32 (self->velz, self->Sector->ceilingplane.c);
+			}
+			if (vel >= 2)
+				self->SetState (self->SpawnState);
+		}
+
+		return;
+	}
 
 	if ((self->z <= self->floorz) && P_HitFloor (self))
 	{ // Landed in some sort of liquid
@@ -678,6 +1083,13 @@ DEFINE_ACTION_FUNCTION(AActor, A_DeathBallImpact)
 		}
 		self->SetState (self->SpawnState);
 		S_Sound (self, CHAN_BODY, "weapons/macestop", 1, ATTN_NORM);
+
+		// [BC] If we're the server, send the state change and move it.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			SERVERCOMMANDS_MoveThingExact( self, CM_X|CM_Y|CM_Z|CM_MOMX|CM_MOMY|CM_MOMZ );
+			SERVERCOMMANDS_SoundActor( self, CHAN_BODY, "weapons/macestop", 1, ATTN_NORM );
+		}
 	}
 	else
 	{ // Explode
@@ -686,6 +1098,17 @@ boom:
 		self->flags |= MF_NOGRAVITY;
 		self->gravity = FRACUNIT;
 		S_Sound (self, CHAN_BODY, "weapons/maceexplode", 1, ATTN_NORM);
+
+		// [BC] If we're the server, do some stuff.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			SERVERCOMMANDS_SetThingState( self, STATE_DEATH );
+			SERVERCOMMANDS_MoveThing( self, CM_X|CM_Y|CM_Z|CM_MOMX|CM_MOMY|CM_MOMZ );
+			SERVERCOMMANDS_SetThingFlags( self, FLAGSET_FLAGS );
+			SERVERCOMMANDS_SetThingFlags( self, FLAGSET_FLAGS2 );
+			SERVERCOMMANDS_SetThingGravity( self );
+			SERVERCOMMANDS_SoundActor( self, CHAN_BODY, "weapons/maceexplode", 1, ATTN_NORM );
+		}
 	}
 }
 
@@ -777,6 +1200,13 @@ DEFINE_ACTION_FUNCTION(AActor, A_FireBlasterPL1)
 		if (!weapon->DepleteAmmo (weapon->bAltFire))
 			return;
 	}
+	// [BC] If we're the client, just play the sound and get out.
+	if ( NETWORK_InClientMode() )
+	{
+		S_Sound( player->mo, CHAN_WEAPON, "weapons/blastershoot", 1, ATTN_NORM );
+		return;
+	}
+
 	angle_t pitch = P_BulletSlope(self);
 	damage = pr_fb1.HitDice (4);
 	angle = self->angle;
@@ -785,7 +1215,22 @@ DEFINE_ACTION_FUNCTION(AActor, A_FireBlasterPL1)
 		angle += pr_fb1.Random2() << 18;
 	}
 	P_LineAttack (self, angle, PLAYERMISSILERANGE, pitch, damage, NAME_Hitscan, "BlasterPuff");
+
+	// [BC] Apply spread.
+	if ( player->cheats2 & CF2_SPREAD )
+	{
+		P_LineAttack( self, angle + ( ANGLE_45 / 3 ), PLAYERMISSILERANGE, pitch, damage, NAME_Hitscan, "BlasterPuff");
+		P_LineAttack( self, angle - ( ANGLE_45 / 3 ), PLAYERMISSILERANGE, pitch, damage, NAME_Hitscan, "BlasterPuff");
+	}
+
+	// [BB] If the player hit a player with his attack, potentially give him a medal.
+	PLAYER_CheckStruckPlayer ( self );
+
 	S_Sound (self, CHAN_WEAPON, "weapons/blastershoot", 1, ATTN_NORM);
+
+	// [BC] If we're the server, tell clients that a weapon is being fired.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_WeaponSound( ULONG( player - players ), "weapons/blastershoot", ULONG( player - players ), SVCF_SKIPTHISCLIENT );
 }
 
 //----------------------------------------------------------------------------
@@ -897,12 +1342,39 @@ DEFINE_ACTION_FUNCTION(AActor, A_FireSkullRodPL1)
 		if (!weapon->DepleteAmmo (weapon->bAltFire))
 			return;
 	}
+
+	// [BC] Weapons are handled by the server.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	mo = P_SpawnPlayerMissile (self, PClass::FindClass("HornRodFX1"));
 	// Randomize the first frame
 	if (mo && pr_fsr1() > 128)
 	{
 		mo->SetState (mo->state->GetNextState());
 	}
+
+
+	// [BC] Apply spread.
+	if ( player->cheats2 & CF2_SPREAD )
+	{
+		mo = P_SpawnPlayerMissile( self, PClass::FindClass("HornRodFX1"), self->angle + ( ANGLE_45 / 3 ));
+		// Randomize the first frame
+		if (mo && pr_fsr1() > 128)
+		{
+			mo->SetState (mo->state->GetNextState());
+		}
+
+		mo = P_SpawnPlayerMissile( self, PClass::FindClass("HornRodFX1"), self->angle - ( ANGLE_45 / 3 ));
+		// Randomize the first frame
+		if (mo && pr_fsr1() > 128)
+		{
+			mo->SetState (mo->state->GetNextState());
+		}
+	}
+
 }
 
 //----------------------------------------------------------------------------
@@ -930,6 +1402,13 @@ DEFINE_ACTION_FUNCTION(AActor, A_FireSkullRodPL2)
 		if (!weapon->DepleteAmmo (weapon->bAltFire))
 			return;
 	}
+
+	// [BC] Weapons are handled by the server.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	P_SpawnPlayerMissile (self, 0,0,0, RUNTIME_CLASS(AHornRodFX2), self->angle, &linetarget, &MissileActor);
 	// Use MissileActor instead of the return value from
 	// P_SpawnPlayerMissile because we need to give info to the mobj
@@ -937,11 +1416,70 @@ DEFINE_ACTION_FUNCTION(AActor, A_FireSkullRodPL2)
 	if (MissileActor != NULL)
 	{
 		MissileActor->special2 = (int)(player - players);
+
+		// [BB] Set the special, otherwise the translation of the rain spawned later will be wrong.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingSpecial2( MissileActor );
+
 		if (linetarget)
 		{
 			MissileActor->tracer = linetarget;
 		}
 		S_Sound (MissileActor, CHAN_WEAPON, "weapons/hornrodpowshoot", 1, ATTN_NORM);
+
+		// [BC] If we're the server, play this sound.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SoundActor( MissileActor, CHAN_WEAPON, "weapons/hornrodpowshoot", 1, ATTN_NORM );
+	}
+
+	// [BC] Apply spread.
+	if ( player->cheats2 & CF2_SPREAD )
+	{
+		P_SpawnPlayerMissile (self, 0,0,0, RUNTIME_CLASS(AHornRodFX2), self->angle + ( ANGLE_45 / 3 ), &linetarget, &MissileActor);
+		// Use MissileActor instead of the return value from
+		// P_SpawnPlayerMissile because we need to give info to the mobj
+		// even if it exploded immediately.
+		if (MissileActor != NULL)
+		{
+			MissileActor->special2 = (int)(player - players);
+
+			// [BB] Set the special, otherwise the translation of the rain spawned later will be wrong.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetThingSpecial2( MissileActor );
+
+			if (linetarget)
+			{
+				MissileActor->tracer = linetarget;
+			}
+			S_Sound (MissileActor, CHAN_WEAPON, "weapons/hornrodpowshoot", 1, ATTN_NORM);
+
+			// [BC] If we're the server, play this sound.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SoundActor( MissileActor, CHAN_WEAPON, "weapons/hornrodpowshoot", 1, ATTN_NORM );
+		}
+
+		P_SpawnPlayerMissile (self, 0,0,0, RUNTIME_CLASS(AHornRodFX2), self->angle - ( ANGLE_45 / 3 ), &linetarget, &MissileActor);
+		// Use MissileActor instead of the return value from
+		// P_SpawnPlayerMissile because we need to give info to the mobj
+		// even if it exploded immediately.
+		if (MissileActor != NULL)
+		{
+			MissileActor->special2 = (int)(player - players);
+
+			// [BB] Set the special, otherwise the translation of the rain spawned later will be wrong.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetThingSpecial2( MissileActor );
+
+			if (linetarget)
+			{
+				MissileActor->tracer = linetarget;
+			}
+			S_Sound (MissileActor, CHAN_WEAPON, "weapons/hornrodpowshoot", 1, ATTN_NORM);
+
+			// [BC] If we're the server, play this sound.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SoundActor( MissileActor, CHAN_WEAPON, "weapons/hornrodpowshoot", 1, ATTN_NORM );
+		}
 	}
 }
 
@@ -954,6 +1492,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_FireSkullRodPL2)
 DEFINE_ACTION_FUNCTION(AActor, A_AddPlayerRain)
 {
 	ARainTracker *tracker;
+
+	// [BC] Let the server spawn rain.
+	if ( NETWORK_InClientMode() )
+		return;
 
 	if (self->target == NULL || self->target->health <= 0)
 	{ // Shooter is dead or nonexistant
@@ -973,6 +1515,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_AddPlayerRain)
 				if (tracker->Rain1->health > 16)
 				{
 					tracker->Rain1->health = 16;
+
+					// [Dusk] Sync the new health value to clients.
+					if ( NETWORK_GetState() == NETSTATE_SERVER )
+						SERVERCOMMANDS_SetThingHealth( tracker->Rain1 );
 				}
 				tracker->Rain1 = NULL;
 			}
@@ -981,6 +1527,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_AddPlayerRain)
 				if (tracker->Rain2->health > 16)
 				{
 					tracker->Rain2->health = 16;
+
+					// [Dusk] Sync the new health value to clients.
+					if ( NETWORK_GetState() == NETSTATE_SERVER )
+						SERVERCOMMANDS_SetThingHealth( tracker->Rain2 );
 				}
 				tracker->Rain2 = NULL;
 			}
@@ -1058,7 +1608,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_SkullRodStorm)
 	if (moceiling >= 0)
 		mo->z = newz - mo->height;
 #endif
-	mo->Translation = multiplayer ?
+	mo->Translation = ( NETWORK_GetState( ) != NETSTATE_SINGLE ) ?
 		TRANSLATION(TRANSLATION_PlayersExtra,self->special2) : 0;
 	mo->target = self->target;
 	mo->velx = 1; // Force collision detection
@@ -1212,11 +1762,33 @@ DEFINE_ACTION_FUNCTION(AActor, A_FirePhoenixPL1)
 		if (!weapon->DepleteAmmo (weapon->bAltFire))
 			return;
 	}
+
+	// [BC] Weapons are handled by the server.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	P_SpawnPlayerMissile (self, RUNTIME_CLASS(APhoenixFX1));
+
+	// [BC] Apply spread.
+	if ( player->cheats2 & CF2_SPREAD )
+	{
+		P_SpawnPlayerMissile( self, RUNTIME_CLASS( APhoenixFX1 ), self->angle + ( ANGLE_45 / 3 ));
+		P_SpawnPlayerMissile( self, RUNTIME_CLASS( APhoenixFX1 ), self->angle - ( ANGLE_45 / 3 ));
+	}
+
 	angle = self->angle + ANG180;
 	angle >>= ANGLETOFINESHIFT;
 	self->velx += FixedMul (4*FRACUNIT, finecosine[angle]);
 	self->vely += FixedMul (4*FRACUNIT, finesine[angle]);
+
+	// [BC] Push the player back even more if they are using spread.
+	if ( player->cheats2 & CF2_SPREAD )
+	{
+		self->velx += FixedMul( 4*FRACUNIT, finecosine[angle] ) * 2;
+		self->vely += FixedMul( 4*FRACUNIT, finesine[angle] ) * 2;
+	}
 }
 
 //----------------------------------------------------------------------------
@@ -1298,6 +1870,16 @@ DEFINE_ACTION_FUNCTION(AActor, A_FirePhoenixPL2)
 		S_StopSound (self, CHAN_WEAPON);
 		return;
 	}
+	// [BC] If we're the client, just play the sound and get out.
+	if ( NETWORK_InClientMode() )
+	{
+		if (!player->refire || !S_IsActorPlayingSomething (player->mo, CHAN_WEAPON, -1))
+		{
+			S_Sound (player->mo, CHAN_WEAPON|CHAN_LOOP, soundid, 1, ATTN_NORM);
+		}
+		return;
+	}
+
 	angle = self->angle;
 	x = self->x + (pr_fp2.Random2() << 9);
 	y = self->y + (pr_fp2.Random2() << 9);
@@ -1314,6 +1896,39 @@ DEFINE_ACTION_FUNCTION(AActor, A_FirePhoenixPL2)
 	{
 		S_Sound (self, CHAN_WEAPON|CHAN_LOOP, soundid, 1, ATTN_NORM);
 	}	
+
+	// [BC] Apply spread.
+	if ( player->cheats2 & CF2_SPREAD )
+	{
+		angle = self->angle + ( ANGLE_45 / 3 );
+		mo = Spawn<APhoenixFX2> (x, y, z, ALLOW_REPLACE);
+		mo->target = self;
+		mo->angle = angle;
+		mo->velx = self->velx + FixedMul (mo->Speed, finecosine[angle>>ANGLETOFINESHIFT]);
+		mo->vely = self->vely + FixedMul (mo->Speed, finesine[angle>>ANGLETOFINESHIFT]);
+		mo->velz = FixedMul (mo->Speed, slope);
+		if (!player->refire || !S_IsActorPlayingSomething (self, CHAN_WEAPON, -1))
+		{
+			S_Sound (self, CHAN_WEAPON|CHAN_LOOP, soundid, 1, ATTN_NORM);
+		}
+
+		angle = self->angle - ( ANGLE_45 / 3 );
+		mo = Spawn<APhoenixFX2> (x, y, z, ALLOW_REPLACE);
+		mo->target = self;
+		mo->angle = angle;
+		mo->velx = self->velx + FixedMul (mo->Speed, finecosine[angle>>ANGLETOFINESHIFT]);
+		mo->vely = self->vely + FixedMul (mo->Speed, finesine[angle>>ANGLETOFINESHIFT]);
+		mo->velz = FixedMul (mo->Speed, slope);
+		if (!player->refire || !S_IsActorPlayingSomething (self, CHAN_WEAPON, -1))
+		{
+			S_Sound (self, CHAN_WEAPON|CHAN_LOOP, soundid, 1, ATTN_NORM);
+		}
+	}
+
+	// [BC] If we're the server, spawn this missile.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SpawnMissile( mo );
+
 	P_CheckMissileSpawn (mo, self->radius);
 }
 

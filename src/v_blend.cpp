@@ -54,7 +54,8 @@
 #include "farchive.h"
 #include "a_hexenglobal.h"
 
-
+// [BB]
+CVAR( Float, blood_fade_scalar, 0.5f, CVAR_ARCHIVE )
 
 // [RH] Amount of red flash for up to 114 damage points. Calculated by hand
 //		using a logarithmic scale and my trusty HP48G.
@@ -102,6 +103,10 @@ void V_AddPlayerBlend (player_t *CPlayer, float blend[4], float maxinvalpha, int
 {
 	int cnt;
 
+	// [BC] The player may not have a body between intermission-less maps.
+	if ( CPlayer->mo == NULL )
+		return;
+
 	// [RH] All powerups can affect the screen blending now
 	for (AInventory *item = CPlayer->mo->Inventory; item != NULL; item = item->Inventory)
 	{
@@ -127,6 +132,11 @@ void V_AddPlayerBlend (player_t *CPlayer, float blend[4], float maxinvalpha, int
 	{
 		cnt = DamageToAlpha[MIN (113, CPlayer->damagecount * painFlash.a / 255)];
 			
+		// [BC] Allow users to tone down the intensity of the blood on the screen.
+		// [CK] If the server wants us to force max blood on the screen, do not multiply it by our scalar
+		if (( zadmflags & ZADF_MAX_BLOOD_SCALAR ) == 0 )
+			cnt = (int)( cnt * blood_fade_scalar );
+
 		if (cnt)
 		{
 			if (cnt > maxpainblend)

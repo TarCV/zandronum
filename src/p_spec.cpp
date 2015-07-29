@@ -68,6 +68,24 @@
 #include "c_console.h"
 
 #include "r_data/r_interpolate.h"
+// [BB] New #includes.
+#include "announcer.h"
+#include "deathmatch.h"
+#include "duel.h"
+#include "network.h"
+#include "team.h"
+#include "lastmanstanding.h"
+#include "sbar.h"
+#include "sv_commands.h"
+#include "cl_demo.h"
+#include "cl_main.h"
+#include "possession.h"
+#include "cooperative.h"
+#include "survival.h"
+#include "gamemode.h"
+#include "doomdata.h"
+#include "invasion.h"
+#include "unlagged.h"
 
 static FRandom pr_playerinspecialsector ("PlayerInSpecialSector");
 void P_SetupPortals();
@@ -85,6 +103,12 @@ END_POINTERS
 IMPLEMENT_POINTY_CLASS (DPusher)
  DECLARE_POINTER (m_Source)
 END_POINTERS
+
+// [BB]
+void DPusher::UpdateToClient( ULONG ulClient )
+{
+	SERVERCOMMANDS_DoPusher( m_Type, m_pLine, m_Magnitude, m_Angle, m_Source, m_Affectee, ulClient, SVCF_ONLYTHISCLIENT );
+}
 
 inline FArchive &operator<< (FArchive &arc, DScroller::EScrollType &type)
 {
@@ -145,6 +169,15 @@ static void P_SpawnScrollers();
 static void P_SpawnFriction ();		// phares 3/16/98
 static void P_SpawnPushers ();		// phares 3/20/98
 
+CUSTOM_CVAR ( Int, sv_killallmonsters_percentage, 100, CVAR_SERVERINFO )
+{
+	if ( self > 100 )
+		self = 100;
+	else if ( self < 0 )
+		self = 0;
+}
+
+FPlayerStart *SelectRandomCooperativeSpot( ULONG ulPlayer );
 
 // [RH] Check dmflags for noexit and respond accordingly
 bool CheckIfExitIsGood (AActor *self, level_info_t *info)
@@ -157,17 +190,49 @@ bool CheckIfExitIsGood (AActor *self, level_info_t *info)
 
 	// We must kill all monsters to exit the level.
 	if ((dmflags2 & DF2_KILL_MONSTERS) && level.killed_monsters != level.total_monsters)
-		return false;
+	{
+		// [BB] Refine this: Instead of needing to kill all monsters, only sv_killallmonsters_percentage percent have to be killed.
+		float fPercentKilled = 100 * ( static_cast<float>(level.killed_monsters) / static_cast<float>(level.total_monsters) );
+		// [BB] Use the flag only in cooperative game modes, doesn't make much sense otherwise.
+		if ( ( fPercentKilled < sv_killallmonsters_percentage ) && ( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode( )) & GMF_COOPERATIVE ) )
+		{
+			// [BB] We have to do something when a player passes a line that should exit the level, so we just
+			// teleport the player back to one of the player starts.
+			if ( self->player && self->player->mo )
+			{
+				ULONG ulPlayer = static_cast<ULONG>( self->player - players );
+
+				// [BB] SelectRandomCooperativeSpot calls G_CheckSpot which removes the MF_SOLID flag, we need to work around this.
+				bool bSolidFlag = !!( players[ulPlayer].mo->flags & MF_SOLID );
+				FPlayerStart *pSpot = SelectRandomCooperativeSpot( ulPlayer );
+				if ( bSolidFlag )
+					players[ulPlayer].mo->flags |=  MF_SOLID;
+				P_Teleport (self, pSpot->x, pSpot->y, ONFLOORZ, ANG45 * (pSpot->angle/45), true, true, false);
+
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVER_PrintfPlayer( PRINT_HIGH, ulPlayer, "You need to kill %d percent of the monsters before exiting the level.\n", sv_killallmonsters_percentage.GetGenericRep( CVAR_Int ).Int );
+				else
+					Printf( "You need to kill %d percent of the monsters before exiting the level.\n", sv_killallmonsters_percentage.GetGenericRep( CVAR_Int ).Int );
+
+			}
+			return false;
+		}
+	}
 
 	// Is this a deathmatch game and we're not allowed to exit?
-	if ((deathmatch || alwaysapplydmflags) && (dmflags & DF_NO_EXIT))
+	// [BC] Teamgame, too.
+	// [BB] Ignore DF_NO_EXIT in lobby maps.
+	if ( ((deathmatch || teamgame || alwaysapplydmflags) && (dmflags & DF_NO_EXIT) && !( GAMEMODE_IsLobbyMap( ) ) )
+	     // [BB] Don't allow anybody to exit during the survival countdown.
+	     || (( survival ) && ( SURVIVAL_GetState( ) == SURVS_COUNTDOWN ))
+	   )
 	{
 		P_DamageMobj (self, self, self, TELEFRAG_DAMAGE, NAME_Exit);
 		return false;
 	}
 	// Is this a singleplayer game and the next map is part of the same hub and we're dead?
 	if (self->health <= 0 &&
-		!multiplayer &&
+		( NETWORK_GetState( ) == NETSTATE_SINGLE ) &&
 		info != NULL &&
 		info->cluster == level.cluster &&
 		(cluster = FindClusterInfo(level.cluster)) != NULL &&
@@ -175,9 +240,22 @@ bool CheckIfExitIsGood (AActor *self, level_info_t *info)
 	{
 		return false;
 	}
-	if (deathmatch)
+	// [BC] Instead of displaying this message in deathmatch only, display it any
+	// time we're not in single player mode (it can be annoying when people exit
+	// the map in cooperative, and it's nice to know who's doing it).
+//	if (deathmatch || teamgame)
+	if ( NETWORK_GetState( ) != NETSTATE_SINGLE )
 	{
-		Printf ("%s exited the level.\n", self->player->userinfo.GetName());
+		// [BB] It's possible, that a monster exits the level, so self->player can be 0.
+		// [TP] A voodoo doll may also exit.
+		if (( self->player != NULL ) && ( self->player->mo == self ))
+		{
+			// [K6/BB] The server should let the clients know who exited the level.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVER_Printf( PRINT_HIGH, "%s \\c-exited the level.\n", self->player->userinfo.GetName());
+			else
+				Printf ("%s \\c-exited the level.\n", self->player->userinfo.GetName());
+		}
 	}
 	return true;
 }
@@ -232,6 +310,10 @@ bool P_ActivateLine (line_t *line, AActor *mo, int side, int activationType)
 	INTBOOL buttonSuccess;
 	BYTE special;
 
+	// Special Zandronum checks
+	if ( GAMEMODE_IsHandledSpecial (mo, line->special) == false )
+		return false;
+
 	if (!P_TestActivateLine (line, mo, side, activationType))
 	{
 		return false;
@@ -241,10 +323,18 @@ bool P_ActivateLine (line_t *line, AActor *mo, int side, int activationType)
 	lineActivation = line->activation;
 	repeat = line->flags & ML_REPEAT_SPECIAL;
 	buttonSuccess = false;
+
+	// [BB] Activating the line may trigger a sector movement. For this it's crucial
+	// for the sectors to be in their actual (and not their unlagged) position.
+	UNLAGGED_SwapSectorUnlaggedStatus ( );
+
 	buttonSuccess = P_ExecuteSpecial(line->special,
 					line, mo, side == 1, line->args[0],
 					line->args[1], line->args[2],
 					line->args[3], line->args[4]);
+
+	// [BB] If the sectors were reconciled revert their actual to their reconciled positions now.
+	UNLAGGED_SwapSectorUnlaggedStatus ( );
 
 	special = line->special;
 	if (!repeat && buttonSuccess)
@@ -257,6 +347,10 @@ bool P_ActivateLine (line_t *line, AActor *mo, int side, int activationType)
 		if (activationType == SPAC_Use || activationType == SPAC_Impact)
 		{
 			P_ChangeSwitchTexture (line->sidedef[0], repeat, special);
+
+			// [BC] Tell the clients of the switch texture change.
+//			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+//				SERVERCOMMANDS_ToggleLine( line - lines, !!repeat );
 		}
 	}
 	// some old WADs use this method to create walls that change the texture when shot.
@@ -271,6 +365,10 @@ bool P_ActivateLine (line_t *line, AActor *mo, int side, int activationType)
 	{
 		P_ChangeSwitchTexture (line->sidedef[0], repeat, special);
 		line->special = 0;
+
+		// [BC] Tell the clients of the switch texture change.
+//		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+//			SERVERCOMMANDS_ToggleLine( line - lines, !!repeat );
 	}
 // end of changed code
 	if (developer && buttonSuccess)
@@ -417,18 +515,44 @@ bool P_TestActivateLine (line_t *line, AActor *mo, int side, int activationType)
 //
 void P_PlayerInSpecialSector (player_t *player, sector_t * sector)
 {
+	// [BB] Some restructuring compared to the ZDoom code to handle the client case.
+	bool bSectorWasNull = false;
 	if (sector == NULL)
 	{
-		// Falling, not all the way down yet?
 		sector = player->mo->Sector;
+		bSectorWasNull = true;
+	}
+	int special = sector->special & ~SECRET_MASK;
+
+	// [BC] Sector specials are server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		// Just do secret triggers, and get out.
+		if ( sector->special & SECRET_MASK )
+		{
+			if (player->mo->CheckLocalView (consoleplayer))
+			{
+				player->secretcount++;
+				level.found_secrets++;
+				sector->special &= ~SECRET_MASK;
+				C_MidPrint (SmallFont, secretmessage);
+				S_Sound (CHAN_AUTO, "misc/secret", 1, ATTN_NORM);
+			}
+		}
+
+		return;
+	}
+
+	// [BB] Replaced check.
+	if ( bSectorWasNull )
+	{
+		// Falling, not all the way down yet?
 		if (player->mo->z != sector->floorplane.ZatPoint (player->mo->x, player->mo->y)
 			&& !player->mo->waterlevel)
 		{
 			return;
 		}
 	}
-
-	int special = sector->special & ~SECRET_MASK;
 
 	// Has hit ground.
 	AInventory *ironfeet;
@@ -488,13 +612,27 @@ void P_PlayerInSpecialSector (player_t *player, sector_t * sector)
 			break;
 
 		case sDamage_Hellslime:
-			if (ironfeet == NULL)
+			// [Dusk] Don't touch the hazard count as the client
+			if (ironfeet == NULL && ( NETWORK_InClientMode() == false ))
+			{
 				player->hazardcount += 2;
+
+				// [Dusk] Update the hazard count
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_SetPlayerHazardCount ( static_cast<ULONG>(player - players) );
+			}
 			break;
 
 		case sDamage_SuperHellslime:
-			if (ironfeet == NULL)
+			// [Dusk] Don't touch the hazard count as the client
+			if (ironfeet == NULL && ( NETWORK_InClientMode() == false ))
+			{
 				player->hazardcount += 4;
+
+				// [Dusk] Update the hazard count
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_SetPlayerHazardCount ( static_cast<ULONG>(player - players) );
+			}
 			break;
 
 		case dDamage_End:
@@ -504,7 +642,9 @@ void P_PlayerInSpecialSector (player_t *player, sector_t * sector)
 			if (!(level.time & 0x1f))
 				P_DamageMobj (player->mo, NULL, NULL, 20, NAME_None);
 
-			if (player->health <= 10 && (!deathmatch || !(dmflags & DF_NO_EXIT)))
+			// [BB] Also do a CheckIfExitIsGood good check to properly handle DF_NO_EXIT.
+			// This check kills the player in case exiting is forbidden.
+			if (player->health <= 10 && CheckIfExitIsGood ( player->mo, NULL ) )
 				G_ExitLevel(0, false);
 			break;
 
@@ -708,7 +848,9 @@ void P_PlayerOnSpecialFlat (player_t *player, int floorType)
 			}
 		}
 
-		if (ironfeet == NULL)
+		// [Dusk] Don't apply TERRAIN damage on our own if we're the
+		// client. The server will tell us when we get hurt.
+		if (ironfeet == NULL && ( NETWORK_InClientMode() == false ) )
 		{
 			P_DamageMobj (player->mo, NULL, NULL, Terrains[floorType].DamageAmount,
 				Terrains[floorType].DamageMOD);
@@ -728,17 +870,102 @@ void P_PlayerOnSpecialFlat (player_t *player, int floorType)
 // P_UpdateSpecials
 // Animate planes, scroll walls, etc.
 //
-EXTERN_CVAR (Float, timelimit)
-
 void P_UpdateSpecials ()
 {
 	// LEVEL TIMER
-	if (deathmatch && timelimit)
+	// [BB] The gamemode decides whether the timelimit is used.
+	if ( GAMEMODE_IsTimelimitActive() )
 	{
-		if (level.maptime >= (int)(timelimit * TICRATE * 60))
+		// [RC] Play the five minute warning.
+		if ( level.time == (int)( ( timelimit - 5 ) * TICRATE * 60 ) ) // I'm amazed this works so well without a flag.
 		{
-			Printf ("%s\n", GStrings("TXT_TIMELIMIT"));
-			G_ExitLevel(0, false);
+			Printf("Five minutes remain!\n");
+			ANNOUNCER_PlayEntry( cl_announcer, "FiveMinuteWarning" );
+		}
+
+		// [RC] Play the one minute warning.
+		else if ( level.time == (int)( ( timelimit - 1 ) * TICRATE * 60 ) )
+		{
+			Printf("One minute remains!\n");
+			ANNOUNCER_PlayEntry( cl_announcer, "OneMinuteWarning" );
+		}
+
+		if ( NETWORK_InClientMode() == false )
+		{
+			if (( level.time >= (int)( timelimit * TICRATE * 60 )) && ( GAME_GetEndLevelDelay( ) == 0 ))
+			{
+				// Special game modes handle this differently.
+				if ( duel )
+					DUEL_TimeExpired( );
+				else if ( lastmanstanding || teamlms )
+					LASTMANSTANDING_TimeExpired( );
+				else if ( possession || teampossession )
+					POSSESSION_TimeExpired( );
+				else if ( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode() ) & GMF_PLAYERSONTEAMS )
+					TEAM_TimeExpired( );
+				else if ( cooperative )
+				{
+					if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+						SERVER_Printf( PRINT_HIGH, "%s\n", GStrings( "TXT_TIMELIMIT" ));
+					else
+						Printf( "%s\n", GStrings( "TXT_TIMELIMIT" ));
+
+					GAME_SetEndLevelDelay( 1 * TICRATE );
+				}
+				// End the level after one second.
+				else
+				{
+					ULONG				ulIdx;
+					LONG				lWinner;
+					LONG				lHighestFrags;
+					bool				bTied;
+					char				szString[64];
+
+					if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+						SERVER_Printf( PRINT_HIGH, "%s\n", GStrings( "TXT_TIMELIMIT" ));
+					else
+						Printf( "%s\n", GStrings( "TXT_TIMELIMIT" ));
+
+					GAME_SetEndLevelDelay( 1 * TICRATE );
+
+					// Determine the winner.
+					lWinner = -1;
+					lHighestFrags = INT_MIN;
+					bTied = false;
+					for ( ulIdx = 0; ulIdx < MAXPLAYERS; ulIdx++ )
+					{
+						// [BB] Spectators can't win.
+						if ( ( playeringame[ulIdx] == false ) || players[ulIdx].bSpectating )
+							continue;
+
+						if ( players[ulIdx].fragcount > lHighestFrags )
+						{
+							lWinner = ulIdx;
+							lHighestFrags = players[ulIdx].fragcount;
+							bTied = false;
+						}
+						else if ( players[ulIdx].fragcount == lHighestFrags )
+							bTied = true;
+					}
+
+					// [BB] In case there are no active players (only spectators), lWinner is -1.
+					if ( bTied || ( lWinner == -1 ) )
+						sprintf( szString, "\\cdDRAW GAME!" );
+					else
+					{
+						if (( NETWORK_GetState( ) == NETSTATE_SINGLE_MULTIPLAYER ) && ( players[consoleplayer].mo->CheckLocalView( lWinner )))
+							sprintf( szString, "YOU WIN!" );
+						else
+							sprintf( szString, "%s \\c-WINS!", players[lWinner].userinfo.GetName() );
+					}
+					V_ColorizeString( szString );
+
+					// Display "%s WINS!" HUD message.
+					GAMEMODE_DisplayStandardMessage ( szString, true );
+
+					GAME_SetEndLevelDelay( 5 * TICRATE );
+				}
+			}
 		}
 	}
 }
@@ -1176,31 +1403,56 @@ void P_SpawnSpecials (void)
 
 		case dLight_Flicker:
 			// FLICKERING LIGHTS
-			new DLightFlash (sector);
+			// [BC] In client mode, light specials may have been shut off by the server.
+			// Therefore, we can't spawn them on our end.
+			if ( NETWORK_InClientMode() == false )
+			{
+				new DLightFlash (sector);
+			}
 			sector->special &= 0xff00;
 			break;
 
 		case dLight_StrobeFast:
 			// STROBE FAST
-			new DStrobe (sector, STROBEBRIGHT, FASTDARK, false);
+			// [BC] In client mode, light specials may have been shut off by the server.
+			// Therefore, we can't spawn them on our end.
+			if ( NETWORK_InClientMode() == false )
+			{
+				new DStrobe (sector, STROBEBRIGHT, FASTDARK, false);
+			}
 			sector->special &= 0xff00;
 			break;
 			
 		case dLight_StrobeSlow:
 			// STROBE SLOW
-			new DStrobe (sector, STROBEBRIGHT, SLOWDARK, false);
+			// [BC] In client mode, light specials may have been shut off by the server.
+			// Therefore, we can't spawn them on our end.
+			if ( NETWORK_InClientMode() == false )
+			{
+				new DStrobe (sector, STROBEBRIGHT, SLOWDARK, false);
+			}
 			sector->special &= 0xff00;
 			break;
 
 		case dLight_Strobe_Hurt:
 		case sLight_Strobe_Hurt:
 			// STROBE FAST/DEATH SLIME
-			new DStrobe (sector, STROBEBRIGHT, FASTDARK, false);
+			// [BC] In client mode, light specials may have been shut off by the server.
+			// Therefore, we can't spawn them on our end.
+			if ( NETWORK_InClientMode() == false )
+			{
+				new DStrobe (sector, STROBEBRIGHT, FASTDARK, false);
+			}
 			break;
 
 		case dLight_Glow:
 			// GLOWING LIGHT
-			new DGlow (sector);
+			// [BC] In client mode, light specials may have been shut off by the server.
+			// Therefore, we can't spawn them on our end.
+			if ( NETWORK_InClientMode() == false )
+			{
+				new DGlow (sector);
+			}
 			sector->special &= 0xff00;
 			break;
 			
@@ -1211,13 +1463,21 @@ void P_SpawnSpecials (void)
 			
 		case dLight_StrobeSlowSync:
 			// SYNC STROBE SLOW
-			new DStrobe (sector, STROBEBRIGHT, SLOWDARK, true);
+			// [BC] In client mode, light specials may have been shut off by the server.
+			// Therefore, we can't spawn them on our end.
+			if ( NETWORK_InClientMode() == false )
+			{
+				new DStrobe (sector, STROBEBRIGHT, SLOWDARK, true);
+			}
 			sector->special &= 0xff00;
 			break;
 
 		case dLight_StrobeFastSync:
 			// SYNC STROBE FAST
-			new DStrobe (sector, STROBEBRIGHT, FASTDARK, true);
+			// [BC] In client mode, light specials may have been shut off by the server.
+			// Therefore, we can't spawn them on our end.
+			if ( NETWORK_InClientMode() == false )
+				new DStrobe (sector, STROBEBRIGHT, FASTDARK, true);
 			sector->special &= 0xff00;
 			break;
 
@@ -1228,24 +1488,49 @@ void P_SpawnSpecials (void)
 			
 		case dLight_FireFlicker:
 			// fire flickering
-			new DFireFlicker (sector);
+			// [BC] In client mode, light specials may have been shut off by the server.
+			// Therefore, we can't spawn them on our end.
+			if ( NETWORK_InClientMode() == false )
+			{
+				new DFireFlicker (sector);
+			}
 			sector->special &= 0xff00;
 			break;
 
 		case dFriction_Low:
-			sector->friction = FRICTION_LOW;
-			sector->movefactor = 0x269;
+			// [BC] In client mode, let the server tell us about sectors' friction level.
+			if ( NETWORK_InClientMode() == false )
+			{
+				sector->friction = FRICTION_LOW;
+				sector->movefactor = 0x269;
+			}
 			sector->special &= 0xff00;
-			sector->special |= FRICTION_MASK;
+			// [BC] In client mode, let the server tell us about sectors' friction level.
+			if ( NETWORK_InClientMode() == false )
+			{
+				sector->special |= FRICTION_MASK;
+			}
 			break;
 
 		  // [RH] Hexen-like phased lighting
 		case LightSequenceStart:
-			new DPhased (sector);
+
+			// [BC] In client mode, light specials may have been shut off by the server.
+			// Therefore, we can't spawn them on our end.
+			if ( NETWORK_InClientMode() == false )
+			{
+				new DPhased (sector);
+			}
 			break;
 
 		case Light_Phased:
-			new DPhased (sector, 48, 63 - (sector->lightlevel & 63));
+
+			// [BC] In client mode, light specials may have been shut off by the server.
+			// Therefore, we can't spawn them on our end.
+			if ( NETWORK_InClientMode() == false )
+			{
+				new DPhased (sector, 48, 63 - (sector->lightlevel & 63));
+			}
 			break;
 
 		case Sky2:
@@ -1253,6 +1538,13 @@ void P_SpawnSpecials (void)
 			break;
 
 		case dScroll_EastLavaDamage:
+
+			// [BC] Damage is server-side.
+			if ( NETWORK_InClientMode() )
+			{
+				break;
+			}
+
 			new DStrobe (sector, STROBEBRIGHT, FASTDARK, false);
 			new DScroller (DScroller::sc_floor, (-FRACUNIT/2)<<3,
 				0, -1, int(sector-sectors), 0);
@@ -1264,6 +1556,13 @@ void P_SpawnSpecials (void)
 			break;
 
 		default:
+
+			// [BC] Don't run any other specials in client mode.
+			if ( NETWORK_InClientMode() )
+			{
+				break;
+			}
+
 			if ((sector->special & 0xff) >= Scroll_North_Slow &&
 				(sector->special & 0xff) <= Scroll_SouthWest_Fast)
 			{ // Hexen scroll special
@@ -1395,6 +1694,13 @@ void P_SpawnSpecials (void)
 			switch (lines[i].args[1])
 			{
 			case Init_Gravity:
+
+				// [BC] The server will give us gravity updates.
+				if ( NETWORK_InClientMode() )
+				{
+					break;
+				}
+
 				{
 				float grav = ((float)P_AproxDistance (lines[i].dx, lines[i].dy)) / (FRACUNIT * 100.0f);
 				for (s = -1; (s = P_FindSectorFromTag(lines[i].args[0],s)) >= 0;)
@@ -1406,6 +1712,13 @@ void P_SpawnSpecials (void)
 			// handled in P_LoadSideDefs2()
 
 			case Init_Damage:
+
+				// [BC] Damage is server-side.
+				if ( NETWORK_InClientMode() )
+				{
+					break;
+				}
+
 				{
 					int damage = P_AproxDistance (lines[i].dx, lines[i].dy) >> FRACBITS;
 					for (s = -1; (s = P_FindSectorFromTag(lines[i].args[0],s)) >= 0;)
@@ -1438,8 +1751,53 @@ void P_SpawnSpecials (void)
 			break;
 		}
 	}
+
+	// [BC] Save these values. If they change, and a client connects, send
+	// him the new values.
+	for ( i = 0; i < numsectors; i++ )
+	{
+		sectors[i].SavedLightLevel = sectors[i].lightlevel;
+		sectors[i].SavedCeilingPic = sectors[i].GetTexture(sector_t::ceiling);
+		sectors[i].SavedFloorPic = sectors[i].GetTexture(sector_t::floor);
+		sectors[i].SavedCeilingPlane = sectors[i].ceilingplane;
+		sectors[i].SavedFloorPlane = sectors[i].floorplane;
+		sectors[i].SavedCeilingTexZ = sectors[i].GetPlaneTexZ(sector_t::ceiling);
+		sectors[i].SavedFloorTexZ = sectors[i].GetPlaneTexZ(sector_t::floor);
+		sectors[i].SavedColorMap = sectors[i].ColorMap;
+		sectors[i].SavedFloorXOffset = sectors[i].GetXOffset(sector_t::floor);
+		sectors[i].SavedFloorYOffset = sectors[i].GetYOffset(sector_t::floor,false);
+		sectors[i].SavedCeilingXOffset = sectors[i].GetXOffset(sector_t::ceiling);
+		sectors[i].SavedCeilingYOffset = sectors[i].GetYOffset(sector_t::ceiling,false);
+		sectors[i].SavedFloorXScale = sectors[i].GetXScale(sector_t::floor);
+		sectors[i].SavedFloorYScale = sectors[i].GetYScale(sector_t::floor);
+		sectors[i].SavedCeilingXScale = sectors[i].GetXScale(sector_t::ceiling);
+		sectors[i].SavedCeilingYScale = sectors[i].GetYScale(sector_t::ceiling);
+		sectors[i].SavedFloorAngle = sectors[i].GetAngle(sector_t::floor,false);
+		sectors[i].SavedCeilingAngle = sectors[i].GetAngle(sector_t::ceiling,false);
+		sectors[i].SavedBaseFloorAngle = sectors[i].planes[sector_t::floor].xform.base_angle;
+		sectors[i].SavedBaseFloorYOffset = sectors[i].planes[sector_t::floor].xform.base_yoffs;
+		sectors[i].SavedBaseCeilingAngle = sectors[i].planes[sector_t::ceiling].xform.base_angle;
+		sectors[i].SavedBaseCeilingYOffset = sectors[i].planes[sector_t::ceiling].xform.base_yoffs;
+		sectors[i].SavedFriction = sectors[i].friction;
+		sectors[i].SavedMoveFactor = sectors[i].movefactor;
+		sectors[i].SavedSpecial = sectors[i].special;
+		sectors[i].SavedDamage = sectors[i].damage;
+		sectors[i].SavedMOD = sectors[i].mod;
+		sectors[i].SavedCeilingReflect = sectors[i].reflect[sector_t::ceiling];
+		sectors[i].SavedFloorReflect = sectors[i].reflect[sector_t::floor];
+	}
+
 	// [RH] Start running any open scripts on this map
-	FBehavior::StaticStartTypedScripts (SCRIPT_Open, NULL, false);
+	// [BC] Clients don't run scripts.
+	// [BB] Clients only run the client side open scripts.
+	if ( NETWORK_InClientMode() == false )
+	{
+		FBehavior::StaticStartTypedScripts (SCRIPT_Open, NULL, false);
+	}
+	else
+	{
+		FBehavior::StaticStartTypedScripts (SCRIPT_Open, NULL, false, 0, false, true);
+	}
 }
 
 // killough 2/28/98:
@@ -1546,6 +1904,23 @@ void DScroller::Tick ()
 
 		case sc_carry_ceiling:       // to be added later
 			break;
+	}
+}
+
+//*****************************************************************************
+//
+void DScroller::UpdateToClient( ULONG ulClient )
+{
+	switch ( m_Type )
+	{
+	case sc_side:
+	case sc_floor:
+	case sc_carry:
+	case sc_ceiling:
+	case sc_carry_ceiling:
+
+		SERVERCOMMANDS_DoScroller( m_Type, m_dx, m_dy, m_Affectee, ulClient, SVCF_ONLYTHISCLIENT );
+		break;
 	}
 }
 
@@ -1770,6 +2145,11 @@ static void P_SpawnScrollers(void)
 			register int s;
 
 		case Scroll_Ceiling:
+
+			// [BC] The server will update these for us.
+			if ( NETWORK_InClientMode() )
+				break;
+
 			for (s=-1; (s = P_FindSectorFromTag (l->args[0],s)) >= 0;)
 			{
 				new DScroller (DScroller::sc_ceiling, -dx, dy, control, s, accel);
@@ -1786,6 +2166,11 @@ static void P_SpawnScrollers(void)
 			break;
 
 		case Scroll_Floor:
+
+			// [BC] The server will update these for us.
+			if ( NETWORK_InClientMode() )
+				break;
+
 			if (l->args[2] != 1)
 			{ // scroll the floor texture
 				for (s=-1; (s = P_FindSectorFromTag (l->args[0],s)) >= 0;)
@@ -1824,12 +2209,22 @@ static void P_SpawnScrollers(void)
 		// killough 3/1/98: scroll wall according to linedef
 		// (same direction and speed as scrolling floors)
 		case Scroll_Texture_Model:
+
+			// [WS] The server will update these for us.
+			if ( NETWORK_InClientMode() )
+				break;
+
 			for (s=-1; (s = P_FindLineFromID (l->args[0],s)) >= 0;)
 				if (s != i)
 					new DScroller (dx, dy, lines+s, control, accel);
 			break;
 
 		case Scroll_Texture_Offsets:
+
+			// [WS] The server will update these for us.
+			if ( NETWORK_InClientMode() )
+				break;
+
 			// killough 3/2/98: scroll according to sidedef offsets
 			s = int(lines[i].sidedef[0] - sides);
 			new DScroller (DScroller::sc_side, -sides[s].GetTextureXOffset(side_t::mid),
@@ -1837,6 +2232,11 @@ static void P_SpawnScrollers(void)
 			break;
 
 		case Scroll_Texture_Left:
+
+			// [WS] The server will update these for us.
+			if ( NETWORK_InClientMode() )
+				break;
+
 			l->special = special;	// Restore the special, for compat_useblocking's benefit.
 			s = int(lines[i].sidedef[0] - sides);
 			new DScroller (DScroller::sc_side, l->args[0] * (FRACUNIT/64), 0,
@@ -1844,6 +2244,11 @@ static void P_SpawnScrollers(void)
 			break;
 
 		case Scroll_Texture_Right:
+
+			// [WS] The server will update these for us.
+			if ( NETWORK_InClientMode() )
+				break;
+
 			l->special = special;
 			s = int(lines[i].sidedef[0] - sides);
 			new DScroller (DScroller::sc_side, l->args[0] * (-FRACUNIT/64), 0,
@@ -1851,6 +2256,11 @@ static void P_SpawnScrollers(void)
 			break;
 
 		case Scroll_Texture_Up:
+
+			// [WS] The server will update these for us.
+			if ( NETWORK_InClientMode() )
+				break;
+
 			l->special = special;
 			s = int(lines[i].sidedef[0] - sides);
 			new DScroller (DScroller::sc_side, 0, l->args[0] * (FRACUNIT/64),
@@ -1858,6 +2268,11 @@ static void P_SpawnScrollers(void)
 			break;
 
 		case Scroll_Texture_Down:
+
+			// [WS] The server will update these for us.
+			if ( NETWORK_InClientMode() )
+				break;
+
 			l->special = special;
 			s = int(lines[i].sidedef[0] - sides);
 			new DScroller (DScroller::sc_side, 0, l->args[0] * (-FRACUNIT/64),
@@ -1865,6 +2280,11 @@ static void P_SpawnScrollers(void)
 			break;
 
 		case Scroll_Texture_Both:
+
+			// [WS] The server will update these for us.
+			if ( NETWORK_InClientMode() )
+				break;
+
 			s = int(lines[i].sidedef[0] - sides);
 			if (l->args[0] == 0) {
 				dx = (l->args[1] - l->args[2]) * (FRACUNIT/64);
@@ -1940,6 +2360,13 @@ static void P_SpawnFriction(void)
 {
 	int i;
 	line_t *l = lines;
+
+	// [BC] Don't do this in client mode, because the friction for the sector could
+	// have changed at some point on the server end.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
 
 	for (i = 0 ; i < numlines ; i++,l++)
 	{
@@ -2019,6 +2446,10 @@ void P_SetSectorFriction (int tag, int amount, bool alterFlag)
 			{
 				sectors[s].special |= FRICTION_MASK;
 			}
+
+			// [BC] If we're the server, update clients about this friction change.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetSectorFriction( s );
 		}
 	}
 }
@@ -2082,6 +2513,10 @@ void P_SetSectorFriction (int tag, int amount, bool alterFlag)
 DPusher::DPusher (DPusher::EPusher type, line_t *l, int magnitude, int angle,
 				  AActor *source, int affectee)
 {
+	// [BB] Save angle and line. This makes it easier to inform the clients about this pusher.
+	m_pLine = l;
+	m_Angle = angle;
+
 	m_Source = source;
 	m_Type = type;
 	if (l)
@@ -2165,6 +2600,14 @@ void DPusher::Tick ()
 
 		while ((thing = it.Next()))
 		{
+			// [BB] While predicting, only handle the body of the predicted player.
+			if ( CLIENT_PREDICT_IsPredicting() && ( ( thing->player == false ) || ( static_cast<int>( thing->player - players ) != consoleplayer ) ) )
+				continue;
+
+			// [BB] Don't affect spectators.
+			if ( thing->player && thing->player->bSpectating )
+				continue;
+
 			// Normal ZDoom is based only on the WINDTHRUST flag, with the noclip cheat as an exemption.
 			bool pusharound = ((thing->flags2 & MF2_WINDTHRUST) && !(thing->flags & MF_NOCLIP));
 					
@@ -2206,6 +2649,14 @@ void DPusher::Tick ()
 	{
 		thing = node->m_thing;
 		if (!(thing->flags2 & MF2_WINDTHRUST) || (thing->flags & MF_NOCLIP))
+			continue;
+
+		// [BB] While predicting, only handle the body of the predicted player.
+		if ( CLIENT_PREDICT_IsPredicting() && ( ( thing->player == false ) || ( static_cast<int>( thing->player - players ) != consoleplayer ) ) )
+			continue;
+
+		// [BB] Don't affect spectators.
+		if ( thing->player && thing->player->bSpectating )
 			continue;
 
 		sector_t *hsec = sec->GetHeightSec();

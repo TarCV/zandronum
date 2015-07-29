@@ -36,8 +36,55 @@
 #include "templates.h"
 #include "renderstyle.h"
 #include "c_cvars.h"
+// [BB] New #includes.
+#include "d_player.h"
 
-CVAR (Bool, r_drawtrans, true, 0)
+// [BC] Archive this so people who don't want alpha don't have to constantly reset it.
+// [BC] Also, when this is disabled, give people with the invisibility sphere the partial
+// invisibility effect.
+CUSTOM_CVAR (Bool, r_drawtrans, true, CVAR_ARCHIVE)
+{
+	ULONG		ulIdx;
+	AInventory	*pInventory;
+
+	for ( ulIdx = 0; ulIdx < MAXPLAYERS; ulIdx++ )
+	{
+		if (( playeringame[ulIdx] == false ) ||
+			( players[ulIdx].mo == NULL ))
+		{
+			continue;
+		}
+
+		pInventory = players[ulIdx].mo->FindInventory( RUNTIME_CLASS( APowerTranslucency ));
+		if ( pInventory )
+		{
+			// First, strip away the effect of the powerup.
+			players[ulIdx].mo->flags &= ~MF_SHADOW;
+			players[ulIdx].mo->flags3 &= ~MF3_GHOST;
+			// [BC] If the owner is a spectating player, don't make him visible!
+			if (( players[ulIdx].mo->player == NULL ) || ( players[ulIdx].mo->player->bSpectating == false ))
+				players[ulIdx].mo->RenderStyle = STYLE_Normal;
+			else
+				players[ulIdx].mo->RenderStyle = STYLE_None;
+			players[ulIdx].mo->alpha = OPAQUE;
+
+			// Then, add it back, depending on the setting of this cvar.
+			// [BC] If r_drawtrans is false, then just give the same effect as partial invisibility.
+			if ( self == false )
+			{
+				players[ulIdx].mo->flags |= MF_SHADOW;
+				players[ulIdx].mo->alpha = FRACUNIT/5;
+				players[ulIdx].mo->RenderStyle = STYLE_OptFuzzy;
+			}
+			else
+			{
+				players[ulIdx].mo->alpha = ( FRACUNIT / 10 );
+				players[ulIdx].mo->RenderStyle = STYLE_Translucent;
+			}
+		}
+	}
+}
+
 CVAR (Int, r_drawfuzz, 1, CVAR_ARCHIVE)
 
 // Convert legacy render styles to flexible render styles.

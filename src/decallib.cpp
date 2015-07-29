@@ -47,8 +47,11 @@
 #include "gi.h"
 #include "g_level.h"
 #include "colormatcher.h"
-#include "b_bot.h"
+// [BB]
+//#include "b_bot.h"
 #include "farchive.h"
+// [BC] New #includes.
+#include "g_game.h"
 
 FDecalLib DecalLibrary;
 
@@ -1164,7 +1167,7 @@ void DDecalFader::Tick ()
 	}
 	else
 	{
-		if (level.maptime < TimeToStartDecay || bglobal.freeze)
+		if (level.maptime < TimeToStartDecay || (level.flags2 & LEVEL2_FROZEN) )
 		{
 			return;
 		}
@@ -1247,7 +1250,7 @@ void DDecalStretcher::Tick ()
 		Destroy ();
 		return;
 	}
-	if (level.maptime < TimeToStart || bglobal.freeze)
+	if (level.maptime < TimeToStart || (level.flags2 & LEVEL2_FROZEN) )
 	{
 		return;
 	}
@@ -1316,7 +1319,7 @@ void DDecalSlider::Tick ()
 		Destroy ();
 		return;
 	}
-	if (level.maptime < TimeToStart || bglobal.freeze)
+	if (level.maptime < TimeToStart || (level.flags2 & LEVEL2_FROZEN) )
 	{
 		return;
 	}
@@ -1382,7 +1385,7 @@ void DDecalColorer::Tick ()
 	}
 	else
 	{
-		if (level.maptime < TimeToStartDecay || bglobal.freeze)
+		if (level.maptime < TimeToStartDecay || (level.flags2 & LEVEL2_FROZEN) )
 		{
 			return;
 		}

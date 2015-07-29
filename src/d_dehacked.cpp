@@ -72,6 +72,10 @@
 #include "doomerrors.h"
 #include "p_effect.h"
 #include "farchive.h"
+// [BC] New #includes.
+#include "cl_demo.h"
+#include "network.h"
+#include "sv_commands.h"
 
 // [SO] Just the way Randy said to do it :)
 // [RH] Made this CVAR_SERVERINFO
@@ -98,6 +102,9 @@ static TArray<int> OrgHeights;
 // disappear, but that doesn't explain why frame patches specify an exact
 // state rather than a code pointer.)
 static TArray<int> CodePConv;
+
+// [TP] Which external patches are currently applied?
+static TArray<FString> g_LoadedDehFiles;
 
 // Sprite names in the order Doom originally had them.
 struct DEHSprName
@@ -178,7 +185,7 @@ DECLARE_ACTION_PARAMS(A_Saw)
 DECLARE_ACTION(A_FirePlasma)
 DECLARE_ACTION(A_FireBFG)
 DECLARE_ACTION(A_FireOldBFG)
-DECLARE_ACTION(A_FireRailgun)
+DECLARE_ACTION_PARAMS(A_FireRailgun) // [TP/BB] Added params
 
 // Default ammo use of the various weapon attacks
 static AmmoPerAttack AmmoPerAttacks[] = {
@@ -192,7 +199,7 @@ static AmmoPerAttack AmmoPerAttacks[] = {
 	{ AF_A_FirePlasma, 1},
 	{ AF_A_FireBFG, -1},	// uses deh.BFGCells
 	{ AF_A_FireOldBFG, 1},
-	{ AF_A_FireRailgun, 1},
+	{ AFP_A_FireRailgun, 1}, // [TP/BB] Added params
 	{ NULL, 0}
 };
 
@@ -2351,6 +2358,12 @@ bool D_LoadDehLump(int lumpnum)
 	return DoDehPatch();
 }
 
+// [TP]
+const TArray<FString>& D_GetDehFileNames()
+{
+	return g_LoadedDehFiles;
+}
+
 bool D_LoadDehFile(const char *patchfile)
 {
 	FILE *deh;
@@ -2365,7 +2378,15 @@ bool D_LoadDehFile(const char *patchfile)
 		fread(PatchFile, 1, PatchSize, deh);
 		fclose(deh);
 		PatchFile[PatchSize] = '\0';		// terminate with a '\0' character
-		return DoDehPatch();
+		// return DoDehPatch();
+		bool result = DoDehPatch();
+
+		// [TP] If the patching succeeded, write this patch down so we can broadcast it to the
+		// launcher.
+		if ( result )
+			g_LoadedDehFiles.Push( ExtractFileBase( patchfile, true ) );
+
+		return result;
 	}
 	else
 	{
@@ -3020,6 +3041,27 @@ bool ADehackedPickup::TryPickup (AActor *&toucher)
 			RealPickup = NULL;
 			return false;
 		}
+
+		// [BC] Tell the client that he successfully picked up the item.
+		if (( NETWORK_GetState( ) == NETSTATE_SERVER ) &&
+			( toucher->player ))
+		{
+			// [BB] Since SERVERCOMMANDS_GiveInventory overwrites the RealPickup amount
+			// of the client with RealPickup->Amount, we have have to set this to the
+			// correct amount the player has.
+			AInventory *pInventory = NULL;
+			if ( toucher->player->mo )
+				pInventory = toucher->player->mo->FindInventory( type );
+
+			if ( pInventory != NULL )
+				RealPickup->Amount = pInventory->Amount;
+
+			SERVERCOMMANDS_GiveInventory( ULONG( toucher->player - players ), RealPickup );
+
+			if (( ItemFlags & IF_QUIET ) == false )
+				SERVERCOMMANDS_DoInventoryPickup( ULONG( toucher->player - players ), RealPickup->GetClass( )->TypeName.GetChars( ), RealPickup->PickupMessage( ));
+		}
+
 		GoAwayAndDie ();
 		return true;
 	}
