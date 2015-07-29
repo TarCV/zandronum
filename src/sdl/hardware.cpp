@@ -36,6 +36,7 @@
 #include <signal.h>
 #include <time.h>
 
+#include "version.h"
 #include "hardware.h"
 #include "i_video.h"
 #include "i_system.h"
@@ -46,6 +47,9 @@
 #include "v_text.h"
 #include "doomstat.h"
 #include "m_argv.h"
+#ifndef NO_GL
+#include "sdlglvideo.h"
+#endif
 #include "r_renderer.h"
 #include "r_swrenderer.h"
 
@@ -54,6 +58,43 @@ EXTERN_CVAR (Bool, fullscreen)
 EXTERN_CVAR (Float, vid_winscale)
 
 IVideo *Video;
+
+extern int NewWidth, NewHeight, NewBits, DisplayBits;
+#ifndef NO_GL
+bool V_DoModeSetup (int width, int height, int bits);
+void I_RestartRenderer();
+#endif
+
+#ifndef NO_GL
+int currentrenderer=1;
+#else
+int currentrenderer=0;
+#endif
+
+// [ZDoomGL]
+CUSTOM_CVAR (Int, vid_renderer, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_NOINITCALL)
+{
+	// 0: Software renderer
+	// 1: OpenGL renderer
+
+	if (self != currentrenderer)
+	{
+		switch (self)
+		{
+		case 0:
+			Printf("Switching to software renderer...\n");
+			break;
+		case 1:
+			Printf("Switching to OpenGL renderer...\n");
+			break;
+		default:
+			Printf("Unknown renderer (%d).  Falling back to software renderer...\n", (int) vid_renderer);
+			self = 0; // make sure to actually switch to the software renderer
+			break;
+		}
+		Printf("You must restart " GAMENAME " to switch the renderer\n");
+	}
+}
 
 void I_ShutdownGraphics ()
 {
@@ -72,10 +113,24 @@ void I_InitGraphics ()
 {
 	UCVarValue val;
 
+#ifndef NO_GL
+	// hack by stevenaaus to force software mode if no 32bpp
+	const SDL_VideoInfo *i = SDL_GetVideoInfo();
+	if ((i->vfmt)->BytesPerPixel != 4) {
+		fprintf (stderr, "n32 bit colour not found, disabling OpenGL.n");
+		fprintf (stderr, "To enable OpenGL, restart X with 32 color (try 'startx -- :1 -depth 24'), and enable OpenGL in the Display Options.nn");
+	} 
+#endif
 	val.Bool = !!Args->CheckParm ("-devparm");
 	ticker.SetGenericRepDefault (val, CVAR_Bool);
 
+#ifndef NO_GL
+	//currentrenderer = vid_renderer;
+	if (currentrenderer==1) Video = new SDLGLVideo(0);
+	else Video = new SDLVideo (0);
+#else
 	Video = new SDLVideo (0);
+#endif
 	if (Video == NULL)
 		I_FatalError ("Failed to initialize display");
 
@@ -91,9 +146,11 @@ static void I_DeleteRenderer()
 
 void I_CreateRenderer()
 {
+	currentrenderer = vid_renderer;
 	if (Renderer == NULL)
 	{
-		Renderer = new FSoftwareRenderer;
+		if (currentrenderer==1) Renderer = gl_CreateInterface();
+		else Renderer = new FSoftwareRenderer;
 		atterm(I_DeleteRenderer);
 	}
 }
@@ -270,12 +327,17 @@ CUSTOM_CVAR (Int, vid_maxfps, 200, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 	}
 }
 
-extern int NewWidth, NewHeight, NewBits, DisplayBits;
-
+#ifndef NO_GL
+CUSTOM_CVAR (Bool, fullscreen, false, CVAR_ARCHIVE|CVAR_GLOBALCONFIG|CVAR_NOINITCALL)
+#else
 CUSTOM_CVAR (Bool, fullscreen, false, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+#endif
 {
-	NewWidth = screen->GetWidth();
-	NewHeight = screen->GetHeight();
+	if ( screen )
+	{
+		NewWidth = screen->GetWidth();
+		NewHeight = screen->GetHeight();
+	}
 	NewBits = DisplayBits;
 	setmodeneeded = true;
 }
@@ -292,7 +354,11 @@ CUSTOM_CVAR (Float, vid_winscale, 1.f, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 		NewWidth = screen->GetWidth();
 		NewHeight = screen->GetHeight();
 		NewBits = DisplayBits;
+#ifdef NO_GL
 		setmodeneeded = true;
+#else
+		//setmodeneeded = true;	// This CVAR doesn't do anything and only causes problems!
+#endif
 	}
 }
 

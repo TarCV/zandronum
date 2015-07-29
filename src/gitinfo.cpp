@@ -36,30 +36,52 @@
 
 #include "gitinfo.h"
 #include "version.h"
+// [BB]
+#include "zstring.h"
 
 const char *GetGitDescription()
 {
-	return GIT_DESCRIPTION;
+	// [BB]
+	return HG_REVISION_HASH_STRING; // GIT_DESCRIPTION;
 }
 
 const char *GetGitHash()
 {
-	return GIT_HASH;
+	// [BB]
+	return HG_REVISION_HASH_STRING; // GIT_HASH;
 }
 
 const char *GetGitTime()
 {
-	return GIT_TIME;
+	// [BB]
+	return SVN_REVISION_STRING; // GIT_TIME;
 }
 
 const char *GetVersionString()
 {
-	if (GetGitDescription()[0] == '\0')
+	// [BB]
+	//if (GetGitDescription()[0] == '\0')
 	{
 		return VERSIONSTR;
 	}
+	/*
 	else
 	{
 		return GIT_DESCRIPTION;
 	}
+	*/
+}
+
+// [BB]
+const char *GetVersionStringRev()
+{
+	//FString s = DOTVERSIONSTR "-r" SVN_REVISION_STRING;
+	//return s.GetChars();
+	return DOTVERSIONSTR_REV;
+}
+
+// [BB]
+unsigned int GetRevisionNumber()
+{
+	return SVN_REVISION_NUMBER;
 }

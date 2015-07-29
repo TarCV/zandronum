@@ -101,6 +101,9 @@ void R_DeinitTranslationTables();
 void R_BuildPlayerTranslation (int player);		// [RH] Actually create a player's translation table.
 void R_GetPlayerTranslation (int color, const struct FPlayerColorSet *colorset, class FPlayerSkin *skin, struct FRemapTable *table);
 
+// [Dusk] Does R_BuildPlayerTranslation for all active players.
+void R_BuildAllPlayerTranslations();
+
 extern const BYTE IcePalette[16][3];
 
 extern TArray<PalEntry> BloodTranslationColors;

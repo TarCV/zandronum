@@ -34,6 +34,9 @@
 #include "m_random.h"
 #include "i_system.h"
 #include "doomstat.h"
+// [BB] New #includes.
+#include "sv_commands.h"
+#include "network.h"
 
 #define FUDGEFACTOR		10
 
@@ -93,6 +96,7 @@ void P_SpawnTeleportFog(fixed_t x, fixed_t y, fixed_t z, int spawnid)
 // TELEPORTATION
 //
 
+// [BC] Added the bHaltMomentum argument.
 bool P_Teleport (AActor *thing, fixed_t x, fixed_t y, fixed_t z, angle_t angle,
 				 bool useFog, bool sourceFog, bool keepOrientation, bool bHaltVelocity, bool keepHeight)
 {
@@ -180,6 +184,14 @@ bool P_Teleport (AActor *thing, fixed_t x, fixed_t y, fixed_t z, angle_t angle,
 	{
 		angle = thing->angle;
 	}
+
+	// [BC] Teleporting spectators do not create fog.
+	if ( thing && thing->player && thing->player->bSpectating )
+	{
+		useFog = false;
+		sourceFog = false;
+	}
+
 	// Spawn teleport fog at source and destination
 	if (sourceFog)
 	{
@@ -223,6 +235,17 @@ bool P_Teleport (AActor *thing, fixed_t x, fixed_t y, fixed_t z, angle_t angle,
 		if (player)
 			player->velx = player->vely = 0;
 	}
+
+	// [BC] If we're the server, update clients about this teleport.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		SERVERCOMMANDS_TeleportThing( thing, sourceFog, useFog, ( useFog && bHaltVelocity ));
+
+		// [BB] The clients start their reactiontime later on their end. Try to adjust for this.
+		if ( thing->player && thing->reactiontime )
+			SERVER_AdjustPlayersReactiontime ( static_cast<ULONG> ( thing->player - players ) );
+	}
+
 	return true;
 }
 
@@ -329,6 +352,7 @@ bool EV_Teleport (int tid, int tag, line_t *line, int side, AActor *thing, bool 
 	fixed_t s = 0, c = 0;
 	fixed_t velx = 0, vely = 0;
 	angle_t badangle = 0;
+	angle_t	OldAngle;
 
 	if (thing == NULL)
 	{ // Teleport function called with an invalid actor
@@ -347,6 +371,10 @@ bool EV_Teleport (int tid, int tag, line_t *line, int side, AActor *thing, bool 
 	{
 		return false;
 	}
+
+	// [BC]
+	OldAngle = thing->angle;
+
 	// [RH] Lee Killough's changes for silent teleporters from BOOM
 	if (keepOrientation && line)
 	{
@@ -393,6 +421,29 @@ bool EV_Teleport (int tid, int tag, line_t *line, int side, AActor *thing, bool 
 		if ((velx | vely) == 0 && thing->player != NULL && thing->player->mo == thing)
 		{
 			thing->player->mo->PlayIdle ();
+		}
+
+		// [BC] Adjust the thing's momentum if we didn't halt it.
+		if ( haltVelocity == false )
+		{
+			// Get the angle between the exit thing and source linedef.
+			// Rotate 90 degrees, so that walking perpendicularly across
+			// teleporter linedef causes thing to exit in the direction
+			// indicated by the exit thing.
+//			angle = R_PointToAngle2 (0, 0, line->dx, line->dy) - searcher->angle + ANG90;
+			angle = thing->angle - OldAngle;
+
+			// Sine, cosine of angle adjustment
+			s = finesine[angle>>ANGLETOFINESHIFT];
+			c = finecosine[angle>>ANGLETOFINESHIFT];
+
+			// Momentum of thing crossing teleporter linedef
+			velx = thing->velx;
+			vely = thing->vely;
+
+			// Rotate thing's momentum to come out of exit just like it entered
+			thing->velx = FixedMul(velx, c) - FixedMul(vely, s);
+			thing->vely = FixedMul(vely, c) + FixedMul(velx, s);
 		}
 		return true;
 	}
@@ -578,6 +629,17 @@ bool EV_SilentLineTeleport (line_t *line, int side, AActor *thing, int id, INTBO
 				player->deltaviewheight = deltaviewheight;
 			}
 
+			// [BC] If we're the server, send the message that this thing has been tele-
+			// ported.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			{
+				SERVERCOMMANDS_TeleportThing( thing, false, false, false );
+
+				// [BB] The clients start their reactiontime later on their end. Try to adjust for this.
+				if ( thing->player && thing->reactiontime )
+					SERVER_AdjustPlayersReactiontime ( static_cast<ULONG> ( thing->player - players ) );
+			}
+
 			return true;
 		}
 	}
@@ -619,7 +681,11 @@ static bool DoGroupForOne (AActor *victim, AActor *source, AActor *dest, bool fl
 							0, fog, fog, !fog);
 	// P_Teleport only changes angle if fog is true
 	victim->angle = dest->angle + offAngle;
-
+	// [BB] If we change the angle of a player, we have to inform the client.
+	// For proper demo recording, we inform all clients about the angle of
+	// all players.
+	if( victim->player && NETWORK_GetState() == NETSTATE_SERVER )
+		SERVERCOMMANDS_SetThingAngleExact( victim );
 	return res;
 }
 

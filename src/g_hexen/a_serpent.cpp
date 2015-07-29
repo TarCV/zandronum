@@ -74,6 +74,12 @@ DEFINE_ACTION_FUNCTION(AActor, A_SerpentLowerHump)
 
 DEFINE_ACTION_FUNCTION(AActor, A_SerpentHumpDecide)
 {
+	// [BB] This is server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (self->MissileState != NULL)
 	{
 		if (pr_serpenthump() > 30)
@@ -82,6 +88,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_SerpentHumpDecide)
 		}
 		else if (pr_serpenthump() < 40)
 		{ // Missile attack
+			// [BB] If we're the server, set the thing's state.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetThingState( self, STATE_MELEE );
+
 			self->SetState (self->MeleeState);
 			return;
 		}
@@ -94,10 +104,21 @@ DEFINE_ACTION_FUNCTION(AActor, A_SerpentHumpDecide)
 	{ // The hump shouldn't occur when within melee range
 		if (self->MissileState != NULL && pr_serpenthump() < 128)
 		{
+			// [BB] If we're the server, set the thing's state.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetThingState( self, STATE_MELEE );
+
 			self->SetState (self->MeleeState);
 		}
 		else
 		{	
+			// [BB] If we're the server, set the thing's state and play the sound.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			{
+				SERVERCOMMANDS_SetThingFrame( self, self->FindState ("Hump") );
+				SERVERCOMMANDS_SoundActor( self, CHAN_BODY, "SerpentActive", 1, ATTN_NORM );
+			}
+
 			self->SetState (self->FindState ("Hump"));
 			S_Sound (self, CHAN_BODY, "SerpentActive", 1, ATTN_NORM);
 		}
@@ -112,6 +133,12 @@ DEFINE_ACTION_FUNCTION(AActor, A_SerpentHumpDecide)
 
 DEFINE_ACTION_FUNCTION(AActor, A_SerpentCheckForAttack)
 {
+	// [BB] This is server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (!self->target)
 	{
 		return;
@@ -120,22 +147,38 @@ DEFINE_ACTION_FUNCTION(AActor, A_SerpentCheckForAttack)
 	{
 		if (!self->CheckMeleeRange ())
 		{
+			// [BB] If we're the server, set the thing's state.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetThingFrame( self, self->FindState ("Attack") );
+
 			self->SetState (self->FindState ("Attack"));
 			return;
 		}
 	}
 	if (P_CheckMeleeRange2 (self))
 	{
+		// [BB] If we're the server, set the thing's state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingFrame( self, self->FindState ("Walk") );
+
 		self->SetState (self->FindState ("Walk"));
 	}
 	else if (self->CheckMeleeRange ())
 	{
 		if (pr_serpentattack() < 32)
 		{
+			// [BB] If we're the server, set the thing's state.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetThingFrame( self, self->FindState ("Walk") );
+
 			self->SetState (self->FindState ("Walk"));
 		}
 		else
 		{
+			// [BB] If we're the server, set the thing's state.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetThingFrame( self, self->FindState ("Attack") );
+
 			self->SetState (self->FindState ("Attack"));
 		}
 	}
@@ -149,12 +192,22 @@ DEFINE_ACTION_FUNCTION(AActor, A_SerpentCheckForAttack)
 
 DEFINE_ACTION_FUNCTION(AActor, A_SerpentChooseAttack)
 {
+	// [BB] This is server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (!self->target || self->CheckMeleeRange())
 	{
 		return;
 	}
 	if (self->MissileState != NULL)
 	{
+		// [BB] If we're the server, set the thing's state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingState( self, STATE_MISSILE );
+
 		self->SetState (self->MissileState);
 	}
 }
@@ -167,6 +220,12 @@ DEFINE_ACTION_FUNCTION(AActor, A_SerpentChooseAttack)
 
 DEFINE_ACTION_FUNCTION(AActor, A_SerpentMeleeAttack)
 {
+	// [BB] This is server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (!self->target)
 	{
 		return;
@@ -177,6 +236,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_SerpentMeleeAttack)
 		int newdam = P_DamageMobj (self->target, self, self, damage, NAME_Melee);
 		P_TraceBleed (newdam > 0 ? newdam : damage, self->target, self);
 		S_Sound (self, CHAN_BODY, "SerpentMeleeHit", 1, ATTN_NORM);
+
+		// [BB] If we're the server, tell the clients to play the sound.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SoundActor( self, CHAN_BODY, "SerpentMeleeHit", 1, ATTN_NORM );
 	}
 	if (pr_serpentmeattack() < 96)
 	{
