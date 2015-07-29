@@ -47,6 +47,11 @@
 #include "tarray.h"
 #include "cmdlib.h"
 #include "farchive.h"
+// [BC] New #includes.
+#include "cl_demo.h"
+#include "deathmatch.h"
+#include "network.h"
+#include "sv_commands.h"
 
 #include "gi.h"
 
@@ -210,18 +215,24 @@ bool P_ChangeSwitchTexture (side_t *side, int useAgain, BYTE special, bool *ques
 	int texture;
 	int sound;
 	FSwitchDef *Switch;
+	// [BC]
+	ULONG	ulShift;
+	// [BB] Check the ulShift handling.
 
 	if ((Switch = TexMan.FindSwitch (side->GetTexture(side_t::top))) != NULL)
 	{
 		texture = side_t::top;
+		ulShift = 0;
 	}
 	else if ((Switch = TexMan.FindSwitch (side->GetTexture(side_t::bottom))) != NULL)
 	{
 		texture = side_t::bottom;
+		ulShift = 2;
 	}
 	else if ((Switch = TexMan.FindSwitch (side->GetTexture(side_t::mid))) != NULL)
 	{
 		texture = side_t::mid;
+		ulShift = 1;
 	}
 	else
 	{
@@ -230,6 +241,17 @@ bool P_ChangeSwitchTexture (side_t *side, int useAgain, BYTE special, bool *ques
 			*quest = false;
 		}
 		return false;
+	}
+
+	// [BC] Set the texture change flags.
+	if ( NETWORK_InClientMode() == false )
+	{
+		if ( side->linedef != NULL )
+		{
+			side->linedef->ulTexChangeFlags |= 1 << ulShift;
+			ulShift += 3;
+			side->linedef->ulTexChangeFlags |= 1 << ulShift;
+		}
 	}
 
 	// EXIT SWITCH?
@@ -258,6 +280,11 @@ bool P_ChangeSwitchTexture (side_t *side, int useAgain, BYTE special, bool *ques
 	pt[0] = line->v1->x + (line->dx >> 1);
 	pt[1] = line->v1->y + (line->dy >> 1);
 	side->SetTexture(texture, Switch->frames[0].Texture);
+
+	// [BC] If we're the server, tell clients to set the line texture.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SetLineTexture( static_cast<ULONG>( side->linedef - lines ) );
+
 	if (useAgain || Switch->NumFrames > 1)
 	{
 		playsound = P_StartButton (side, texture, Switch, pt[0], pt[1], !!useAgain);
@@ -269,6 +296,10 @@ bool P_ChangeSwitchTexture (side_t *side, int useAgain, BYTE special, bool *ques
 	if (playsound)
 	{
 		S_Sound (pt[0], pt[1], 0, CHAN_VOICE|CHAN_LISTENERZ, sound, 1, ATTN_STATIC);
+
+		// [BC] If we're the server, tell clients to play the sound.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SoundPoint( pt[0], pt[1], 0, CHAN_VOICE|CHAN_LISTENERZ, S_GetName( sound ), 1, ATTN_STATIC );
 	}
 	if (quest != NULL)
 	{
@@ -353,6 +384,11 @@ void DActiveButton::Tick ()
 				S_Sound (m_X, m_Y, 0, CHAN_VOICE|CHAN_LISTENERZ,
 					def->Sound != 0 ? FSoundID(def->Sound) : FSoundID("switches/normbutn"),
 					1, ATTN_STATIC);
+
+				// [BC] If we're the server, tell clients to play the sound.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_SoundPoint( m_X, m_Y, 0, CHAN_VOICE|CHAN_LISTENERZ, ( def->Sound != 0 ) ? S_GetName( def->Sound ) : "switches/normbutn", 1, ATTN_STATIC );
+
 				bFlippable = false;
 			}
 			else
@@ -364,6 +400,10 @@ void DActiveButton::Tick ()
 		bool killme = AdvanceFrame ();
 
 		m_Side->SetTexture(m_Part, def->frames[m_Frame].Texture);
+
+		// [BC] If we're the server, tell clients to update the switch texture.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetLineTexture( static_cast<ULONG>( m_Side->linedef - lines )  );
 
 		if (killme)
 		{

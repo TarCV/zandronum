@@ -19,6 +19,10 @@
 #include "d_event.h"
 #include "v_font.h"
 #include "farchive.h"
+// [BB] New #includes.
+#include "cl_demo.h"
+#include "sv_commands.h"
+#include "deathmatch.h"
 
 // Include all the other Strife stuff here to reduce compile time
 #include "a_acolyte.cpp"
@@ -448,10 +452,22 @@ static FRandom pr_gethurt ("HurtMe!");
 
 DEFINE_ACTION_FUNCTION(AActor, A_GetHurt)
 {
+	// [BB] The server handles this.
+	if ( NETWORK_InClientMode() )
+	{
+		if (( self->ulNetworkFlags & NETFL_CLIENTSIDEONLY ) == false )
+			return;
+	}
+
 	self->flags4 |= MF4_INCOMBAT;
 	if ((pr_gethurt() % 5) == 0)
 	{
 		S_Sound (self, CHAN_VOICE, self->PainSound, 1, ATTN_NORM);
+
+		// [BB] If we're the server, tell clients to play the sound.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SoundActor( self, CHAN_VOICE, S_GetName( self->PainSound ), 1, ATTN_NORM );
+
 		self->health--;
 	}
 	if (self->health <= 0)
@@ -609,10 +625,19 @@ DEFINE_ACTION_FUNCTION(AActor, A_FLoopActiveSound)
 
 DEFINE_ACTION_FUNCTION(AActor, A_Countdown)
 {
+	// [BB] The server handles this.
+	if ( NETWORK_InClientMode() && ( ( self->ulNetworkFlags & NETFL_CLIENTSIDEONLY ) == false ) )
+		return;
+
 	if (--self->reactiontime <= 0)
 	{
 		P_ExplodeMissile (self, NULL, NULL);
 		self->flags &= ~MF_SKULLFLY;
+
+		// [BB] The server tells the client when to explode in P_ExplodeMissile, but we
+		// still need to tell them about the MF_SKULLFLY change.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingFlags( self, FLAGSET_FLAGS );
 	}
 }
 

@@ -35,7 +35,10 @@ private:
 protected:
 	DMover ();
 	void Serialize (FArchive &arc);
+	// [BB] Changed Destroy to public, so that it can be called in cl_main.cpp.
+public:
 	void Destroy();
+protected:
 	void StopInterpolation();
 	inline EResult MoveFloor (fixed_t speed, fixed_t dest, int crush, int direction, bool hexencrush)
 	{

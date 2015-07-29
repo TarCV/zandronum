@@ -10,6 +10,9 @@
 #include "w_wad.h"
 #include "doomstat.h"
 #include "v_font.h"
+// [BB] New #includes.
+#include "network.h"
+#include "sv_commands.h"
 
 
 struct OneKey
@@ -438,9 +441,26 @@ bool P_CheckKeys (AActor *owner, int keynum, bool remote)
 				if (snd != 0)
 				{
 					S_Sound (owner, CHAN_VOICE, snd, 1, ATTN_NORM);
+
+					// [BB] If we're the server, tell the clients to play the sound
+					if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+						SERVERCOMMANDS_SoundActor( owner, CHAN_VOICE, S_GetName( snd ), 1, ATTN_NORM );
+
 					break;
 				}
 			}
+		}
+	}
+
+	if ( owner->player )
+	{
+		// [BC] If we're the server, print the message to 
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			if ( failtext[0] == '$' )
+				failtext = GStrings( failtext + 1 );
+
+			SERVERCOMMANDS_PrintMid( failtext, false, owner->player - players, SVCF_ONLYTHISCLIENT );
 		}
 	}
 
@@ -459,7 +479,7 @@ bool AKey::HandlePickup (AInventory *item)
 {
 	// In single player, you can pick up an infinite number of keys
 	// even though you can only hold one of each.
-	if (multiplayer)
+	if ( NETWORK_GetState( ) != NETSTATE_SINGLE )
 	{
 		return Super::HandlePickup (item);
 	}
@@ -477,7 +497,7 @@ bool AKey::HandlePickup (AInventory *item)
 
 bool AKey::ShouldStay ()
 {
-	return !!multiplayer;
+	return ( NETWORK_GetState( ) != NETSTATE_SINGLE );
 }
 
 //==========================================================================

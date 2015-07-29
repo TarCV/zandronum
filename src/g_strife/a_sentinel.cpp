@@ -13,9 +13,18 @@ DEFINE_ACTION_FUNCTION(AActor, A_SentinelBob)
 {
 	fixed_t minz, maxz;
 
+	// [CW] This is handled by the server.
+	if ( NETWORK_InClientMode() )
+		return;
+
 	if (self->flags & MF_INFLOAT)
 	{
 		self->velz = 0;
+
+		// [CW] Moving the actor is server side.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_MoveThing( self, CM_MOMZ );
+
 		return;
 	}
 	if (self->threshold != 0)
@@ -36,11 +45,15 @@ DEFINE_ACTION_FUNCTION(AActor, A_SentinelBob)
 		self->velz += FRACUNIT;
 	}
 	self->reactiontime = (minz >= self->z) ? 4 : 0;
+
+	// [CW] Moving the actor is server side.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_MoveThingExact( self, CM_MOMZ );
 }
 
 DEFINE_ACTION_FUNCTION(AActor, A_SentinelAttack)
 {
-	AActor *missile, *trail;
+	AActor *missile = NULL, *trail;
 
 	// [BB] Without a target the P_SpawnMissileZAimed call will crash.
 	if (!self->target)
@@ -48,7 +61,15 @@ DEFINE_ACTION_FUNCTION(AActor, A_SentinelAttack)
 		return;
 	}
 
-	missile = P_SpawnMissileZAimed (self, self->z + 32*FRACUNIT, self->target, PClass::FindClass("SentinelFX2"));
+	// [CW] If we aren't a client, spawn the missile.
+	if ( NETWORK_InClientMode() == false )
+	{
+		missile = P_SpawnMissileZAimed (self, self->z + 32*FRACUNIT, self->target, PClass::FindClass("SentinelFX2"));
+
+		// [CW] Spawn the missile server side.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SpawnMissile( missile );
+	}
 
 	if (missile != NULL && (missile->velx | missile->vely) != 0)
 	{
@@ -75,6 +96,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_SentinelRefire)
 {
 	A_FaceTarget (self);
 
+	// [CW] Clients may not do this.
+	if ( NETWORK_InClientMode() )
+		return;
+
 	if (pr_sentinelrefire() >= 30)
 	{
 		if (self->target == NULL ||
@@ -84,6 +109,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_SentinelRefire)
 			(self->MissileState == NULL && !self->CheckMeleeRange()) ||
 			pr_sentinelrefire() < 40)
 		{
+			// [CW] Tell clients to set the frame.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetThingFrame( self, self->SeeState );
+
 			self->SetState (self->SeeState);
 		}
 	}
