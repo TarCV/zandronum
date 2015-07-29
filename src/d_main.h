@@ -132,6 +132,9 @@ private:
 	int IdentifyVersion (TArray<FString> &wadfiles, const char *iwad, const char *zdoom_wad);
 public:
 	const FIWADInfo *FindIWAD(TArray<FString> &wadfiles, const char *iwad, const char *basewad);
+
+	// [RC] Checks if a directory contains IWADs. Used by "no IWAD" setup screen in I_system.cpp.
+	bool DoesDirectoryHaveIWADs( const char *pszPath );
 };
 
 

@@ -461,6 +461,7 @@ size_t DObject::PropagateMark()
 size_t DObject::PointerSubstitution (DObject *old, DObject *notOld)
 {
 	const PClass *info = GetClass();
+
 	const size_t *offsets = info->FlatPointers;
 	size_t changed = 0;
 	if (offsets == NULL)
@@ -527,10 +528,12 @@ size_t DObject::StaticPointerSubstitution (DObject *old, DObject *notOld)
 		}
 	}
 
+	/* [BB] ST doesn't use these bots.
 	// Go through bot stuff.
 	if (bglobal.firstthing.p == (AActor *)old)		bglobal.firstthing = (AActor *)notOld, ++changed;
 	if (bglobal.body1.p == (AActor *)old)			bglobal.body1 = (AActor *)notOld, ++changed;
 	if (bglobal.body2.p == (AActor *)old)			bglobal.body2 = (AActor *)notOld, ++changed;
+	*/
 
 	return changed;
 }

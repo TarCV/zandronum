@@ -102,9 +102,12 @@ void P_DropWeapon (player_t* player);
 // P_USER
 //
 void	P_FallingDamage (AActor *ent);
-void	P_PlayerThink (player_t *player);
+bool	PLAYER_Responder( event_t *pEvent );
+void	P_PlayerThink (player_t *player, ticcmd_t *pCmd = NULL );
+/*
 void	P_PredictPlayer (player_t *player);
 void	P_UnPredictPlayer ();
+*/
 
 //
 // P_MOBJ
@@ -116,6 +119,7 @@ void	P_UnPredictPlayer ();
 
 #define SPF_TEMPPLAYER		1	// spawning a short-lived dummy player
 #define SPF_WEAPONFULLYUP	2	// spawn with weapon already raised
+#define SPF_CLIENTUPDATE	4	// [BB]
 
 APlayerPawn *P_SpawnPlayer (struct FPlayerStart *mthing, int playernum, int flags=0);
 
@@ -132,7 +136,8 @@ enum EPuffFlags
 	PF_NORANDOMZ = 16
 };
 
-AActor *P_SpawnPuff (AActor *source, const PClass *pufftype, fixed_t x, fixed_t y, fixed_t z, angle_t dir, int updown, int flags = 0);
+// [BC] Added bTellClientToSpawn.
+AActor *P_SpawnPuff (AActor *source, const PClass *pufftype, fixed_t x, fixed_t y, fixed_t z, angle_t dir, int updown, int flags = 0, bool bTellClientToSpawn = true);
 void	P_SpawnBlood (fixed_t x, fixed_t y, fixed_t z, angle_t dir, int damage, AActor *originator);
 void	P_BloodSplatter (fixed_t x, fixed_t y, fixed_t z, AActor *originator);
 void	P_BloodSplatter2 (fixed_t x, fixed_t y, fixed_t z, AActor *originator);
@@ -150,9 +155,9 @@ AActor *P_SpawnMissileAngleZSpeed (AActor *source, fixed_t z, const PClass *type
 AActor *P_SpawnMissileZAimed (AActor *source, fixed_t z, AActor *dest, const PClass *type);
 
 AActor *P_SpawnPlayerMissile (AActor* source, const PClass *type);
-AActor *P_SpawnPlayerMissile (AActor *source, const PClass *type, angle_t angle);
+AActor *P_SpawnPlayerMissile (AActor *source, const PClass *type, angle_t angle, bool bSpawnSound = true );
 AActor *P_SpawnPlayerMissile (AActor *source, fixed_t x, fixed_t y, fixed_t z, const PClass *type, angle_t angle, 
-							  AActor **pLineTarget = NULL, AActor **MissileActor = NULL, bool nofreeaim = false);
+							  AActor **pLineTarget = NULL, AActor **MissileActor = NULL, bool nofreeaim = false, bool bSpawnSound = true, bool bSpawnOnClient = true);
 
 void P_CheckFakeFloorTriggers (AActor *mo, fixed_t oldz, bool oldz_has_viewheight=false);
 
@@ -170,7 +175,7 @@ bool	P_Thing_Move (int tid, AActor *source, int mapspot, bool fog);
 int		P_Thing_Damage (int tid, AActor *whofor0, int amount, FName type);
 void	P_Thing_SetVelocity(AActor *actor, fixed_t vx, fixed_t vy, fixed_t vz, bool add, bool setbob);
 void P_RemoveThing(AActor * actor);
-bool P_Thing_Raise(AActor *thing);
+bool P_Thing_Raise(AActor *thing, bool bIgnorePositionCheck = false); // [BB] Added bIgnorePositionCheck.
 const PClass *P_GetSpawnableType(int spawnnum);
 
 //
@@ -410,11 +415,13 @@ AActor	*P_CheckOnmobj (AActor *thing);
 void	P_FakeZMovement (AActor *mo);
 bool	P_TryMove (AActor* thing, fixed_t x, fixed_t y, int dropoff, const secplane_t * onfloor, FCheckPosition &tm, bool missileCheck = false);
 bool	P_TryMove (AActor* thing, fixed_t x, fixed_t y, int dropoff, const secplane_t * onfloor = NULL);
+bool	P_OldTryMove (AActor* thing, fixed_t x, fixed_t y, bool dropoff, bool onfloor = false);
 bool	P_CheckMove(AActor *thing, fixed_t x, fixed_t y);
 void	P_ApplyTorque(AActor *mo);
 bool	P_TeleportMove (AActor* thing, fixed_t x, fixed_t y, fixed_t z, bool telefrag);	// [RH] Added z and telefrag parameters
 void	P_PlayerStartStomp (AActor *actor);		// [RH] Stomp on things for a newly spawned player
 void	P_SlideMove (AActor* mo, fixed_t tryx, fixed_t tryy, int numsteps);
+void	P_OldSlideMove (AActor* mo);
 bool	P_BounceWall (AActor *mo);
 bool	P_BounceActor (AActor *mo, AActor *BlockingMobj, bool ontop);
 bool	P_CheckSight (const AActor *t1, const AActor *t2, int flags=0);
@@ -428,6 +435,7 @@ enum ESightFlags
 };
 
 void	P_ResetSightCounters (bool full);
+void	P_ResetSpawnCounters( void ); // [BC]
 bool	P_TalkFacing (AActor *player);
 void	P_UseLines (player_t* player);
 bool	P_UsePuzzleItem (AActor *actor, int itemType);
@@ -470,6 +478,7 @@ bool	P_HitFloor (AActor *thing);
 bool	P_HitWater (AActor *thing, sector_t *sec, fixed_t splashx = FIXED_MIN, fixed_t splashy = FIXED_MIN, fixed_t splashz=FIXED_MIN, bool checkabove = false, bool alert = true);
 void	P_CheckSplash(AActor *self, fixed_t distance);
 void	P_RailAttack (AActor *source, int damage, int offset_xy, fixed_t offset_z = 0, int color1 = 0, int color2 = 0, float maxdiff = 0, int flags = 0, const PClass *puff = NULL, angle_t angleoffset = 0, angle_t pitchoffset = 0, fixed_t distance = 8192*FRACUNIT, int duration = 0, float sparsity = 1.0, float drift = 1.0, const PClass *spawnclass = NULL);	// [RH] Shoot a railgun
+void	P_RailAttackWithPossibleSpread (AActor *source, int damage, int offset_xy, fixed_t offset_z = 0, int color1 = 0, int color2 = 0, float maxdiff = 0, int flags = 0, const PClass *puff = NULL, angle_t angleoffset = 0, angle_t pitchoffset = 0, fixed_t distance = 8192*FRACUNIT, int duration = 0, float sparsity = 1.0, float drift = 1.0, const PClass *spawnclass = NULL);	// [BB] Shoot a railgun with spread applied if necessary
 
 enum	// P_RailAttack / A_RailAttack / A_CustomRailgun / P_DrawRailTrail flags
 {	
@@ -481,7 +490,7 @@ enum	// P_RailAttack / A_RailAttack / A_CustomRailgun / P_DrawRailTrail flags
 };
 
 
-bool	P_CheckMissileSpawn (AActor *missile, fixed_t maxdist);
+bool	P_CheckMissileSpawn (AActor *missile, fixed_t maxdist, bool bExplode = true);
 void	P_PlaySpawnSound(AActor *missile, AActor *spawner);
 
 // [RH] Position the chasecam
@@ -507,6 +516,9 @@ bool	Check_Sides(AActor *, int, int);					// phares
 
 // [RH] 
 const secplane_t * P_CheckSlopeWalk (AActor *actor, fixed_t &xmove, fixed_t &ymove);
+
+// [TP]
+bool P_CheckUnblock ( AActor *pActor1, AActor *pActor2 );
 
 //----------------------------------------------------------------------------------
 //
@@ -611,5 +623,129 @@ FPolyObj *PO_GetPolyobj(int polyNum);
 #include "p_spec.h"
 
 bool P_AlignFlat (int linenum, int side, int fc);
+
+// [BB] Moved here from po_man.cpp
+class DPolyAction : public DThinker
+{
+	DECLARE_CLASS (DPolyAction, DThinker)
+	HAS_OBJECT_POINTERS
+public:
+	DPolyAction (int polyNum);
+	void Serialize (FArchive &arc);
+	void Destroy();
+	void Stop();
+	int GetSpeed() const { return m_Speed; }
+
+	void StopInterpolation ();
+
+	void	SetSpeed( LONG lSpeed );
+
+	LONG	GetDist( void );
+	void	SetDist( LONG lDist );
+
+	LONG	GetPolyObj( void );
+
+	virtual void UpdateToClient( ULONG ulClient ); // [WS] We need this here.
+protected:
+	DPolyAction ();
+	int m_PolyObj;
+	int m_Speed;
+	int m_Dist;
+	TObjPtr<DInterpolation> m_Interpolation;
+
+	void SetInterpolation ();
+
+	friend void ThrustMobj (AActor *actor, seg_t *seg, FPolyObj *po);
+};
+
+class DRotatePoly : public DPolyAction
+{
+	DECLARE_CLASS (DRotatePoly, DPolyAction)
+public:
+	DRotatePoly (int polyNum);
+	void Tick ();
+	void UpdateToClient( ULONG ulClient );
+
+private:
+	DRotatePoly ();
+
+	friend bool EV_RotatePoly (line_t *line, int polyNum, int speed, int byteAngle, int direction, bool overRide);
+};
+
+
+class DMovePoly : public DPolyAction
+{
+	DECLARE_CLASS (DMovePoly, DPolyAction)
+public:
+	DMovePoly (int polyNum);
+	void Serialize (FArchive &arc);
+	void Tick ();
+	virtual void UpdateToClient( ULONG ulClient ); // [WS] This needs to be virtual.
+
+	LONG	GetAngle( void );
+	void	SetAngle( LONG lAngle );
+
+	LONG	GetXSpeed( void );
+	void	SetXSpeed( LONG lSpeed );
+
+	LONG	GetYSpeed( void );
+	void	SetYSpeed( LONG lSpeed );
+protected:
+	DMovePoly ();
+	int m_Angle;
+	fixed_t m_xSpeed; // for sliding walls
+	fixed_t m_ySpeed;
+
+	friend bool EV_MovePoly (line_t *line, int polyNum, int speed, angle_t angle, fixed_t dist, bool overRide);
+};
+
+class DMovePolyTo : public DPolyAction
+{
+	DECLARE_CLASS(DMovePolyTo, DPolyAction)
+public:
+	DMovePolyTo(int polyNum);
+	void Serialize(FArchive &arc);
+	void Tick();
+protected:
+	DMovePolyTo();
+	fixed_t m_xSpeed;
+	fixed_t m_ySpeed;
+	fixed_t m_xTarget;
+	fixed_t m_yTarget;
+
+	friend bool EV_MovePolyTo(line_t *line, int polyNum, int speed, int x, int y, bool overRide);
+};
+
+
+class DPolyDoor : public DMovePoly
+{
+	DECLARE_CLASS (DPolyDoor, DMovePoly)
+public:
+	DPolyDoor (int polyNum, podoortype_t type);
+	void Serialize (FArchive &arc);
+	void Tick ();
+	void UpdateToClient( ULONG ulClient );
+
+	LONG	GetDirection( void );
+	void	SetDirection( LONG lDirection );
+
+	LONG	GetTotalDist( void );
+	void	SetTotalDist( LONG lDist );
+
+	bool	GetClose( void );
+	void	SetClose( bool bClose );
+
+protected:
+	int m_Direction;
+	int m_TotalDist;
+	int m_Tics;
+	int m_WaitTics;
+	podoortype_t m_Type;
+	bool m_Close;
+
+	friend bool EV_OpenPolyDoor (line_t *line, int polyNum, int speed, angle_t angle, int delay, int distance, podoortype_t type);
+private:
+	DPolyDoor ();
+};
 
 #endif	// __P_LOCAL__

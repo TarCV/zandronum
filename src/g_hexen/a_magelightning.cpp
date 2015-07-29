@@ -130,6 +130,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_LightningReady)
 	if (pr_lightningready() < 160)
 	{
 		S_Sound (self, CHAN_WEAPON, "MageLightningReady", 1, ATTN_NORM);
+
+		// [BC] If we're the server, play sound for clients.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_WeaponSound( ULONG( self->player - players ), "MageLightningReady", ULONG( self->player - players ), SVCF_SKIPTHISCLIENT );
 	}
 }
 
@@ -266,6 +270,12 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_MLightningAttack)
 
 	AActor *fmo, *cmo;
 
+	// [BC/BB] The projectile spawning is handled by the server.
+	if ( NETWORK_InClientMode() )
+	{
+		goto spawningdone;
+	}
+
 	fmo = P_SpawnPlayerMissile (self, floor);
 	cmo = P_SpawnPlayerMissile (self, ceiling);
 	if (fmo)
@@ -280,7 +290,49 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_MLightningAttack)
 		cmo->lastenemy = fmo;
 		CALL_ACTION(A_LightningZap, cmo);	
 	}
+
+	// [BC] Apply spread.
+	if (( self->player ) &&
+		( self->player->cheats2 & CF2_SPREAD ))
+	{
+		fmo = P_SpawnPlayerMissile (self, PClass::FindClass ("LightningFloor"), self->angle + ( ANGLE_45 / 3 ));
+		cmo = P_SpawnPlayerMissile (self, PClass::FindClass ("LightningCeiling"), self->angle + ( ANGLE_45 / 3 ));
+		if (fmo)
+		{
+			fmo->special1 = 0;
+			fmo->lastenemy = cmo;
+			CALL_ACTION(A_LightningZap, fmo);	
+		}
+		if (cmo)
+		{
+			cmo->tracer = NULL;
+			cmo->lastenemy = fmo;
+			CALL_ACTION(A_LightningZap, cmo);	
+		}
+
+		fmo = P_SpawnPlayerMissile (self, PClass::FindClass ("LightningFloor"), self->angle - ( ANGLE_45 / 3 ));
+		cmo = P_SpawnPlayerMissile (self, PClass::FindClass ("LightningCeiling"), self->angle - ( ANGLE_45 / 3 ));
+		if (fmo)
+		{
+			fmo->special1 = 0;
+			fmo->lastenemy = cmo;
+			CALL_ACTION(A_LightningZap, fmo);	
+		}
+		if (cmo)
+		{
+			cmo->tracer = NULL;
+			cmo->lastenemy = fmo;
+			CALL_ACTION(A_LightningZap, cmo);	
+		}
+	}
+
+	// [BB] Added label so that the clients can skip the stuff above.
+spawningdone:
 	S_Sound (self, CHAN_BODY, "MageLightningFire", 1, ATTN_NORM);
+
+	// [BC] If we're the server, play sound for clients.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_WeaponSound( ULONG( self->player - players ), "MageLightningFire", ULONG( self->player - players ), SVCF_SKIPTHISCLIENT );
 
 	if (self->player != NULL)
 	{

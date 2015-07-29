@@ -44,6 +44,7 @@
 #include "r_data/colormaps.h"
 
 #ifdef _3DFLOORS
+EXTERN_CVAR(Int, vid_renderer)
 
 //==========================================================================
 //
@@ -200,7 +201,7 @@ static void P_Add3DFloor(sector_t* sec, sector_t* sec2, line_t* master, int flag
 
 	// kg3D - software renderer only hack
 	// this is really required because of ceilingclip and floorclip
-	if(flags & FF_BOTHPLANES)
+	if((vid_renderer == 0) && (flags & FF_BOTHPLANES))
 	{
 		P_Add3DFloor(sec, sec2, master, FF_EXISTS | FF_THISINSIDE | FF_RENDERPLANES | FF_NOSHADE | FF_SEETHROUGH | FF_SHOOTTHROUGH |
 			(flags & (FF_INVERTSECTOR | FF_TRANSLUCENT | FF_ADDITIVETRANS)), alpha);
@@ -355,7 +356,7 @@ bool P_CheckFor3DFloorHit(AActor * mo)
 {
 	sector_t * sector = mo->Sector;
 
-	if ((mo->player && (mo->player->cheats & CF_PREDICTING))) return false;
+	//if ((mo->player && (mo->player->cheats & CF_PREDICTING))) return false;
 
 	for(unsigned i=0;i<sector->e->XFloor.ffloors.Size();i++)
 	{
@@ -385,7 +386,7 @@ bool P_CheckFor3DCeilingHit(AActor * mo)
 {
 	sector_t * sector = mo->Sector;
 
-	if ((mo->player && (mo->player->cheats & CF_PREDICTING))) return false;
+	//if ((mo->player && (mo->player->cheats & CF_PREDICTING))) return false;
 
 	for(unsigned i=0;i<sector->e->XFloor.ffloors.Size();i++)
 	{
@@ -820,6 +821,7 @@ void P_Spawn3DFloors (void)
 		line->args[0] = line->args[1] = line->args[2] = line->args[3] = line->args[4] = 0;
 	}
 	// kg3D - do it in software
+	if(vid_renderer == 0)
 	for (i = 0; i < numsectors; i++)
 	{
 		P_Recalculate3DFloors(&sectors[i]);

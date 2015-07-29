@@ -1,6 +1,7 @@
 #ifndef FMODSOUND_H
 #define FMODSOUND_H
 
+#ifndef NO_SOUND
 #include "i_sound.h"
 #include "fmod_wrap.h"
 
@@ -126,3 +127,4 @@ private:
 };
 
 #endif
+#endif //NO_SOUND
