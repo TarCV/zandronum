@@ -75,6 +75,8 @@ extern "C" __declspec(dllimport) long __stdcall SHGetFolderPathA(void *hwnd, int
 #include "x86.h"
 #include "version.h"
 #include "md5.h"
+// [BB] New #includes.
+#include "network.h"
 
 void P_GetPolySpots (MapData * lump, TArray<FNodeBuilder::FPolyStart> &spots, TArray<FNodeBuilder::FPolyStart> &anchors);
 
@@ -1019,7 +1021,8 @@ bool P_CheckNodes(MapData * map, bool rebuilt, int buildtime)
 	// Building nodes in debug is much slower so let's cache them only if cachetime is 0
 	buildtime = 0;
 #endif
-	if (gl_cachenodes && buildtime/1000.f >= gl_cachetime)
+	// [BB] Reportedly, the server can crash in case "gl_cachenodes true".
+	if ( ( NETWORK_GetState( ) != NETSTATE_SERVER ) && gl_cachenodes && buildtime/1000.f >= gl_cachetime)
 	{
 		DPrintf("Caching nodes\n");
 		CreateCachedNodes(map);
@@ -1498,7 +1501,7 @@ void P_SetRenderSector()
 		seg_t *seg = ss->firstline;
 
 		// Check for one-dimensional subsectors. These should be ignored when
-		// being processed for automap drawinng etc.
+		// being processed for automap drawing etc.
 		ss->flags |= SSECF_DEGENERATE;
 		for(j=2; j<ss->numlines; j++)
 		{

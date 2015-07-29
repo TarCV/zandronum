@@ -34,32 +34,65 @@
 #ifndef __VERSION_H__
 #define __VERSION_H__
 
-// The svnrevision.h is automatically updated to grab the revision of
-// of the current source tree so that it can be included with version numbers.
-#include "svnrevision.h"
+const char *GetGitDescription();
+const char *GetGitHash();
+const char *GetGitTime();
+const char *GetVersionString();
+// [BB]
+const char *GetVersionStringRev();
+unsigned int GetRevisionNumber();
 
 /** Lots of different version numbers **/
 
-#define DOTVERSIONSTR_NOREV "2.7.0"
+#define GAME_MAJOR_VERSION 3
+#define GAME_MINOR_VERSION 0
+#define GAMEVER_STRING "3.0"
+#define DOTVERSIONSTR GAMEVER_STRING "-alpha"
+#define VERSIONSTR DOTVERSIONSTR
 
-// The version string the user actually sees.
-#define DOTVERSIONSTR DOTVERSIONSTR_NOREV " (r" SVN_REVISION_STRING ")"
+#define ZDVER_STRING "2.7.0"
+#define ZD_SVN_REVISION_STRING "4342"
+#define ZD_SVN_REVISION_NUMBER 4342
 
-// The version as seen in the Windows resource
-#define RC_FILEVERSION 2,7,0,SVN_REVISION_NUMBER
-#define RC_PRODUCTVERSION 2,7,0,0
-#define RC_FILEVERSION2 DOTVERSIONSTR
-#define RC_PRODUCTVERSION2 "2.7"
+// [BB] The version string that includes revision / compatibility data.
+#define DOTVERSIONSTR_REV DOTVERSIONSTR "-r" SVN_REVISION_STRING
+
+// [BC] What version of ZDoom is this based off of?
+#define	ZDOOMVERSIONSTR		ZDVER_STRING"-"ZD_SVN_REVISION_STRING
+
+/** Release code stuff */
+
+// Please maintain the existing structure as much as possible, because it's
+// used in communicating between servers and clients of different versions.
+#define BUILD_OTHER			0
+#define BUILD_RELEASE		1
+#define BUILD_INTERNAL		2
+#define BUILD_PRIVATE		3
+
+// [RC] Release code ID for this build.
+#define BUILD_ID			BUILD_INTERNAL
+#define BUILD_ID_STR		"Internal" // Used in the exe's metadata.
 
 // Version identifier for network games.
 // Bump it every time you do a release unless you're certain you
-// didn't change anything that will affect sync.
-#define NETGAMEVERSION 229
+// didn't change anything that will affect network protocol.
+// 003 = 0.97c2
+// 004 = 0.97c3
+// 005 = 0.97d-beta4
+// 006 = 0.97d-beta4.2
+// 007 = 0.97d-RC9
+// [BB] Use the revision number to automatically make builds from
+// different revisions incompatible. Skulltag only uses one byte
+// to transfer NETGAMEVERSION, so we need to limit its value to [0,255].
+#define NETGAMEVERSION (GetRevisionNumber() % 256)
 
 // Version stored in the ini's [LastRun] section.
 // Bump it if you made some configuration change that you want to
 // be able to migrate in FGameConfigFile::DoGlobalSetup().
 #define LASTRUNVERSION "210"
+
+// [TP] Same as above except for Zandronum-specific changes
+#define LASTZARUNVERSION "181"
 
 // Protocol version used in demos.
 // Bump it if you change existing DEM_ commands or add new ones.
@@ -77,7 +110,7 @@
 // MINSAVEVER is the minimum level snapshot version that can be loaded.
 #define MINSAVEVER 3100
 
-#if SVN_REVISION_NUMBER < MINSAVEVER
+#if ZD_SVN_REVISION_NUMBER < MINSAVEVER
 // If we don't know the current revision write something very high to ensure that
 // the reesulting executable can read its own savegames but no regular engine can.
 #define SAVEVER			999999
@@ -102,21 +135,29 @@ static inline const char *MakeSaveSig()
 	return foo;
 }
 #else
-#define SAVEVER			SVN_REVISION_NUMBER
-#define SAVESIG			"ZDOOMSAVE"SVN_REVISION_STRING
+// savegame versioning is based on ZDoom revisions
+#define SAVEVER			ZD_SVN_REVISION_NUMBER
+#define SAVESIG			"ZDOOMSAVE"ZD_SVN_REVISION_STRING
 #endif
 
+#define DYNLIGHT
+
 // This is so that derivates can use the same savegame versions without worrying about engine compatibility
-#define GAMESIG "ZDOOM"
-#define BASEWAD "zdoom.pk3"
+#define GAMESIG "ZANDRONUM"
+#define BASEWAD "zandronum.pk3"
 
 // More stuff that needs to be different for derivatives.
-#define GAMENAME "ZDoom"
-#define FORUM_URL "http://forum.zdoom.org"
-#define BUGS_FORUM_URL	"http://forum.zdoom.org/index.php?c=3"
+#define GAMENAME "Zandronum"
+#define GAMENAMELOWERCASE "zandronum"
+#define DOMAIN_NAME "zandronum.com"
+#define FORUM_URL "http://" DOMAIN_NAME "/forum/"
+#define BUGS_FORUM_URL	"http://" DOMAIN_NAME "/tracker/"
+
+// [BC] This is what's displayed as the title for server windows.
+#define	SERVERCONSOLE_TITLESTRING	GAMENAME " v" DOTVERSIONSTR " Server"
 
 #ifdef unix
-#define GAME_DIR ".config/zdoom"
+#define GAME_DIR ".config/" GAMENAMELOWERCASE
 #elif defined(__APPLE__)
 #define GAME_DIR GAMENAME
 #else

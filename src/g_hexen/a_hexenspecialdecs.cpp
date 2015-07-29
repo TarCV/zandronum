@@ -70,6 +70,13 @@ DEFINE_ACTION_FUNCTION(AActor, A_PotteryExplode)
 		}
 	}
 	S_Sound (mo, CHAN_BODY, "PotteryExplode", 1, ATTN_NORM);
+
+	// [BC] Don't spawn the item in client mode.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	// Spawn an item?
 	const PClass *type = P_GetSpawnableType(self->args[0]);
 	if (type != NULL)
@@ -77,7 +84,12 @@ DEFINE_ACTION_FUNCTION(AActor, A_PotteryExplode)
 		if (!((level.flags2 & LEVEL2_NOMONSTERS) || (dmflags & DF_NO_MONSTERS))
 		|| !(GetDefaultByType (type)->flags3 & MF3_ISMONSTER))
 		{ // Only spawn monsters if not -nomonsters
-			Spawn (type, self->x, self->y, self->z, ALLOW_REPLACE);
+			// [BC]
+			AActor	*pActor = Spawn (type, self->x, self->y, self->z, ALLOW_REPLACE);
+
+			// [BC] If we're the server, spawn the thing.
+			if (( pActor ) && ( NETWORK_GetState( ) == NETSTATE_SERVER ))
+				SERVERCOMMANDS_SpawnThing( pActor );
 		}
 	}
 }
@@ -296,7 +308,15 @@ DEFINE_ACTION_FUNCTION(AActor, A_SoAExplode)
 		if (!((level.flags2 & LEVEL2_NOMONSTERS) || (dmflags & DF_NO_MONSTERS))
 		|| !(GetDefaultByType (type)->flags3 & MF3_ISMONSTER))
 		{ // Only spawn monsters if not -nomonsters
-			Spawn (type, self->x, self->y, self->z, ALLOW_REPLACE);
+			// [BC]
+			if ( NETWORK_InClientMode() == false )
+			{
+				AActor	*pActor = Spawn (type, self->x, self->y, self->z, ALLOW_REPLACE);
+
+				// [BC] If we're the server, spawn the thing.
+				if (( pActor ) && ( NETWORK_GetState( ) == NETSTATE_SERVER ))
+					SERVERCOMMANDS_SpawnThing( pActor );
+			}
 		}
 	}
 	S_Sound (self, CHAN_BODY, self->DeathSound, 1, ATTN_NORM);

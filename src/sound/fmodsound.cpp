@@ -44,7 +44,8 @@ extern HWND Window;
 #define FALSE 0
 #define TRUE 1
 #endif
-#ifdef __APPLE__
+// [BB] FreeBSD doesn't accept malloc.h anymore.
+#if defined(__APPLE__) || defined(__FreeBSD__)
 #include <stdlib.h>
 #elif __sun
 #include <alloca.h>
@@ -53,7 +54,9 @@ extern HWND Window;
 #endif
 
 #include "templates.h"
+#ifndef NO_SOUND
 #include "fmodsound.h"
+#endif
 #include "c_cvars.h"
 #include "i_system.h"
 #include "i_music.h"
@@ -93,6 +96,7 @@ struct FEnumList
 
 // EXTERNAL FUNCTION PROTOTYPES --------------------------------------------
 
+#ifndef NO_SOUND
 // PUBLIC FUNCTION PROTOTYPES ----------------------------------------------
 
 // PRIVATE FUNCTION PROTOTYPES ---------------------------------------------
@@ -100,6 +104,7 @@ struct FEnumList
 static int Enum_NumForName(const FEnumList *list, const char *name);
 static const char *Enum_NameForNum(const FEnumList *list, int num);
 
+#endif
 // EXTERNAL DATA DECLARATIONS ----------------------------------------------
 
 EXTERN_CVAR (String, snd_output)
@@ -139,6 +144,8 @@ CUSTOM_CVAR (Float, snd_waterlp, 250, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 		self = 22000;
 	}
 }
+
+#ifndef NO_SOUND
 
 // PRIVATE DATA DEFINITIONS ------------------------------------------------
 
@@ -930,6 +937,12 @@ bool FMODSoundRenderer::Init()
 		int buffercount = snd_buffercount ? snd_buffercount : 4;
 		result = Sys->setDSPBufferSize(buffersize, buffercount);
 	}
+	/*
+	// [BC] Initalize FMOD with global focus, so that sound continues to play even if
+	// Skulltag is minimized. That way, people can join a server, alt+tab out while
+	// waiting for someone to show up, and then hear if someone joins.
+	if (!FModLog (FSOUND_Init (snd_samplerate, 64, FSOUND_INIT_DSOUND_DEFERRED|FSOUND_INIT_GLOBALFOCUS)))
+	*/
 	else
 	{
 		result = FMOD_OK;
@@ -938,7 +951,6 @@ bool FMODSoundRenderer::Init()
 	{
 		Printf(TEXTCOLOR_BLUE"Setting DSP buffer size failed. (Error %d)\n", result);
 	}
-
 	// Try to init
 	initflags = FMOD_INIT_NORMAL;
 	if (snd_hrtf)
@@ -2584,6 +2596,10 @@ unsigned int FMODSoundRenderer::GetSampleLength(SoundHandle sfx)
 FMOD_RESULT F_CALLBACK FMODSoundRenderer::ChannelCallback
 	(FMOD_CHANNEL *channel, FMOD_CHANNEL_CALLBACKTYPE type, void *data1, void *data2)
 {
+	// [BB] This seems to solve player class related Hexen startup crashes.
+	if ( channel == NULL )
+		return FMOD_OK;
+
 	FMOD::Channel *chan = (FMOD::Channel *)channel;
 	FISoundChannel *schan;
 
@@ -3086,3 +3102,4 @@ FMOD_RESULT FMODSoundRenderer::SetSystemReverbProperties(const REVERB_PROPERTIES
 #endif
 }
 
+#endif //NO_SOUND

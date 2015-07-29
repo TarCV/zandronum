@@ -10,6 +10,15 @@
 #include <errno.h>
 #include <limits.h>
 
+// [EP] Header for the timestamp appending to crash log filename.
+#include <time.h>
+
+// Solaris doesn't have SA_ONESHOT
+// According to the Linux header this is the same.
+#ifndef SA_ONESHOT
+#define SA_ONESHOT SA_RESETHAND
+#endif
+
 #ifdef __linux__
 #include <sys/prctl.h>
 #ifndef PR_SET_PTRACER
@@ -137,6 +146,7 @@ static void gdb_info(pid_t pid)
 		           "shell echo \"\"\n"
 		           "shell echo \"* Backtrace\"\n"
 		           "thread apply all backtrace full\n"
+		           "gcore\n" // [EP] try to create a core dump ...
 		           "detach\n"
 		           "quit\n", pid);
 		fclose(f);
@@ -170,6 +180,15 @@ static void sys_info(void)
 	putchar('\n');
 	fflush(stdout);
 #endif
+	// [BB] Also log the gdb version.
+	FILE *IN = popen ( "gdb --version", "r" );
+	if ( IN )  {
+		char gdbversion[1024];
+		if ( fgets(gdbversion, 1024, IN) )
+			puts(gdbversion);
+
+		pclose(IN);
+	}
 }
 
 
@@ -337,6 +356,24 @@ static void crash_handler(const char *logfile)
 
 	if(logfile)
 	{
+		// [EP/TP] Needed for the timestamp appending to crash log filename.
+		char newLogfile[64];
+		time_t timestamp;
+
+		time( &timestamp );
+		char *bufferEnd = newLogfile + sizeof( newLogfile );
+		snprintf( newLogfile, sizeof( newLogfile ), "%s", logfile );
+
+		char *appendPoint = strchr( newLogfile, '.' );
+		if ( appendPoint == NULL )
+			appendPoint = newLogfile + strlen( newLogfile );
+
+		appendPoint += strftime( appendPoint, bufferEnd - appendPoint, "-%m_%d_%Y-%H_%M_%S", localtime( &timestamp ) );
+
+		snprintf( appendPoint, bufferEnd - appendPoint, ".%d.log", (int)crash_info.pid );
+
+		logfile = (const char *)newLogfile;
+
 		/* Create crash log file and redirect shell output to it */
 		if(freopen(logfile, "wa", stdout) != stdout)
 		{
@@ -365,6 +402,7 @@ static void crash_handler(const char *logfile)
 		kill(crash_info.pid, SIGKILL);
 	}
 
+#ifndef SERVER_ONLY // [BB] The Linux server doesn't have a GUI, so don't bother it with a window.
 	if(logfile)
 	{
 		const char *str;
@@ -379,6 +417,7 @@ static void crash_handler(const char *logfile)
 
 		system(buf);
 	}
+#endif
 	exit(0);
 }
 

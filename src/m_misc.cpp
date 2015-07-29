@@ -78,6 +78,9 @@
 
 #include "gameconfigfile.h"
 
+// [BB] New #includes.
+#include "p_acs.h"
+
 FGameConfigFile *GameConfig;
 
 CVAR(Bool, screenshot_quiet, false, CVAR_ARCHIVE|CVAR_GLOBALCONFIG);
@@ -138,6 +141,27 @@ int M_ReadFile (char const *name, BYTE **buffer)
 
 	*buffer = buf;
 	return length;
+}
+
+//=============================================================================
+//
+// [BC] M_DoesFileExist
+//
+// Returns true if the file exists. Largely the same as the above function.
+//
+//=============================================================================
+bool M_DoesFileExist( const char *pszFileName )
+{
+	int handle;
+	struct stat fileinfo;
+
+	handle = open (pszFileName, O_RDONLY | O_BINARY, 0666);
+	if (handle == -1)
+		return ( false );
+	if (fstat (handle,&fileinfo) == -1)
+		return ( false );
+
+	return ( true );
 }
 
 //---------------------------------------------------------------------------
@@ -362,7 +386,7 @@ FString GetUserFile (const char *file)
 		// This can be removed after a release or two
 		// Transfer the old zdoom directory to the new location
 		bool moved = false;
-		FString oldpath = NicePath("~/.zdoom/");
+		FString oldpath = NicePath("~/." GAMENAMELOWERCASE "/");
 		if (stat (oldpath, &extrainfo) != -1)
 		{
 			if (rename(oldpath, path) == -1)
@@ -632,8 +656,10 @@ void WritePCXfile (FILE *file, const BYTE *buffer, const PalEntry *palette,
 void WritePNGfile (FILE *file, const BYTE *buffer, const PalEntry *palette,
 				   ESSType color_type, int width, int height, int pitch)
 {
+	char software[100];
+	mysnprintf(software, countof(software), GAMENAME " %s", GetVersionString());
 	if (!M_CreatePNG (file, buffer, palette, color_type, width, height, pitch) ||
-		!M_AppendPNGText (file, "Software", GAMENAME DOTVERSIONSTR) ||
+		!M_AppendPNGText (file, "Software", software) ||
 		!M_FinishPNG (file))
 	{
 		Printf ("Could not create screenshot.\n");
@@ -806,6 +832,10 @@ void M_ScreenShot (const char *filename)
 
 CCMD (screenshot)
 {
+	// [BB] This function can overwrite arbitrary files and thus may not be used by ConsoleCommand.
+	if ( ACS_IsCalledFromConsoleCommand( ))
+		return;
+
 	if (argv.argc() == 1)
 		G_ScreenShot (NULL);
 	else

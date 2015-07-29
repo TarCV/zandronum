@@ -80,6 +80,10 @@
 #include "g_level.h"
 #include "doomstat.h"
 #include "r_utility.h"
+// [BB] New #includes.
+#include "serverconsole/serverconsole.h"
+#include "network.h"
+#include "p_acs.h"
 
 #include "stats.h"
 #include "st_start.h"
@@ -94,8 +98,6 @@
 #else
 #define X64 ""
 #endif
-
-#define WINDOW_TITLE GAMESIG " " DOTVERSIONSTR X64 " (" __DATE__ ")"
 
 // The maximum number of functions that can be registered with atterm.
 #define MAX_TERMS	64
@@ -143,9 +145,13 @@ LONG			GameTitleFontHeight;
 LONG			DefaultGUIFontHeight;
 LONG			ErrorIconChar;
 
+// [BC] New stuff for the server console.
+HANDLE			hStdout;
+HANDLE			hStdin;
+
 // PRIVATE DATA DEFINITIONS ------------------------------------------------
 
-static const char WinClassName[] = "ZDoomMainWindow";
+static const char WinClassName[] = GAMENAME " MainWindow";
 static HMODULE hwtsapi32;		// handle to wtsapi32.dll
 static void (*TermFuncs[MAX_TERMS])(void);
 static int NumTerms;
@@ -714,7 +720,9 @@ void ShowErrorPane(const char *text)
 	}
 	if (text != NULL)
 	{
-		SetWindowText (Window, "Fatal Error - " WINDOW_TITLE);
+		char caption[100];
+		mysnprintf(caption, countof(caption), "Fatal Error - "GAMESIG" %s "X64" (%s)", GetVersionString(), GetGitTime());
+		SetWindowText (Window, caption);
 		ErrorIcon = CreateWindowEx (WS_EX_NOPARENTNOTIFY, "STATIC", NULL, WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | SS_OWNERDRAW, 0, 0, 0, 0, Window, NULL, g_hInst, NULL);
 		if (ErrorIcon != NULL)
 		{
@@ -907,89 +915,117 @@ void DoMain (HINSTANCE hInstance)
 		FixPathSeperator(program);
 		progdir.Truncate((long)strlen(program));
 		progdir.UnlockBuffer();
-/*
-		height = GetSystemMetrics (SM_CYFIXEDFRAME) * 2 +
-				GetSystemMetrics (SM_CYCAPTION) + 12 * 32;
-		width  = GetSystemMetrics (SM_CXFIXEDFRAME) * 2 + 8 * 78;
-*/
-		width = 512;
-		height = 384;
 
-		// Many Windows structures that specify their size do so with the first
-		// element. DEVMODE is not one of those structures.
-		memset (&displaysettings, 0, sizeof(displaysettings));
-		displaysettings.dmSize = sizeof(displaysettings);
-		EnumDisplaySettings (NULL, ENUM_CURRENT_SETTINGS, &displaysettings);
-		x = (displaysettings.dmPelsWidth - width) / 2;
-		y = (displaysettings.dmPelsHeight - height) / 2;
-
-		if (Args->CheckParm ("-0"))
+		// [BB] To allow an external program to check our version, output this info to a file.
 		{
-			x = y = 0;
-		}
-
-		WNDCLASS WndClass;
-		WndClass.style			= 0;
-		WndClass.lpfnWndProc	= LConProc;
-		WndClass.cbClsExtra		= 0;
-		WndClass.cbWndExtra		= 0;
-		WndClass.hInstance		= hInstance;
-		WndClass.hIcon			= LoadIcon (hInstance, MAKEINTRESOURCE(IDI_ICON1));
-		WndClass.hCursor		= LoadCursor (NULL, IDC_ARROW);
-		WndClass.hbrBackground	= NULL;
-		WndClass.lpszMenuName	= NULL;
-		WndClass.lpszClassName	= (LPCTSTR)WinClassName;
-		
-		/* register this new class with Windows */
-		if (!RegisterClass((LPWNDCLASS)&WndClass))
-			I_FatalError ("Could not register window class");
-		
-		/* create window */
-		Window = CreateWindowEx(
-				WS_EX_APPWINDOW,
-				(LPCTSTR)WinClassName,
-				(LPCTSTR)WINDOW_TITLE,
-				WS_OVERLAPPEDWINDOW | WS_VISIBLE | WS_CLIPCHILDREN,
-				x, y, width, height,
-				(HWND)   NULL,
-				(HMENU)  NULL,
-						hInstance,
-				NULL);
-
-		if (!Window)
-			I_FatalError ("Could not open window");
-
-		if (kernel != NULL)
-		{
-			typedef BOOL (WINAPI *pts)(DWORD, DWORD *);
-			pts pidsid = (pts)GetProcAddress (kernel, "ProcessIdToSessionId");
-			if (pidsid != 0)
+			FString *args;
+			if ( Args->CheckParmList( "--version", &args) == 1 )
 			{
-				if (!pidsid (GetCurrentProcessId(), &SessionID))
-				{
-					SessionID = 0;
-				}
-				hwtsapi32 = LoadLibraryA ("wtsapi32.dll");
-				if (hwtsapi32 != 0)
-				{
-					FARPROC reg = GetProcAddress (hwtsapi32, "WTSRegisterSessionNotification");
-					if (reg == 0 || !((BOOL(WINAPI *)(HWND, DWORD))reg) (Window, NOTIFY_FOR_THIS_SESSION))
-					{
-						FreeLibrary (hwtsapi32);
-						hwtsapi32 = 0;
-					}
-					else
-					{
-						atterm (UnWTS);
-					}
-				}
+				FILE *file = fopen( args[0].GetChars(), "w" );
+				if ( file == NULL )
+					return;
+				fputs( GetVersionStringRev(), file );
+				fputs( "\n", file );
+				fputs( GetGitDescription(), file );
+
+				fclose( file );
+				return;
 			}
 		}
 
-		GetClientRect (Window, &cRect);
+		// [BC] When hosting, spawn a console dialog box instead of creating a window.
+		if ( Args->CheckParm( "-host" ))
+		{
+			// This never returns.
+			DialogBox( g_hInst, MAKEINTRESOURCE( IDD_SERVERDIALOG ), NULL/*(HWND)Window*/, (DLGPROC)SERVERCONSOLE_ServerDialogBoxCallback );
+		}
+		else
+		{
+/*
+			height = GetSystemMetrics (SM_CYFIXEDFRAME) * 2 +
+					GetSystemMetrics (SM_CYCAPTION) + 12 * 32;
+			width  = GetSystemMetrics (SM_CXFIXEDFRAME) * 2 + 8 * 78;
+*/
+			width = 512;
+			height = 384;
 
-		WinWidth = cRect.right;
-		WinHeight = cRect.bottom;
+			// Many Windows structures that specify their size do so with the first
+			// element. DEVMODE is not one of those structures.
+			memset (&displaysettings, 0, sizeof(displaysettings));
+			displaysettings.dmSize = sizeof(displaysettings);
+			EnumDisplaySettings (NULL, ENUM_CURRENT_SETTINGS, &displaysettings);
+			x = (displaysettings.dmPelsWidth - width) / 2;
+			y = (displaysettings.dmPelsHeight - height) / 2;
+			if (Args->CheckParm ("-0"))
+			{
+				x = y = 0;
+			}
+
+			WNDCLASS WndClass;
+			WndClass.style			= 0;
+			WndClass.lpfnWndProc	= LConProc;
+			WndClass.cbClsExtra		= 0;
+			WndClass.cbWndExtra		= 0;
+			WndClass.hInstance		= hInstance;
+			WndClass.hIcon			= LoadIcon (hInstance, MAKEINTRESOURCE(IDI_ICONST));
+			WndClass.hCursor		= LoadCursor (NULL, IDC_ARROW);
+			WndClass.hbrBackground	= NULL;
+			WndClass.lpszMenuName	= NULL;
+			WndClass.lpszClassName	= (LPCTSTR)WinClassName;
+		
+			/* register this new class with Windows */
+			if (!RegisterClass((LPWNDCLASS)&WndClass))
+				I_FatalError ("Could not register window class");
+		
+			/* create window */
+			char caption[100];
+			mysnprintf(caption, countof(caption), ""GAMESIG" %s "X64" (%s)", GetVersionString(), GetGitTime());
+			Window = CreateWindowEx(
+					WS_EX_APPWINDOW,
+					(LPCTSTR)WinClassName,
+					(LPCTSTR)caption,
+					WS_OVERLAPPEDWINDOW | WS_VISIBLE | WS_CLIPCHILDREN,
+					x, y, width, height,
+					(HWND)   NULL,
+					(HMENU)  NULL,
+							hInstance,
+					NULL);
+
+			if (!Window)
+				I_FatalError ("Could not open window");
+
+			if (kernel != NULL)
+			{
+				typedef BOOL (WINAPI *pts)(DWORD, DWORD *);
+				pts pidsid = (pts)GetProcAddress (kernel, "ProcessIdToSessionId");
+				if (pidsid != 0)
+				{
+					if (!pidsid (GetCurrentProcessId(), &SessionID))
+					{
+						SessionID = 0;
+					}
+					hwtsapi32 = LoadLibraryA ("wtsapi32.dll");
+					if (hwtsapi32 != 0)
+					{
+						FARPROC reg = GetProcAddress (hwtsapi32, "WTSRegisterSessionNotification");
+						if (reg == 0 || !((BOOL(WINAPI *)(HWND, DWORD))reg) (Window, NOTIFY_FOR_THIS_SESSION))
+						{
+							FreeLibrary (hwtsapi32);
+							hwtsapi32 = 0;
+						}
+						else
+						{
+							atterm (UnWTS);
+						}
+					}
+				}
+			}
+
+			GetClientRect (Window, &cRect);
+
+			WinWidth = cRect.right;
+			WinHeight = cRect.bottom;
+		}
 
 		CoInitialize (NULL);
 		atterm (UnCOM);
@@ -998,6 +1034,13 @@ void DoMain (HINSTANCE hInstance)
 
 		I_DetectOS ();
 		D_DoomMain ();
+	}
+	catch (class CNoIWADError &/*error*/) // [RC] No IWADs were found! Show a setup dialog.
+	{
+		ShowWindow( Window, SW_HIDE );
+		I_ShutdownGraphics( );
+		I_ShowNoIWADsScreen( );
+		exit( 0 );
 	}
 	catch (class CNoRunExit &)
 	{
@@ -1045,7 +1088,7 @@ void DoomSpecificInfo (char *buffer, size_t bufflen)
 	char *const buffend = buffer + bufflen - 2;	// -2 for CRLF at end
 	int i;
 
-	buffer += mysnprintf (buffer, buffend - buffer, "ZDoom version " DOTVERSIONSTR " (" __DATE__ ")\r\n");
+	buffer += mysnprintf (buffer, buffend - buffer, GAMENAME " version %s (%s)", GetVersionString(), GetGitHash());
 	buffer += mysnprintf (buffer, buffend - buffer, "\r\nCommand line: %s\r\n", GetCommandLine());
 
 	for (i = 0; (arg = Wads.GetWadName (i)) != NULL; ++i)
@@ -1064,6 +1107,33 @@ void DoomSpecificInfo (char *buffer, size_t bufflen)
 		strncpy (name, level.mapname, 8);
 		name[8] = 0;
 		buffer += mysnprintf (buffer, buffend - buffer, "\r\n\r\nCurrent map: %s", name);
+
+		// [BC] Also display the network state.
+		char	szNetState[16];
+		switch ( NETWORK_GetState( ))
+		{
+		case NETSTATE_SINGLE:
+
+			sprintf( szNetState, "SINGLE" );
+			break;
+		case NETSTATE_SINGLE_MULTIPLAYER:
+
+			sprintf( szNetState, "FAKE MULTI" );
+			break;
+		case NETSTATE_CLIENT:
+
+			sprintf( szNetState, "CLIENT" );
+			break;
+		case NETSTATE_SERVER:
+
+			sprintf( szNetState, "SERVER" );
+			break;
+		default:
+
+			sprintf( szNetState, "UNKNOWN" );
+			break;
+		}
+		buffer += wsprintf (buffer, "\r\n\r\nNetwork state: %s", szNetState);
 
 		if (!viewactive)
 		{
@@ -1139,6 +1209,14 @@ LONG WINAPI ExitMessedUp (LPEXCEPTION_POINTERS foo)
 
 void CALLBACK ExitFatally (ULONG_PTR dummy)
 {
+	// [BB] If we are the server, try to kick all players before we shut down.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		SERVER_KickAllPlayers( "The server encountered a fatal error and needs to shut down!" );
+		// [BB] It's crucial that we send the packets informing the clients now.
+		SERVER_SendOutPackets();
+	}
+
 	SetUnhandledExceptionFilter (ExitMessedUp);
 	I_ShutdownGraphics ();
 	RestoreConView ();
@@ -1297,17 +1375,39 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE nothing, LPSTR cmdline, int n
 
 //==========================================================================
 //
-// CCMD crashout
+//	[BC] MainDoomThread
 //
-// Debugging routine for testing the crash logger.
-// Useless in a debug build, because that doesn't enable the crash logger.
+//	This is the new thread created by the server console.
 //
 //==========================================================================
-
-#ifndef _DEBUG
-#include "c_dispatch.h"
-CCMD (crashout)
+DWORD WINAPI MainDoomThread( LPVOID )
 {
-	*(int *)0 = 0;
+	// Setup our main thread ID so that if we have a crash, it crashes properly.
+	MainThread = INVALID_HANDLE_VALUE;
+	DuplicateHandle (GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &MainThread,
+		0, FALSE, DUPLICATE_SAME_ACCESS);
+	MainThreadID = GetCurrentThreadId();
+
+	try
+	{
+		D_DoomMain( );
+	}
+	catch (class CNoIWADError &/*error*/) // [RC] No IWADs were found! Show a setup dialog.
+	{
+		SERVERCONSOLE_Hide( );
+		I_ShowNoIWADsScreen( );
+		exit( 0 );
+	}
+	catch (class CDoomError &error)
+	{
+//		I_ShutdownGraphics ();
+//		RestoreConView ();
+		if (error.GetMessage ())
+		{
+			ShowErrorPane (error.GetMessage());
+		}
+		exit (-1);
+	}
+
+	return ( 0 );
 }
-#endif

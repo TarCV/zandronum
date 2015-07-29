@@ -35,6 +35,9 @@
 // to handle sound origins in sectors.
 // SECTORS do store MObjs anyway.
 #include "actor.h"
+struct FLightNode;
+struct FGLSection;
+struct seg_t;
 
 #include "dthinker.h"
 
@@ -81,15 +84,43 @@ struct vertex_t
 {
 	fixed_t x, y;
 
+	float fx, fy;		// Floating point coordinates of this vertex (excluding polyoblect translation!)
+	angle_t viewangle;	// precalculated angle for clipping
+	int angletime;		// recalculation time for view angle
+	bool dirty;			// something has changed and needs to be recalculated
+	int numheights;
+	int numsectors;
+	sector_t ** sectors;
+	float * heightlist;
+
+	vertex_t()
+	{
+		x = y = 0;
+		fx = fy = 0;
+		angletime = 0;
+		viewangle = 0;
+		dirty = true;
+		numheights = numsectors = 0;
+		sectors = NULL;
+		heightlist = NULL;
+	}
+
 	bool operator== (const vertex_t &other)
 	{
 		return x == other.x && y == other.y;
+	}
+
+	bool operator!= (const vertex_t &other)
+	{
+		return x != other.x || y != other.y;
 	}
 
 	void clear()
 	{
 		x = y = 0;
 	}
+
+	angle_t GetClipAngle();
 };
 
 // Forward of LineDefs, for Sectors.
@@ -199,8 +230,12 @@ public:
 	void Activate (AActor *source);
 	void Deactivate (AActor *source);
 	virtual bool TriggerAction (AActor *triggerer, int activationType);
+	// [BB] Added PrepareForHiding ();
+	virtual void PrepareForHiding ();
 protected:
 	bool CheckTrigger (AActor *triggerer) const;
+	// [BB] Added RemoveFromSectorActionsList ();
+	void RemoveFromSectorActionsList ();
 };
 
 class ASkyViewpoint;
@@ -211,6 +246,10 @@ struct secplane_t
 	// ic is 1/c, for faster Z calculations
 
 	fixed_t a, b, c, d, ic;
+
+	// [Spleen] Store the old D's of the plane for unlagged support
+	fixed_t		unlaggedD[UNLAGGEDTICS];
+	fixed_t		restoreD;
 
 	// Returns < 0 : behind; == 0 : on; > 0 : in front
 	int PointOnSide (fixed_t x, fixed_t y, fixed_t z) const
@@ -319,12 +358,19 @@ FArchive &operator<< (FArchive &arc, secplane_t &plane);
 
 
 #include "p_3dfloors.h"
+struct subsector_t;
+struct sector_t;
+struct side_t;
+extern bool gl_plane_reflection_i;
+struct FPortal;
+
 // Ceiling/floor flags
 enum
 {
 	PLANEF_ABSLIGHTING	= 1,	// floor/ceiling light is absolute, not relative
 	PLANEF_BLOCKED		= 2,	// can not be moved anymore.
 	PLANEF_ADDITIVE		= 4,	// rendered additive
+	PLANEF_SPRINGPAD		= 8,	// [BC] Floor bounces actors up at the same velocity they landed on it with.	
 };
 
 // Internal sector flags
@@ -339,6 +385,7 @@ enum
 	SECF_UNDERWATERMASK	= 32+64,
 	SECF_DRAWN			= 128,	// sector has been drawn at least once
 	SECF_HIDDEN			= 256,	// Do not draw on textured automap
+	SECF_RETURNZONE		= 512,	// [BC] Flags should be immediately returned if they're dropped within this sector (lava sectors, unreachable sectors, etc.).
 };
 
 enum
@@ -381,6 +428,7 @@ struct extsector_t
 		{
 			TArray<sector_t *> AttachedSectors;		// all sectors containing 3dMidtex lines attached to this sector
 			TArray<line_t *> AttachedLines;			// all 3dMidtex lines attached to this sector
+			fixed_t MoveDistance;					// [Dusk] how far from the inital position is the plane at?
 		} Floor, Ceiling;
 	} Midtex;
 
@@ -440,8 +488,10 @@ struct sector_t
 	fixed_t FindLowestCeilingPoint (vertex_t **v) const;
 	fixed_t FindHighestFloorPoint (vertex_t **v) const;
 	void AdjustFloorClip () const;
-	void SetColor(int r, int g, int b, int desat);
-	void SetFade(int r, int g, int b);
+	// [BB] Added bInformClients and bExecuteOnClient.
+	void SetColor(int r, int g, int b, int desat, bool bInformClients = true, bool bExecuteOnClient = false);
+	// [BB] Added bInformClients and bExecuteOnClient.
+	void SetFade(int r, int g, int b, bool bInformClients = true, bool bExecuteOnClient = false);
 	void ClosestPoint(fixed_t x, fixed_t y, fixed_t &ox, fixed_t &oy) const;
 	int GetFloorLight () const;
 	int GetCeilingLight () const;
@@ -723,6 +773,86 @@ struct sector_t
 	int							sectornum;			// for comparing sector copies
 
 	extsector_t	*				e;		// This stores data that requires construction/destruction. Such data must not be copied by R_FakeFlat.
+
+	// GL only stuff starts here
+	float						reflect[2];
+
+	int							dirtyframe[3];		// last frame this sector was marked dirty
+	bool						dirty;				// marked for recalculation
+	bool						transdoor;			// For transparent door hacks
+	fixed_t						transdoorheight;	// for transparent door hacks
+	int							subsectorcount;		// list of subsectors
+	subsector_t **				subsectors;
+	FPortal *					portals[2];			// floor and ceiling portals
+
+	enum
+	{
+		vbo_fakefloor = floor+2,
+		vbo_fakeceiling = ceiling+2,
+	};
+
+	int				vboindex[4];	// VBO indices of the 4 planes this sector uses during rendering
+	fixed_t			vboheight[2];	// Last calculated height for the 2 planes of this actual sector
+	int				vbocount[2];	// Total count of vertices belonging to this sector's planes
+#ifdef IBO_TEST
+	int				iboindex[4];	// VBO indices of the 4 planes this sector uses during rendering
+	int				ibocount;
+#endif
+
+	float GetReflect(int pos) { return gl_plane_reflection_i? reflect[pos] : 0; }
+	bool VBOHeightcheck(int pos) const { return vboheight[pos] == GetPlaneTexZ(pos); }
+
+	enum
+	{
+		INVALIDATE_PLANES = 1,
+		INVALIDATE_OTHER = 2
+	};
+
+	// [BC] Is this sector a floor or ceiling?
+	int		floorOrCeiling;
+
+	// [BC] Has the height changed during the course of the level?
+	bool		bCeilingHeightChange;
+	bool		bFloorHeightChange;
+	secplane_t	SavedCeilingPlane;
+	secplane_t	SavedFloorPlane;
+	fixed_t		SavedCeilingTexZ;
+	fixed_t		SavedFloorTexZ;
+
+	// [BC] Has the flat changed?
+	bool		bFlatChange;
+	FTextureID	SavedFloorPic;
+	FTextureID	SavedCeilingPic;
+
+	// [BC] Has the light level changed?
+	bool	bLightChange;
+	BYTE	SavedLightLevel;
+
+	// [BC] Backup other numberous elements for resetting the map.
+	FDynamicColormap	*SavedColorMap;
+	float				SavedGravity;
+	fixed_t				SavedFloorXOffset;
+	fixed_t				SavedFloorYOffset;
+	fixed_t				SavedCeilingXOffset;
+	fixed_t				SavedCeilingYOffset;
+	fixed_t				SavedFloorXScale;
+	fixed_t				SavedFloorYScale;
+	fixed_t				SavedCeilingXScale;
+	fixed_t				SavedCeilingYScale;
+	fixed_t				SavedFloorAngle;
+	fixed_t				SavedCeilingAngle;
+	fixed_t				SavedBaseFloorAngle;
+	fixed_t				SavedBaseFloorYOffset;
+	fixed_t				SavedBaseCeilingAngle;
+	fixed_t				SavedBaseCeilingYOffset;
+	fixed_t				SavedFriction;
+	fixed_t				SavedMoveFactor;
+	short				SavedSpecial;
+	short				SavedDamage;
+	short				SavedMOD;
+	float				SavedCeilingReflect;
+	float				SavedFloorReflect;
+
 };
 
 FArchive &operator<< (FArchive &arc, sector_t::splane &p);
@@ -782,6 +912,13 @@ struct side_t
 	SWORD		Light;
 	BYTE		Flags;
 	int			Index;		// needed to access custom UDMF fields which are stored in loading order.
+
+	// [BC] Saved properties for when a map resets, or when we need to give updates
+	// to new clients connecting.
+	BYTE		SavedFlags;
+	FTextureID	SavedTopTexture;
+	FTextureID	SavedMidTexture;
+	FTextureID	SavedBottomTexture;
 
 	int GetLightLevel (bool foggy, int baselight, bool noabsolute=false, int *pfakecontrast_usedbygzdoom=NULL) const;
 
@@ -877,6 +1014,13 @@ struct side_t
 
 	vertex_t *V1() const;
 	vertex_t *V2() const;
+
+	//For GL
+	FLightNode * lighthead[2];				// all blended lights that may affect this wall
+
+	seg_t **segs;	// all segs belonging to this sidedef in ascending order. Used for precise rendering
+	int numsegs;
+
 };
 
 FArchive &operator<< (FArchive &arc, side_t::part &p);
@@ -892,7 +1036,12 @@ enum slopetype_t
 	ST_NEGATIVE
 };
 
-
+#define	TEXCHANGE_FRONTTOP		1
+#define	TEXCHANGE_FRONTMEDIUM	2
+#define	TEXCHANGE_FRONTBOTTOM	4
+#define	TEXCHANGE_BACKTOP		8
+#define	TEXCHANGE_BACKMEDIUM	16
+#define	TEXCHANGE_BACKBOTTOM	32
 struct line_t
 {
 	vertex_t	*v1, *v2;	// vertices, from v1 to v2
@@ -911,6 +1060,17 @@ struct line_t
 	sector_t	*frontsector, *backsector;
 	int 		validcount;	// if == validcount, already checked
 	int			locknumber;	// [Dusk] lock number for special
+	// [BC] Have any of this line's textures been changed during the course of the level?
+	// [EP] TODO: remove the 'ul' prefix from this variable, it isn't ULONG anymore
+	unsigned int ulTexChangeFlags;
+
+	// [BC] Saved properties for when a map resets, or when we need to give updates
+	// to new clients connecting.
+	int			SavedSpecial;
+	int			SavedArgs[5];
+	DWORD		SavedFlags;
+	fixed_t		SavedAlpha;
+
 };
 
 // phares 3/14/98
@@ -957,6 +1117,11 @@ struct seg_t
 	// Sector references. Could be retrieved from linedef, too.
 	sector_t*		frontsector;
 	sector_t*		backsector;		// NULL for one-sided lines
+
+	seg_t*			PartnerSeg;
+	subsector_t*	Subsector;
+
+	float			sidefrac;		// relative position of seg's ending vertex on owning sidedef
 };
 
 struct glsegextra_t
@@ -964,6 +1129,9 @@ struct glsegextra_t
 	DWORD		 PartnerSeg;
 	subsector_t *Subsector;
 };
+
+extern seg_t *segs;
+
 
 //
 // A SubSector.
@@ -979,6 +1147,12 @@ enum
 	SSECF_POLYORG = 4,
 };
 
+struct FPortalCoverage
+{
+	DWORD *		subsectors;
+	int			sscount;
+};
+
 struct subsector_t
 {
 	sector_t	*sector;
@@ -990,6 +1164,19 @@ struct subsector_t
 	int			flags;
 
 	void BuildPolyBSP();
+	// subsector related GL data
+	FLightNode *	lighthead[2];	// Light nodes (blended and additive)
+	int				validcount;
+	short			mapsection;
+	char			hacked;			// 1: is part of a render hack
+									// 2: has one-sided walls
+	FPortalCoverage	portalcoverage[2];
+
+	// [BL] Constructor to init GZDoom data
+	subsector_t() : render_sector(NULL), hacked(0)
+	{
+		lighthead[0] = lighthead[1] = NULL;
+	}
 };
 
 
@@ -1038,6 +1225,8 @@ typedef BYTE lighttable_t;	// This could be wider for >8 bit display.
 // This encapsulates the fields of vissprite_t that can be altered by AlterWeaponSprite
 struct visstyle_t
 {
+	// [BB] Dummy variable to stop wallhacks.
+	BYTE			dummy;
 	lighttable_t	*colormap;
 	fixed_t			alpha;
 	FRenderStyle	RenderStyle;

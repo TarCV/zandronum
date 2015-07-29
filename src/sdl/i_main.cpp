@@ -150,7 +150,7 @@ static int DoomSpecificInfo (char *buffer, char *end)
 	int i, p;
 
 	p = 0;
-	p += snprintf (buffer+p, size-p, GAMENAME" version " DOTVERSIONSTR " (" __DATE__ ")\n");
+	p += snprintf (buffer+p, size-p, GAMENAME" version %s (%s)\n", GetVersionString(), GetGitHash());
 #ifdef __VERSION__
 	p += snprintf (buffer+p, size-p, "Compiler version: %s\n", __VERSION__);
 #endif
@@ -244,12 +244,12 @@ int main (int argc, char **argv)
 #if !defined (__APPLE__)
 	{
 		int s[4] = { SIGSEGV, SIGILL, SIGFPE, SIGBUS };
-		cc_install_handlers(argc, argv, 4, s, "zdoom-crash.log", DoomSpecificInfo);
-	}
+		cc_install_handlers(argc, argv, 4, s, GAMENAMELOWERCASE"-crash.log", DoomSpecificInfo);
+ 	}
 #endif // !__APPLE__
-
-	printf(GAMENAME" v%s - SVN revision %s - SDL version\nCompiled on %s\n",
-		DOTVERSIONSTR_NOREV,SVN_REVISION_STRING,__DATE__);
+ 	
+	printf(GAMENAME" %s - %s - SDL version\nCompiled on %s\n",
+		GetVersionString(), GetGitTime(), __DATE__);
 
 	seteuid (getuid ());
     std::set_new_handler (NewFailure);
@@ -264,11 +264,28 @@ int main (int argc, char **argv)
 	
 	setlocale (LC_ALL, "C");
 
-	if (SDL_Init (SDL_INIT_VIDEO|SDL_INIT_TIMER|SDL_INIT_NOPARACHUTE|SDL_INIT_JOYSTICK) == -1)
+	Args = new DArgs(argc, argv);
+
+#ifdef SERVER_ONLY
+	Args->AppendArg( "-host" );
+#endif
+	if ( Args->CheckParm( "-host" ))
 	{
-		fprintf (stderr, "Could not initialize SDL:\n%s\n", SDL_GetError());
-		return -1;
+		if (SDL_Init (SDL_INIT_TIMER|SDL_INIT_NOPARACHUTE) == -1)
+		{
+			fprintf (stderr, "Could not initialize SDL:\n%s\n", SDL_GetError());
+			return -1;
+		}
 	}
+	else
+	{
+		if (SDL_Init (SDL_INIT_VIDEO|SDL_INIT_TIMER|SDL_INIT_NOPARACHUTE|SDL_INIT_JOYSTICK) == -1)
+		{
+			fprintf (stderr, "Could not initialize SDL:\n%s\n", SDL_GetError());
+			return -1;
+		}
+	}
+
 	atterm (SDL_Quit);
 
 	{
@@ -284,7 +301,9 @@ int main (int argc, char **argv)
 		printf("\n");
 	}
 
-	SDL_WM_SetCaption (GAMESIG " " DOTVERSIONSTR " (" __DATE__ ")", NULL);
+	char caption[100];
+	mysnprintf(caption, countof(caption), GAMESIG " %s (%s)", GetVersionString(), GetGitTime());
+	SDL_WM_SetCaption(caption, caption);
 
 #ifdef __APPLE__
 	
@@ -308,8 +327,6 @@ int main (int argc, char **argv)
 	
     try
     {
-		Args = new DArgs(argc, argv);
-
 		/*
 		  killough 1/98:
 
