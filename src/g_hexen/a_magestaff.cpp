@@ -102,6 +102,12 @@ void MStaffSpawn (AActor *pmo, angle_t angle)
 	AActor *mo;
 	AActor *linetarget;
 
+	// [BC] Weapons are handled by the server.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	mo = P_SpawnPlayerMissile (pmo, 0, 0, 8*FRACUNIT,
 		RUNTIME_CLASS(AMageStaffFX2), angle, &linetarget);
 	if (mo)
@@ -149,6 +155,19 @@ DEFINE_ACTION_FUNCTION(AActor, A_MStaffAttack)
 	MStaffSpawn (self, angle);
 	MStaffSpawn (self, angle-ANGLE_1*5);
 	MStaffSpawn (self, angle+ANGLE_1*5);
+
+	// [BC] Apply spread.
+	if ( player->cheats2 & CF2_SPREAD )
+	{
+		MStaffSpawn (self, angle + ( ANGLE_45 / 3 ));
+		MStaffSpawn (self, angle-ANGLE_1*5 + ( ANGLE_45 / 3 ));
+		MStaffSpawn (self, angle+ANGLE_1*5 + ( ANGLE_45 / 3 ));
+
+		MStaffSpawn (self, angle - ( ANGLE_45 / 3 ));
+		MStaffSpawn (self, angle-ANGLE_1*5 - ( ANGLE_45 / 3 ));
+		MStaffSpawn (self, angle+ANGLE_1*5 - ( ANGLE_45 / 3 ));
+	}
+
 	S_Sound (self, CHAN_WEAPON, "MageStaffFire", 1, ATTN_NORM);
 	weapon->MStaffCount = 3;
 }
@@ -228,6 +247,10 @@ void MStaffSpawn2 (AActor *actor, angle_t angle)
 	{
 		mo->target = actor;
 		mo->tracer = P_BlockmapSearch (mo, 10, FrontBlockCheck);
+
+		// [BB] Tell the clients to spawn the missile.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SpawnMissile( mo );
 	}
 }
 
@@ -239,6 +262,13 @@ void MStaffSpawn2 (AActor *actor, angle_t angle)
 
 DEFINE_ACTION_FUNCTION(AActor, A_MageAttack)
 {
+	// [BB] Weapons are handled by the server.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
+
 	if (!self->target) return;
 
 	angle_t angle;
@@ -247,5 +277,9 @@ DEFINE_ACTION_FUNCTION(AActor, A_MageAttack)
 	MStaffSpawn2 (self, angle-ANGLE_1*5);
 	MStaffSpawn2 (self, angle+ANGLE_1*5);
 	S_Sound (self, CHAN_WEAPON, "MageStaffFire", 1, ATTN_NORM);
+
+	// [BB] If we're the server, tell the clients to play the sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SoundActor( self, CHAN_WEAPON, "MageStaffFire", 1, ATTN_NORM );
 }
 

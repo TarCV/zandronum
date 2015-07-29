@@ -12,6 +12,8 @@
 #include "doomstat.h"
 #include "g_level.h"
 #include "farchive.h"
+// [BB] New #includes.
+#include "sv_commands.h"
 
 static FRandom pr_morphmonst ("MorphMonster");
 
@@ -104,7 +106,11 @@ bool P_MorphPlayer (player_t *activator, player_t *p, const PClass *spawntype, i
 	morphed->flags  |= actor->flags & (MF_SHADOW|MF_NOGRAVITY);
 	morphed->flags2 |= actor->flags2 & MF2_FLY;
 	morphed->flags3 |= actor->flags3 & MF3_GHOST;
-	Spawn(((enter_flash) ? enter_flash : RUNTIME_CLASS(ATeleportFog)), actor->x, actor->y, actor->z + TELEFOGHEIGHT, ALLOW_REPLACE);
+	// [WS] We need a fog pointer.
+	AActor *fog = Spawn(((enter_flash) ? enter_flash : RUNTIME_CLASS(ATeleportFog)), actor->x, actor->y, actor->z + TELEFOGHEIGHT, ALLOW_REPLACE);
+	// [WS] Inform the clients of the fog.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SpawnThingNoNetID( fog );
 	actor->player = NULL;
 	actor->flags &= ~(MF_SOLID|MF_SHOOTABLE);
 	actor->flags |= MF_UNMORPHED;
@@ -155,6 +161,22 @@ bool P_MorphPlayer (player_t *activator, player_t *p, const PClass *spawntype, i
 		p->camera = morphed;
 	}
 	morphed->ScoreIcon = actor->ScoreIcon;	// [GRB]
+
+	// [BB] Tell the clients to morph the player.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		const ULONG ulPlayer = static_cast<ULONG> ( morphed->player-players );
+		SERVERCOMMANDS_SpawnPlayer( ulPlayer, PST_LIVE, MAXPLAYERS, 0, true );
+		SERVER_ResetInventory( ulPlayer );
+		// [BB] SERVER_ResetInventory only informs the player ulPlayer. Let the others know of at least the ammo of the player.
+		SERVERCOMMANDS_SyncPlayerAmmoAmount ( ulPlayer, ulPlayer, SVCF_SKIPTHISCLIENT );
+		SERVERCOMMANDS_SetThingFlags( morphed, FLAGSET_FLAGS );
+		SERVERCOMMANDS_SetThingFlags( morphed, FLAGSET_FLAGS2 );
+		SERVERCOMMANDS_SetThingFlags( morphed, FLAGSET_FLAGS3 );
+		if ( morphed->tid != 0 )
+			SERVERCOMMANDS_SetThingTID( morphed );
+	}
+
 	return true;
 }
 
@@ -288,7 +310,7 @@ bool P_UndoPlayerMorph (player_t *activator, player_t *player, int unmorphflag, 
 			// If a custom skin was in use, then reload it
 			// or else the base skin for the player class.
 			if ((unsigned int)player->userinfo.GetSkin() >= PlayerClasses.Size () &&
-				(size_t)player->userinfo.GetSkin() < numskins)
+				(size_t)player->userinfo.GetSkin() < skins.Size())
 			{
 
 				skinindex = player->userinfo.GetSkin();
@@ -311,7 +333,11 @@ bool P_UndoPlayerMorph (player_t *activator, player_t *player, int unmorphflag, 
 	angle = mo->angle >> ANGLETOFINESHIFT;
 	if (exit_flash != NULL)
 	{
-		Spawn(exit_flash, pmo->x + 20*finecosine[angle], pmo->y + 20*finesine[angle], pmo->z + TELEFOGHEIGHT, ALLOW_REPLACE);
+		// [WS] We need a fog pointer.
+		AActor *fog = Spawn(exit_flash, pmo->x + 20*finecosine[angle], pmo->y + 20*finesine[angle], pmo->z + TELEFOGHEIGHT, ALLOW_REPLACE);
+		// [WS] Inform the clients of the fog.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SpawnThingNoNetID( fog );
 	}
 	mo->SetupWeaponSlots();		// Use original class's weapon slots.
 	beastweap = player->ReadyWeapon;
@@ -358,6 +384,22 @@ bool P_UndoPlayerMorph (player_t *activator, player_t *player, int unmorphflag, 
 	{
 		hxarmor->Slots[4] = mo->GetClass()->Meta.GetMetaFixed (APMETA_Hexenarmor0);
 	}
+	// [BB] Tell the clients to unmorph the player, also give back the original inventory to the player.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		// [BB] The clients start their reactiontime later on their end. Try to adjust for this.
+		SERVER_AdjustPlayersReactiontime ( static_cast<ULONG> ( player - players ) );
+
+		SERVERCOMMANDS_SpawnPlayer( ULONG( player-players ), PST_LIVE );
+		SERVER_ResetInventory( ULONG( player-players ));
+		SERVERCOMMANDS_SetThingFlags( player->mo, FLAGSET_FLAGS );
+		SERVERCOMMANDS_SetThingFlags( player->mo, FLAGSET_FLAGS2 );
+		SERVERCOMMANDS_SetThingFlags( player->mo, FLAGSET_FLAGS3 );
+		// [WS] Inform clients the state of the unmorphed player.
+		SERVERCOMMANDS_SetThingFrame( player->mo, player->mo->state, MAXPLAYERS, 0, false );
+		if ( player->mo->tid != 0 )
+			SERVERCOMMANDS_SetThingTID( player->mo );
+	}
 	return true;
 }
 
@@ -382,6 +424,9 @@ bool P_MorphMonster (AActor *actor, const PClass *spawntype, int duration, int s
 	}
 
 	morphed = static_cast<AMorphedMonster *>(Spawn (spawntype, actor->x, actor->y, actor->z, NO_REPLACE));
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_DestroyThing( actor );
+
 	DObject::StaticPointerSubstitution (actor, morphed);
 	morphed->tid = actor->tid;
 	morphed->angle = actor->angle;
@@ -410,7 +455,11 @@ bool P_MorphMonster (AActor *actor, const PClass *spawntype, int duration, int s
 	actor->flags &= ~(MF_SOLID|MF_SHOOTABLE);
 	actor->flags |= MF_UNMORPHED;
 	actor->renderflags |= RF_INVISIBLE;
-	Spawn(((enter_flash) ? enter_flash : RUNTIME_CLASS(ATeleportFog)), actor->x, actor->y, actor->z + TELEFOGHEIGHT, ALLOW_REPLACE);
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SpawnThing( morphed );
+	AActor* fog = Spawn(((enter_flash) ? enter_flash : RUNTIME_CLASS(ATeleportFog)), actor->x, actor->y, actor->z + TELEFOGHEIGHT, ALLOW_REPLACE);
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SpawnThingNoNetID( fog );
 	return true;
 }
 
@@ -469,8 +518,14 @@ bool P_UndoMonsterMorph (AMorphedMonster *beast, bool force)
 	beast->UnmorphedMe = NULL;
 	DObject::StaticPointerSubstitution (beast, actor);
 	const PClass *exit_flash = beast->MorphExitFlash;
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_DestroyThing( beast );
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SpawnThing( actor );
 	beast->Destroy ();
-	Spawn(exit_flash, beast->x, beast->y, beast->z + TELEFOGHEIGHT, ALLOW_REPLACE);
+	AActor* fog = Spawn(exit_flash, beast->x, beast->y, beast->z + TELEFOGHEIGHT, ALLOW_REPLACE);
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SpawnThingNoNetID( fog );
 	return true;
 }
 

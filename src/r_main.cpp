@@ -28,6 +28,10 @@
 #include <stdlib.h>
 #include <math.h>
 
+// [BB] network.h has to be included before stats.h under Linux.
+// The reason should be investigated.
+#include "network.h"
+
 #include "templates.h"
 #include "doomdef.h"
 #include "d_net.h"
@@ -57,6 +61,9 @@
 #include "v_font.h"
 #include "r_data/colormaps.h"
 #include "farchive.h"
+// [BC] New #includes.
+#include "sv_commands.h"
+
 
 // MACROS ------------------------------------------------------------------
 
@@ -263,7 +270,7 @@ void R_SetVisibility (float vis)
 
 	CurrentVisibility = vis;
 
-	if (FocalTangent == 0)
+	if (FocalTangent == 0 || FocalLengthY == 0)
 	{ // If r_visibility is called before the renderer is all set up, don't
 	  // divide by zero. This will be called again later, and the proper
 	  // values can be initialized then.
@@ -327,7 +334,8 @@ CCMD (r_visibility)
 	{
 		Printf ("Visibility is %g\n", R_GetVisibility());
 	}
-	else if (!netgame)
+	// [BB] !netgame -> ( NETWORK_GetState( ) != NETSTATE_CLIENT )
+	else if ( NETWORK_GetState( ) != NETSTATE_CLIENT )
 	{
 		R_SetVisibility ((float)atof (argv[1]));
 	}
@@ -441,6 +449,27 @@ CUSTOM_CVAR (Int, r_columnmethod, 1, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 void R_InitRenderer()
 {
 	atterm(R_ShutdownRenderer);
+	// [BC] In server mode, the only data we need to load are sprites and textures.
+	// This is because the server needs to know if objects have valid frames so it can
+	// decide whether or not it's okay to spawn them, and so servers have valid texture
+	// references to send out to clients if textures change during the course of the map.
+	/* [BB] Not compatible with the ZDoom updates.
+	// [BB] 2.0 didn't have this and it didn't seem to cause problems.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		TexMan.AddGroup( "S_START", "S_END", ns_sprites, FTexture::TEX_Sprite );
+		R_InitPatches ();	// Initializes "special" textures that have no external references
+		R_InitTextures ();
+		TexMan.AddGroup("F_START", "F_END", ns_flats, FTexture::TEX_Flat);
+		R_InitBuildTiles ();
+		TexMan.AddGroup("TX_START", "TX_END", ns_newtextures, FTexture::TEX_Override);
+		TexMan.DefaultTexture = TexMan.CheckForTexture ("-NOFLAT-", FTexture::TEX_Override, 0);
+		// [BB] The server currently needs the fonts at least for DLevelScript::DoSetFont.
+		V_InitFonts();
+		return;
+	}
+	*/
+
 	// viewwidth / viewheight are set by the defaults
 	clearbufshort (zeroarray, MAXWIDTH, 0);
 

@@ -402,7 +402,8 @@ void DQuitMenu::HandleResult(bool res)
 {
 	if (res)
 	{
-		if (!netgame)
+		// [BB] !netgame -> ( NETWORK_GetState( ) == NETSTATE_SINGLE )
+		if ( NETWORK_GetState( ) == NETSTATE_SINGLE )
 		{
 			if (gameinfo.quitSound.IsNotEmpty())
 			{
@@ -466,7 +467,8 @@ IMPLEMENT_CLASS(DEndGameMenu)
 
 DEndGameMenu::DEndGameMenu(bool playsound)
 {
-	Init(NULL, GStrings(netgame ? "NETEND" : "ENDGAME"), 0, playsound);
+	// [BB] netgame -> ( NETWORK_GetState( ) != NETSTATE_SINGLE )
+	Init(NULL, GStrings(( NETWORK_GetState( ) != NETSTATE_SINGLE ) ? "NETEND" : "ENDGAME"), 0, playsound);
 }
 
 //=============================================================================
@@ -480,7 +482,8 @@ void DEndGameMenu::HandleResult(bool res)
 	if (res)
 	{
 		M_ClearMenus ();
-		if (!netgame)
+		// [BB] !netgame -> ( NETWORK_GetState( ) == NETSTATE_SINGLE )
+		if ( NETWORK_GetState( ) == NETSTATE_SINGLE )
 		{
 			D_StartTitle ();
 		}
@@ -579,7 +582,8 @@ void DQuickSaveMenu::HandleResult(bool res)
 
 CCMD (quicksave)
 {	// F6
-	if (!usergame || (players[consoleplayer].health <= 0 && !multiplayer))
+	// [BB] !multiplayer -> ( NETWORK_GetState( ) == NETSTATE_SINGLE )
+	if (!usergame || (players[consoleplayer].health <= 0 && ( NETWORK_GetState( ) == NETSTATE_SINGLE )))
 	{
 		S_Sound (CHAN_VOICE | CHAN_UI, "menu/invalid", snd_menuvolume, ATTN_NONE);
 		return;
@@ -668,7 +672,8 @@ CCMD (quickload)
 {	// F9
 	M_StartControlPanel (true);
 
-	if (netgame)
+	// [BB] netgame -> ( NETWORK_GetState( ) != NETSTATE_SINGLE )
+	if ( NETWORK_GetState( ) != NETSTATE_SINGLE )
 	{
 		M_StartMessage (GStrings("QLOADNET"), 1);
 		return;
