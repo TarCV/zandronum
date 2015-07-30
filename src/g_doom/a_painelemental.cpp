@@ -41,7 +41,14 @@ void A_PainShootSkull (AActor *self, angle_t angle, const PClass *spawntype, int
 	angle_t an;
 	int prestep;
 
+	// [BC] Spawning of additional lost souls is server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (spawntype == NULL) return;
+
 	if (self->DamageType==NAME_Massacre) return;
 
 	// [RH] check to make sure it's not too close to the ceiling
@@ -70,6 +77,11 @@ void A_PainShootSkull (AActor *self, angle_t angle, const PClass *spawntype, int
 
 		while ( (othink = iterator.Next ()) )
 		{
+			// [BB] Don't count actors hidden by HideOrDestroyIfSafe().
+			AActor *actor = static_cast<AActor *> ( othink );
+			if ( actor && ( actor->state == RUNTIME_CLASS ( AInventory )->ActorInfo->FindState("HideIndefinitely") ) )
+				++count;
+
 			if (--count == 0)
 				return;
 		}
@@ -110,6 +122,10 @@ void A_PainShootSkull (AActor *self, angle_t angle, const PClass *spawntype, int
 	}
 
 	other = Spawn (spawntype, x, y, z, ALLOW_REPLACE);
+
+	// [BC] If we're the server, tell clients to spawn the actor.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SpawnThing( other );
 
 	// Check to see if the new Lost Soul's z value is above the
 	// ceiling of its new sector, or below the floor. If so, kill it.

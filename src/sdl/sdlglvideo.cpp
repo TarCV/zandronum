@@ -1,3 +1,4 @@
+#ifndef NO_GL
 
 // HEADER FILES ------------------------------------------------------------
 
@@ -415,3 +416,5 @@ void SDLGLFB::NewRefreshRate ()
 {
 }
 
+
+#endif
