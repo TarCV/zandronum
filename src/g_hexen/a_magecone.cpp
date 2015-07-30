@@ -73,6 +73,16 @@ DEFINE_ACTION_FUNCTION(AActor, A_FireConePL1)
 	}
 	S_Sound (self, CHAN_WEAPON, "MageShardsFire", 1, ATTN_NORM);
 
+	// [BC] Weapons are handled by the server.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
+	// [BC] If we're the server, play the sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_WeaponSound( ULONG( player - players ), "MageShardsFire", ULONG( player - players ), SVCF_SKIPTHISCLIENT );
+
 	damage = 90+(pr_cone()&15);
 	for (i = 0; i < 16; i++)
 	{
@@ -81,6 +91,11 @@ DEFINE_ACTION_FUNCTION(AActor, A_FireConePL1)
 		if (linetarget)
 		{
 			P_DamageMobj (linetarget, self, self, damage, NAME_Ice);
+
+			// [BC] Apply spread.
+			if ( player->cheats2 & CF2_SPREAD )
+				P_DamageMobj (linetarget, self, self, damage * 2, NAME_Ice);
+
 			conedone = true;
 			break;
 		}
@@ -98,6 +113,30 @@ DEFINE_ACTION_FUNCTION(AActor, A_FireConePL1)
 			mo->target = self;
 			mo->args[0] = 3;		// Mark Initial shard as super damage
 		}
+
+		// [BC] Apply spread.
+		if ( player->cheats2 & CF2_SPREAD )
+		{
+			mo = P_SpawnPlayerMissile (self, RUNTIME_CLASS(AFrostMissile), self->angle + ( ANGLE_45 / 3 ));
+			if (mo)
+			{
+				mo->special1 = SHARDSPAWN_LEFT|SHARDSPAWN_DOWN|SHARDSPAWN_UP
+					|SHARDSPAWN_RIGHT;
+				mo->special2 = 3; // Set sperm count (levels of reproductivity)
+				mo->target = self;
+				mo->args[0] = 3;		// Mark Initial shard as super damage
+			}
+
+			mo = P_SpawnPlayerMissile (self, RUNTIME_CLASS(AFrostMissile), self->angle - ( ANGLE_45 / 3 ));
+			if (mo)
+			{
+				mo->special1 = SHARDSPAWN_LEFT|SHARDSPAWN_DOWN|SHARDSPAWN_UP
+					|SHARDSPAWN_RIGHT;
+				mo->special2 = 3; // Set sperm count (levels of reproductivity)
+				mo->target = self;
+				mo->args[0] = 3;		// Mark Initial shard as super damage
+			}
+		}
 	}
 }
 
@@ -112,6 +151,12 @@ DEFINE_ACTION_FUNCTION(AActor, A_ShedShard)
 	AActor *mo;
 	int spawndir = self->special1;
 	int spermcount = self->special2;
+
+	// [BC] Let the server do this.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
 
 	if (spermcount <= 0) return;				// No sperm left
 	self->special2 = 0;
@@ -128,6 +173,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_ShedShard)
 			mo->special2 = spermcount;
 			mo->velz = self->velz;
 			mo->args[0] = (spermcount==3)?2:0;
+
+			// [BC] Tell clients to spawn the shard.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SpawnMissileExact( mo );
 		}
 	}
 	if (spawndir & SHARDSPAWN_RIGHT)
@@ -140,6 +189,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_ShedShard)
 			mo->special2 = spermcount;
 			mo->velz = self->velz;
 			mo->args[0] = (spermcount==3)?2:0;
+
+			// [BC] Tell clients to spawn the shard.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SpawnMissileExact( mo );
 		}
 	}
 	if (spawndir & SHARDSPAWN_UP)
@@ -155,6 +208,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_ShedShard)
 				mo->special1 = SHARDSPAWN_UP;
 			mo->special2 = spermcount;
 			mo->args[0] = (spermcount==3)?2:0;
+
+			// [BC] Tell clients to spawn the shard.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SpawnMissileExact( mo );
 		}
 	}
 	if (spawndir & SHARDSPAWN_DOWN)
@@ -171,6 +228,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_ShedShard)
 			mo->special2 = spermcount;
 			mo->target = self->target;
 			mo->args[0] = (spermcount==3)?2:0;
+
+			// [BC] Tell clients to spawn the shard.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SpawnMissileExact( mo );
 		}
 	}
 }
