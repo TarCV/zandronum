@@ -8,6 +8,8 @@ ACTOR Blood
 	+NOBLOCKMAP
 	+NOTELEPORT
 	+ALLOWPARTICLES
+	// [BC]
+	+NONETID
 	States
 	{
 	Spawn:

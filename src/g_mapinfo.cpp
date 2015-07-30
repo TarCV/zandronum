@@ -102,6 +102,21 @@ level_info_t *FindLevelInfo (const char *mapname, bool allowdefault)
 	}
 	return NULL;
 }
+//==========================================================================
+//
+// [RC] Finds a level given its name.
+// Like FindLevelInfo but returns NULL if the level wasn't found.
+//
+//==========================================================================
+
+level_info_t *FindLevelByName( const char *mapname )
+{
+	int i = FindWadLevelInfo( mapname );
+	if ( i > -1 )
+		return &wadlevelinfos[i];
+	else
+		return NULL;
+}
 
 //==========================================================================
 //
@@ -241,6 +256,8 @@ void level_info_t::Reset()
 		flags2 = 0;
 	else
 		flags2 = LEVEL2_LAXMONSTERACTIVATION;
+	// [BB]
+	flagsZA = 0;
 	Music = "";
 	LevelName = "";
 	strcpy (fadetable, "COLORMAP");
@@ -790,6 +807,26 @@ void FMapInfoParser::ParseNextMap(char *mapname)
 		{
 			mysnprintf(mapname, 11, "enDSeQ%04x", int(seq));
 		}
+		// [BB] If we're in a multiplayer game, don't do the finale, just go back to the
+		// beginning.
+		else if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			if (strnicmp (sc.String, "EndGame", 7) == 0)
+			{
+				switch (sc.String[7])
+				{
+				case '1':	sprintf (sc.String, "E1M1");	break;
+				case '2':	sprintf (sc.String, "E2M1");	break;
+				case '3':	sprintf (sc.String, "E3M1");	break;
+				case '4':	sprintf (sc.String, "E4M1");	break;
+				case 'C':	sprintf (sc.String, "MAP01");	break;
+//				case 'W':	type = END_Underwater;	break;
+//				case 'S':	type = END_Strife;		break;
+				default:	sprintf (sc.String, "MAP01");	break;
+				}
+				strncpy (mapname, sc.String, 8);
+			}
+		}
 	}
 }
 
@@ -1192,6 +1229,7 @@ enum EMIType
 	MITYPE_CLRFLAG2,
 	MITYPE_SCFLAGS2,
 	MITYPE_COMPATFLAG,
+	MITYPE_SETFLAGZA, // [BB]
 };
 
 struct MapInfoFlagHandler
@@ -1276,7 +1314,9 @@ MapFlagHandlers[] =
 	{ "rememberstate",					MITYPE_CLRFLAG2,	LEVEL2_FORGETSTATE, 0 },
 	{ "unfreezesingleplayerconversations",MITYPE_SETFLAG2,	LEVEL2_CONV_SINGLE_UNFREEZE, 0 },
 	{ "spawnwithweaponraised",			MITYPE_SETFLAG2,	LEVEL2_PRERAISEWEAPON, 0 },
-	{ "nobotnodes",						MITYPE_IGNORE,	0, 0 },		// Skulltag option: nobotnodes
+	{ "nobotnodes",						MITYPE_SETFLAGZA,	LEVEL_ZA_NOBOTNODES, 0 },// [BC] Allow the prevention of spawning bot nodes (helpful for very large maps).
+	{ "lobby",							MITYPE_SETFLAGZA,	LEVEL_ZA_ISLOBBY, 0 },	// [AM] Prefer this.
+	{ "islobby",						MITYPE_SETFLAGZA,	LEVEL_ZA_ISLOBBY, 0 },	// [BB]
 	{ "compat_shorttex",				MITYPE_COMPATFLAG, COMPATF_SHORTTEX, 0 },
 	{ "compat_stairs",					MITYPE_COMPATFLAG, COMPATF_STAIRINDEX, 0 },
 	{ "compat_limitpain",				MITYPE_COMPATFLAG, COMPATF_LIMITPAIN, 0 },
@@ -1402,6 +1442,12 @@ void FMapInfoParser::ParseMapDefinition(level_info_t &info)
 				info.compatmask2 |= handler->data2;
 			}
 			break;
+
+			// [BB]
+			case MITYPE_SETFLAGZA:
+				info.flagsZA |= handler->data1;
+				info.flagsZA |= handler->data2;
+				break;
 
 			default:
 				// should never happen
@@ -1569,6 +1615,9 @@ level_info_t *FMapInfoParser::ParseMapHeader(level_info_t &defaultinfo)
 // key "Shortcut key for the menu"
 // noskillmenu
 // remove
+// [BC] botepisode
+// [BC] botskillname "Title at botskill menu"
+// [BC] botskillpicname "Picture to display as botskill menu title"
 //
 //==========================================================================
 
@@ -1583,6 +1632,10 @@ void FMapInfoParser::ParseEpisodeInfo ()
 	bool noskill = false;
 	bool optional = false;
 	bool extended = false;
+	//[BC]
+	bool	bBotEpisode = false;
+	char	szBotSkillTitle[64];
+	bool	bBotSkillPicIsGFX = false;
 
 	// Get map name
 	sc.MustGetString ();
@@ -1637,6 +1690,22 @@ void FMapInfoParser::ParseEpisodeInfo ()
 		else if (sc.Compare("noskillmenu"))
 		{
 			noskill = true;
+		}
+		else if ( sc.Compare( "botepisode" ))
+		{
+			bBotEpisode = true;
+		}
+		else if ( sc.Compare( "botskillname" ))
+		{
+			sc.MustGetString( );
+			sprintf( szBotSkillTitle, "%s", sc.String );
+			bBotSkillPicIsGFX = false;
+		}
+		else if ( sc.Compare( "botskillpicname" ))
+		{
+			sc.MustGetString( );
+			sprintf( szBotSkillTitle, "%s", sc.String );
+			bBotSkillPicIsGFX = true;
 		}
 		else if (!ParseCloseBrace())
 		{
@@ -1696,6 +1765,20 @@ void FMapInfoParser::ParseEpisodeInfo ()
 		epi->mPicName = pic;
 		epi->mShortcut = tolower(key);
 		epi->mNoSkill = noskill;
+		/* [BB] FIXME
+		EpisodeMenu[i].bBotSkill = bBotEpisode;
+		EpisodeMenu[i].bBotSkillFullText = !bBotSkillPicIsGFX;
+		if ( bBotEpisode )
+			sprintf( EpisodeSkillHeaders[i], "%s", szBotSkillTitle );
+		*/
+
+		/* [BB] We can't do this here.
+		if ( bBotSkillPicIsGFX )
+		{
+			if ( !TexMan.CheckForTexture( szBotSkillTitle, FTexture::TEX_MiscPatch, 0 ).Exists() )
+				TexMan.AddPatch( szBotSkillTitle );
+		}
+		*/
 	}
 }
 

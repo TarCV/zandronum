@@ -39,7 +39,11 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FatAttack1)
 	A_FaceTarget (self);
 	// Change direction  to ...
 	self->angle += FATSPREAD;
-	P_SpawnMissile (self, self->target, spawntype);
+	missile = P_SpawnMissile (self, self->target, spawntype);
+
+	// [BC] If we're the server, tell clients to spawn the missile.
+	if (( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( missile ))
+		SERVERCOMMANDS_SpawnMissile( missile );
 
 	missile = P_SpawnMissile (self, self->target, spawntype);
 	if (missile != NULL)
@@ -48,6 +52,10 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FatAttack1)
 		an = missile->angle >> ANGLETOFINESHIFT;
 		missile->velx = FixedMul (missile->Speed, finecosine[an]);
 		missile->vely = FixedMul (missile->Speed, finesine[an]);
+
+		// [BC] If we're the server, tell clients to spawn the missile.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SpawnMissile( missile );
 	}
 }
 
@@ -67,7 +75,11 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FatAttack2)
 	A_FaceTarget (self);
 	// Now here choose opposite deviation.
 	self->angle -= FATSPREAD;
-	P_SpawnMissile (self, self->target, spawntype);
+	missile = P_SpawnMissile (self, self->target, spawntype);
+
+	// [BC] If we're the server, tell clients to spawn the missile.
+	if (( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( missile ))
+		SERVERCOMMANDS_SpawnMissile( missile );
 
 	missile = P_SpawnMissile (self, self->target, spawntype);
 	if (missile != NULL)
@@ -76,6 +88,10 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FatAttack2)
 		an = missile->angle >> ANGLETOFINESHIFT;
 		missile->velx = FixedMul (missile->Speed, finecosine[an]);
 		missile->vely = FixedMul (missile->Speed, finesine[an]);
+
+		// [BC] If we're the server, tell clients to spawn the missile.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SpawnMissile( missile );
 	}
 }
 
@@ -101,6 +117,10 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FatAttack3)
 		an = missile->angle >> ANGLETOFINESHIFT;
 		missile->velx = FixedMul (missile->Speed, finecosine[an]);
 		missile->vely = FixedMul (missile->Speed, finesine[an]);
+
+		// [BC] If we're the server, tell clients to spawn the missile.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SpawnMissile( missile );
 	}
 
 	missile = P_SpawnMissile (self, self->target, spawntype);
@@ -110,6 +130,10 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FatAttack3)
 		an = missile->angle >> ANGLETOFINESHIFT;
 		missile->velx = FixedMul (missile->Speed, finecosine[an]);
 		missile->vely = FixedMul (missile->Speed, finesine[an]);
+
+		// [BC] If we're the server, tell clients to spawn the missile.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SpawnMissile( missile );
 	}
 }
 

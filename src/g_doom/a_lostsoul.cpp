@@ -25,6 +25,12 @@ void A_SkullAttack(AActor *self, fixed_t speed)
 	angle_t an;
 	int dist;
 
+	// [BC] This is handled server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (!self->target)
 		return;
 				
@@ -32,6 +38,15 @@ void A_SkullAttack(AActor *self, fixed_t speed)
 	self->flags |= MF_SKULLFLY;
 
 	S_Sound (self, CHAN_VOICE, self->AttackSound, 1, ATTN_NORM);
+
+	// [BC] If we're the server, tell clients play this sound.
+	// [BB] And tell them of MF_SKULLFLY.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		SERVERCOMMANDS_SetThingFlags( self, FLAGSET_FLAGS );
+		SERVERCOMMANDS_SoundActor( self, CHAN_VOICE, S_GetName( self->AttackSound ), 1, ATTN_NORM );
+	}
+
 	A_FaceTarget (self);
 	an = self->angle >> ANGLETOFINESHIFT;
 	self->velx = FixedMul (speed, finecosine[an]);
@@ -42,6 +57,10 @@ void A_SkullAttack(AActor *self, fixed_t speed)
 	if (dist < 1)
 		dist = 1;
 	self->velz = (dest->z + (dest->height>>1) - self->z) / dist;
+
+	// [BC] Update the lost soul's momentum.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_MoveThingExact( self, CM_X|CM_Y|CM_Z|CM_MOMX|CM_MOMY|CM_MOMZ );
 }
 
 DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_SkullAttack)

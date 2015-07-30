@@ -44,6 +44,10 @@
 #include "i_system.h"
 #include "gl/system/gl_cvars.h"
 
+#ifdef _WIN32 // [BB] Detect some kinds of glBegin hooking.
+char myGlBeginCharArray[4] = {0,0,0,0};
+#endif
+
 #if defined (unix) || defined (__APPLE__)
 #include <SDL.h>
 #define wglGetProcAddress(x) (*SDL_GL_GetProcAddress)(x)
@@ -515,7 +519,7 @@ static bool SetupPixelFormat(HDC hDC, bool allowsoftware, bool nostencil, int mu
 {
 	int colorDepth;
 	HDC deskDC;
-	int attributes[26];
+	int attributes[28]; // [BB] Added two attributes.
 	int pixelFormat;
 	unsigned int numFormats;
 	float attribsFloat[] = {0.0f, 0.0f};
@@ -584,8 +588,13 @@ static bool SetupPixelFormat(HDC hDC, bool allowsoftware, bool nostencil, int mu
 					attributes[23]	=	0;
 				}
 			
-				attributes[24]	=	0;
-				attributes[25]	=	0;
+				// [BB] Starting with driver version 314.07, NVIDIA GeForce cards support OpenGL quad buffered
+				// stereo rendering with 3D Vision hardware. Select the corresponding attribute here.
+				const int offset = ( multisample > 0 ) ? 24 : 20;
+				attributes[offset]	=	WGL_STEREO_ARB;
+				attributes[offset+1]	=	true;
+				attributes[offset+2]	=	0;
+				attributes[offset+3]	=	0;
 			
 				if (!wglChoosePixelFormatARB(hDC, attributes, attribsFloat, 1, &pixelFormat, &numFormats))
 				{
@@ -1071,6 +1080,11 @@ void APIENTRY GetContext(RenderContext & gl)
 
 	gl.BlendEquation = glBlendEquationDummy;
 	gl.SetVSync = SetVSync;
+
+#ifdef _WIN32 // [BB] Detect some kinds of glBegin hooking.
+	for ( int i = 0; i < 4; ++i )
+		myGlBeginCharArray[i] = reinterpret_cast<char *>(gl.Begin)[i];
+#endif
 
 #if !defined (unix) && !defined (__APPLE__)
 	ReadInitExtensions();

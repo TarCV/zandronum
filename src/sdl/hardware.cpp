@@ -47,7 +47,9 @@
 #include "v_text.h"
 #include "doomstat.h"
 #include "m_argv.h"
+#ifndef NO_GL
 #include "sdlglvideo.h"
+#endif
 #include "r_renderer.h"
 #include "r_swrenderer.h"
 
@@ -58,13 +60,20 @@ EXTERN_CVAR (Float, vid_winscale)
 IVideo *Video;
 
 extern int NewWidth, NewHeight, NewBits, DisplayBits;
+#ifndef NO_GL
 bool V_DoModeSetup (int width, int height, int bits);
 void I_RestartRenderer();
+#endif
 
-int currentrenderer;
+#ifndef NO_GL
+int currentrenderer=1;
+#else
+int currentrenderer=0;
+#endif
 
 // [ZDoomGL]
-CUSTOM_CVAR (Int, vid_renderer, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_NOINITCALL)
+// [BB] Changed default.
+CUSTOM_CVAR (Int, vid_renderer, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_NOINITCALL)
 {
 	// 0: Software renderer
 	// 1: OpenGL renderer
@@ -105,13 +114,24 @@ void I_InitGraphics ()
 {
 	UCVarValue val;
 
+#ifndef NO_GL
+	// hack by stevenaaus to force software mode if no 32bpp
+	const SDL_VideoInfo *i = SDL_GetVideoInfo();
+	if ((i->vfmt)->BytesPerPixel != 4) {
+		fprintf (stderr, "n32 bit colour not found, disabling OpenGL.n");
+		fprintf (stderr, "To enable OpenGL, restart X with 32 color (try 'startx -- :1 -depth 24'), and enable OpenGL in the Display Options.nn");
+	} 
+#endif
 	val.Bool = !!Args->CheckParm ("-devparm");
 	ticker.SetGenericRepDefault (val, CVAR_Bool);
-	
+
+#ifndef NO_GL
 	//currentrenderer = vid_renderer;
 	if (currentrenderer==1) Video = new SDLGLVideo(0);
 	else Video = new SDLVideo (0);
-	
+#else
+	Video = new SDLVideo (0);
+#endif
 	if (Video == NULL)
 		I_FatalError ("Failed to initialize display");
 
@@ -308,12 +328,17 @@ CUSTOM_CVAR (Int, vid_maxfps, 200, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 	}
 }
 
-extern int NewWidth, NewHeight, NewBits, DisplayBits;
-
+#ifndef NO_GL
+CUSTOM_CVAR (Bool, fullscreen, false, CVAR_ARCHIVE|CVAR_GLOBALCONFIG|CVAR_NOINITCALL)
+#else
 CUSTOM_CVAR (Bool, fullscreen, false, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+#endif
 {
-	NewWidth = screen->GetWidth();
-	NewHeight = screen->GetHeight();
+	if ( screen )
+	{
+		NewWidth = screen->GetWidth();
+		NewHeight = screen->GetHeight();
+	}
 	NewBits = DisplayBits;
 	setmodeneeded = true;
 }
@@ -330,7 +355,11 @@ CUSTOM_CVAR (Float, vid_winscale, 1.f, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 		NewWidth = screen->GetWidth();
 		NewHeight = screen->GetHeight();
 		NewBits = DisplayBits;
+#ifdef NO_GL
 		setmodeneeded = true;
+#else
+		//setmodeneeded = true;	// This CVAR doesn't do anything and only causes problems!
+#endif
 	}
 }
 

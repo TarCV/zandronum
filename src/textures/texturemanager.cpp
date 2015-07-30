@@ -53,6 +53,8 @@
 #include "r_renderer.h"
 #include "r_sky.h"
 #include "textures/textures.h"
+// [BB] New #includes.
+#include "cl_demo.h"
 
 FTextureManager TexMan;
 
@@ -1228,7 +1230,12 @@ void FTextureManager::PrecacheLevel (void)
 	BYTE *hitlist;
 	int cnt = NumTextures();
 
-	if (demoplayback)
+	// [BC] The server doesn't need to precache the level.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
+
+	// [BC] Support for client-side demos.
+	if (demoplayback || CLIENTDEMO_IsPlaying( ))
 		return;
 
 	hitlist = new BYTE[cnt];
