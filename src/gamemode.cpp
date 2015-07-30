@@ -463,7 +463,7 @@ bool GAMEMODE_IsGameInProgressOrResultSequence( void )
 //
 bool GAMEMODE_IsLobbyMap( void )
 {
-	return level.flags2 & LEVEL2_ISLOBBY || stricmp(level.mapname, lobby) == 0;
+	return level.flagsZA & LEVEL_ZA_ISLOBBY || stricmp(level.mapname, lobby) == 0;
 }
 
 //*****************************************************************************
@@ -471,14 +471,14 @@ bool GAMEMODE_IsLobbyMap( void )
 bool GAMEMODE_IsLobbyMap( const char* mapname )
 {
 	// [BB] The level is not loaded yet, so we can't use level.flags2 directly.
-	const level_info_t *levelinfo = FindLevelInfo( mapname );
+	const level_info_t *levelinfo = FindLevelInfo( mapname, false );
 
 	if (levelinfo == NULL)
 	{
 		return false;
 	}
 
-	return levelinfo->flags2 & LEVEL2_ISLOBBY || stricmp( levelinfo->mapname, lobby ) == 0;
+	return levelinfo->flagsZA & LEVEL_ZA_ISLOBBY || stricmp( levelinfo->mapname, lobby ) == 0;
 }
 
 //*****************************************************************************
@@ -539,8 +539,7 @@ void GAMEMODE_GetTimeLeftString( FString &TimeLeftString )
 void GAMEMODE_RespawnDeadSpectatorsAndPopQueue( BYTE Playerstate )
 {
 	// [BB] This is server side.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -609,8 +608,7 @@ void GAMEMODE_RespawnDeadSpectatorsAndPopQueue( BYTE Playerstate )
 void GAMEMODE_RespawnAllPlayers( BOTEVENT_e BotEvent, playerstate_t PlayerState )
 {
 	// [BB] This is server side.
-	if (( NETWORK_GetState( ) != NETSTATE_CLIENT ) &&
-		( CLIENTDEMO_IsPlaying( ) == false ))
+	if ( NETWORK_InClientMode() == false )
 	{
 		// Respawn the players.
 		for ( ULONG ulIdx = 0; ulIdx < MAXPLAYERS; ulIdx++ )
@@ -684,26 +682,6 @@ void GAMEMODE_ResetPlayersKillCount( const bool bInformClients )
 			SERVERCOMMANDS_SetPlayerPoints ( ulIdx );
 		}
 	}
-}
-//*****************************************************************************
-//
-bool GAMEMODE_IsActorVisibleToConsoleplayersCamera( const AActor* pActor )
-{
-	// [BB] Safety check. This should never be NULL. Nevertheless, we return true to leave the default ZDoom behavior unaltered.
-	if ( players[consoleplayer].camera == NULL )
-		return true;
-
-	if ( TEAM_IsActorVisibleToPlayer( pActor, players[consoleplayer].camera->player ) == false )
-		return false;
-
-	const player_t* pPlayer = players[consoleplayer].camera->player;
-
-	if ( ( pActor->VisibleToPlayerClass != NAME_None )
-		&& pPlayer && pPlayer->mo && ( pActor->VisibleToPlayerClass != pPlayer->mo->GetClass()->TypeName ) )
-		return false;
-
-	// [BB] Passed all checks.
-	return true;
 }
 
 //*****************************************************************************
@@ -802,7 +780,7 @@ void GAMEMODE_AdjustActorSpawnFlags ( AActor *pActor )
 void GAMEMODE_SpawnSpecialGamemodeThings ( void )
 {
 	// [BB] The server will let the clients know of any necessary spawns.
-	if ( NETWORK_InClientMode( ) == false )
+	if ( NETWORK_InClientMode() == false )
 	{
 		// Spawn the terminator artifact in terminator mode.
 		if ( terminator )
@@ -936,7 +914,7 @@ void GAMEMODE_DisplayCNTRMessage( const char *pszMessage, const bool bInformClie
 	// If necessary, send it to clients.
 	else if ( bInformClients )
 	{
-		SERVERCOMMANDS_PrintHUDMessageFadeOut( pszMessage, 1.5f, TEAM_MESSAGE_Y_AXIS, 0, 0, CR_UNTRANSLATED, 3.0f, 0.25f, "BigFont", false, MAKE_ID('C','N','T','R'), ulPlayerExtra, ulFlags );
+		SERVERCOMMANDS_PrintHUDMessageFadeOut( pszMessage, 1.5f, TEAM_MESSAGE_Y_AXIS, 0, 0, CR_UNTRANSLATED, 3.0f, 0.25f, "BigFont", false, MAKE_ID('C','N','T','R'), ulPlayerExtra, ServerCommandFlags::FromInt( ulFlags ) );
 	}
 }
 
@@ -959,7 +937,7 @@ void GAMEMODE_DisplaySUBSMessage( const char *pszMessage, const bool bInformClie
 	// If necessary, send it to clients.
 	else if ( bInformClients )
 	{
-		SERVERCOMMANDS_PrintHUDMessageFadeOut( pszMessage, 1.5f, TEAM_MESSAGE_Y_AXIS_SUB, 0, 0, CR_UNTRANSLATED, 3.0f, 0.25f, "SmallFont", false, MAKE_ID( 'S','U','B','S' ), ulPlayerExtra, ulFlags );
+		SERVERCOMMANDS_PrintHUDMessageFadeOut( pszMessage, 1.5f, TEAM_MESSAGE_Y_AXIS_SUB, 0, 0, CR_UNTRANSLATED, 3.0f, 0.25f, "SmallFont", false, MAKE_ID( 'S','U','B','S' ), ulPlayerExtra, ServerCommandFlags::FromInt( ulFlags ) );
 	}
 }
 

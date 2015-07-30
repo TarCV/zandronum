@@ -37,10 +37,10 @@
 #include "doomstat.h"
 #include "d_protocol.h"
 #include "d_netinf.h"
-#include "f_finale.h"
+#include "intermission/intermission.h"
 #include "m_argv.h"
 #include "m_misc.h"
-#include "m_menu.h"
+#include "menu/menu.h"
 #include "m_random.h"
 #include "m_crc32.h"
 #include "i_system.h"
@@ -61,10 +61,8 @@
 #include "p_local.h" 
 #include "s_sound.h"
 #include "gstrings.h"
-#include "r_data.h"
 #include "r_main.h"
 #include "r_sky.h"
-#include "r_draw.h"
 #include "g_game.h"
 #include "g_level.h"
 #include "sbar.h"
@@ -73,12 +71,15 @@
 #include "gi.h"
 #include "a_keys.h"
 #include "a_artifacts.h"
-#include "r_translate.h"
+#include "r_data/r_translate.h"
 #include "cmdlib.h"
 #include "d_net.h"
 #include "d_event.h"
 #include "p_acs.h"
 #include "m_joy.h"
+#include "farchive.h"
+#include "r_renderer.h"
+#include "r_data/colormaps.h"
 // [BB] New #includes.
 #include "network.h"
 #include "chat.h"
@@ -118,6 +119,7 @@
 #include "g_hub.h"
 
 static FRandom pr_dmspawn ("DMSpawn");
+static FRandom pr_pspawn ("PlayerSpawn");
 
 const int SAVEPICWIDTH = 216;
 const int SAVEPICHEIGHT = 162;
@@ -136,6 +138,9 @@ void	G_DoVictory (void);
 void	G_DoWorldDone (void);
 void	G_DoSaveGame (bool okForQuicksave, FString filename, const char *description);
 void	G_DoAutoSave ();
+
+void STAT_Write(FILE *file);
+void STAT_Read(PNGHandle *png);
 
 FIntCVar gameskill ("skill", 2, CVAR_SERVERINFO|CVAR_LATCH);
 CVAR (Bool, chasedemo, false, 0);
@@ -161,6 +166,8 @@ CUSTOM_CVAR (Int, displaynametags, 3, CVAR_ARCHIVE)
 	}
 }
 
+CVAR(Int, nametagcolor, CR_GOLD, CVAR_ARCHIVE)
+
 
 gameaction_t	gameaction;
 gamestate_t 	gamestate = GS_STARTUP;
@@ -185,10 +192,9 @@ int 			consoleplayer;			// player taking events
 int 			gametic;
 
 CVAR(Bool, demo_compress, true, CVAR_ARCHIVE|CVAR_GLOBALCONFIG);
-char			demoname[256];
+FString			demoname;
 bool 			demorecording;
 bool 			demoplayback;
-bool 			netdemo;
 bool			demonew;				// [RH] Only used around G_InitNew for demos
 int				demover;
 BYTE*			demobuffer;
@@ -205,8 +211,6 @@ bool 			precache = true;		// if true, load all graphics at start
 wbstartstruct_t wminfo; 				// parms for world map / intermission 
  
 short			consistancy[MAXPLAYERS][BACKUPTICS];
- 
-BYTE*			savebuffer;
  
  
 #define MAXPLMOVE				(forwardmove[1]) 
@@ -282,9 +286,9 @@ CUSTOM_CVAR (Float, turbo, 100.f, 0)
 	{
 		self = 10.f;
 	}
-	else if (self > 256.f)
+	else if (self > 255.f)
 	{
-		self = 256.f;
+		self = 255.f;
 	}
 	else
 	{
@@ -415,7 +419,7 @@ CCMD (weapnext)
  	if ((displaynametags & 2) && StatusBar && SmallFont && SendItemUse)
  	{
  		StatusBar->AttachMessage(new DHUDMessageFadeOut(SmallFont, SendItemUse->GetTag(),
- 			1.5f, 0.90f, 0, 0, CR_GOLD, 2.f, 0.35f), MAKE_ID( 'W', 'E', 'P', 'N' ));
+			1.5f, 0.90f, 0, 0, (EColorRange)*nametagcolor, 2.f, 0.35f), MAKE_ID( 'W', 'E', 'P', 'N' ));
  	}
 }
 
@@ -433,7 +437,7 @@ CCMD (weapprev)
  	if ((displaynametags & 2) && StatusBar && SmallFont && SendItemUse)
  	{
  		StatusBar->AttachMessage(new DHUDMessageFadeOut(SmallFont, SendItemUse->GetTag(),
- 			1.5f, 0.90f, 0, 0, CR_GOLD, 2.f, 0.35f), MAKE_ID( 'W', 'E', 'P', 'N' ));
+			1.5f, 0.90f, 0, 0, (EColorRange)*nametagcolor, 2.f, 0.35f), MAKE_ID( 'W', 'E', 'P', 'N' ));
  	}
 }
 
@@ -464,7 +468,7 @@ CCMD (invnext)
 		}
 		if ((displaynametags & 1) && StatusBar && SmallFont && who->InvSel)
 			StatusBar->AttachMessage (new DHUDMessageFadeOut (SmallFont, who->InvSel->GetTag(), 
-			1.5f, 0.80f, 0, 0, CR_GOLD, 2.f, 0.35f), MAKE_ID('S','I','N','V'));
+			1.5f, 0.80f, 0, 0, (EColorRange)*nametagcolor, 2.f, 0.35f), MAKE_ID('S','I','N','V'));
 	}
 	who->player->inventorytics = 5*TICRATE;
 }
@@ -494,7 +498,7 @@ CCMD (invprev)
 		}
 		if ((displaynametags & 1) && StatusBar && SmallFont && who->InvSel)
 			StatusBar->AttachMessage (new DHUDMessageFadeOut (SmallFont, who->InvSel->GetTag(), 
-			1.5f, 0.80f, 0, 0, CR_GOLD, 2.f, 0.35f), MAKE_ID('S','I','N','V'));
+			1.5f, 0.80f, 0, 0, (EColorRange)*nametagcolor, 2.f, 0.35f), MAKE_ID('S','I','N','V'));
 	}
 	who->player->inventorytics = 5*TICRATE;
 }
@@ -506,7 +510,7 @@ CCMD (invuseall)
 
 CCMD (invuse)
 {
-	if (players[consoleplayer].inventorytics == 0 || gameinfo.gametype == GAME_Strife)
+	if (players[consoleplayer].inventorytics == 0)
 	{
 		if (players[consoleplayer].mo) SendItemUse = players[consoleplayer].mo->InvSel;
 	}
@@ -567,6 +571,8 @@ CCMD (drop)
 	}
 }
 
+const PClass *GetFlechetteType(AActor *other);
+
 CCMD (useflechette)
 { // Select from one of arti_poisonbag1-3, whichever the player has
 	static const ENamedName bagnames[3] =
@@ -575,22 +581,26 @@ CCMD (useflechette)
 		NAME_ArtiPoisonBag2,
 		NAME_ArtiPoisonBag3
 	};
-	int i, j;
 
 	if (who == NULL)
 		return;
 
-	if (who->IsKindOf (PClass::FindClass (NAME_ClericPlayer)))
-		i = 0;
-	else if (who->IsKindOf (PClass::FindClass (NAME_MagePlayer)))
-		i = 1;
-	else
-		i = 2;
-
-	for (j = 0; j < 3; ++j)
+	const PClass *type = GetFlechetteType(who);
+	if (type != NULL)
 	{
 		AInventory *item;
-		if ( (item = who->FindInventory (bagnames[(i+j)%3])) )
+		if ( (item = who->FindInventory (type) ))
+		{
+			SendItemUse = item;
+			return;
+		}
+	}
+
+	// The default flechette could not be found. Try all 3 types then.
+	for (int j = 0; j < 3; ++j)
+	{
+		AInventory *item;
+		if ( (item = who->FindInventory (bagnames[j])) )
 		{
 			SendItemUse = item;
 			break;
@@ -689,9 +699,15 @@ void G_BuildTiccmd (ticcmd_t *cmd)
 	}
 
 	if (Button_LookUp.bDown)
+	{
 		G_AddViewPitch (lookspeed[speed]);
+		LocalKeyboardTurner = true;
+	}
 	if (Button_LookDown.bDown)
+	{
 		G_AddViewPitch (-lookspeed[speed]);
+		LocalKeyboardTurner = true;
+	}
 
 	if (Button_MoveUp.bDown)
 		fly += flyspeed[speed];
@@ -953,7 +969,16 @@ static void ChangeSpy (bool forward)
 	// If not viewing through a player, return your eyes to your own head.
 	if (!players[consoleplayer].camera || players[consoleplayer].camera->player == NULL)
 	{
-		players[consoleplayer].camera = players[consoleplayer].mo;
+		// When watching demos, you will just have to wait until your player
+		// has done this for you, since it could desync otherwise.
+		if (!demoplayback)
+		{
+			// [BB] The client doesn't use the DEM stuff.
+			if ( NETWORK_InClientMode() )
+				players[consoleplayer].camera = players[consoleplayer].mo;
+			else
+				Net_WriteByte(DEM_REVERTCAMERA);
+		}
 		return;
 	}
 
@@ -1180,7 +1205,7 @@ bool G_Responder (event_t *ev)
 	if (gameaction == ga_nothing && 
 		(demoplayback || ( CLIENTDEMO_IsPlaying( ) && !CLIENTDEMO_IsInFreeSpectateMode() ) || gamestate == GS_DEMOSCREEN || gamestate == GS_TITLELEVEL))
 	{
-		const char *cmd = C_GetBinding (ev->data1);
+		const char *cmd = Bindings.GetBind (ev->data1);
 
 		if (ev->type == EV_KeyDown)
 		{
@@ -1200,16 +1225,17 @@ bool G_Responder (event_t *ev)
 				stricmp (cmd, "bumpgamma") &&
 				stricmp (cmd, "screenshot")))
 			{
-				M_StartControlPanel (true, true);
+				M_StartControlPanel(true);
+				M_SetMenu(NAME_Mainmenu, -1);
 				return true;
 			}
 			else
 			{
-				return C_DoKey (ev);
+				return C_DoKey (ev, &Bindings, &DoubleBindings);
 			}
 		}
 		if (cmd && cmd[0] == '+')
-			return C_DoKey (ev);
+			return C_DoKey (ev, &Bindings, &DoubleBindings);
 
 		return false;
 	}
@@ -1237,7 +1263,7 @@ bool G_Responder (event_t *ev)
 
 		if (ST_Responder (ev))
 			return true;		// status window ate it
-		if (!viewactive && AM_Responder (ev))
+		if (!viewactive && AM_Responder (ev, false))
 			return true;		// automap ate it
 	}
 	else if (gamestate == GS_FINALE)
@@ -1249,12 +1275,12 @@ bool G_Responder (event_t *ev)
 	switch (ev->type)
 	{
 	case EV_KeyDown:
-		if (C_DoKey (ev))
+		if (C_DoKey (ev, &Bindings, &DoubleBindings))
 			return true;
 		break;
 
 	case EV_KeyUp:
-		C_DoKey (ev);
+		C_DoKey (ev, &Bindings, &DoubleBindings);
 		break;
 
 	// [RH] mouse buttons are sent as key up/down events
@@ -1268,7 +1294,7 @@ bool G_Responder (event_t *ev)
 	// the events *last* so that any bound keys get precedence.
 
 	if (gamestate == GS_LEVEL && viewactive)
-		return AM_Responder (ev);
+		return AM_Responder (ev, true);
 
 	return (ev->type == EV_KeyDown ||
 			ev->type == EV_Mouse);
@@ -1291,8 +1317,7 @@ void G_Ticker ()
 	LONG		lSize;
 
 	// Client's don't spawn players until instructed by the server.
-	if (( NETWORK_GetState( ) != NETSTATE_CLIENT ) &&
-		( CLIENTDEMO_IsPlaying( ) == false ))
+	if ( NETWORK_InClientMode() == false )
 	{
 		// do player reborns if needed
 		for (i = 0; i < MAXPLAYERS; i++)
@@ -1341,6 +1366,7 @@ void G_Ticker ()
 			G_DoNewGame ();
 			break;
 		case ga_loadgame:
+		case ga_loadgamehidecon:
 		case ga_autoloadgame:
 			G_DoLoadGame ();
 			break;
@@ -1354,6 +1380,9 @@ void G_Ticker ()
 			G_DoAutoSave ();
 			gameaction = ga_nothing;
 			break;
+		case ga_loadgameplaydemo:
+			G_DoLoadGame ();
+			// fallthrough
 		case ga_playdemo:
 			G_DoPlayDemo ();
 			break;
@@ -1361,7 +1390,7 @@ void G_Ticker ()
 			G_DoCompleted ();
 			break;
 		case ga_slideshow:
-			F_StartSlideshow ();
+			if (gamestate == GS_LEVEL) F_StartIntermission(level.info->slideshow, FSTATE_InLevel);
 			break;
 		case ga_worlddone:
 			G_DoWorldDone ();
@@ -1459,9 +1488,8 @@ void G_Ticker ()
 			CLIENTDEMO_WriteTiccmd( &players[consoleplayer].cmd );
 	}
 
-	if (( NETWORK_GetState( ) != NETSTATE_CLIENT ) &&
-		( NETWORK_GetState( ) != NETSTATE_SERVER ) &&
-		( CLIENTDEMO_IsPlaying( ) == false ))
+	if (( NETWORK_InClientMode() == false ) &&
+		( NETWORK_GetState( ) != NETSTATE_SERVER ))
 	{
 		// [RH] Include some random seeds and player stuff in the consistancy
 		// check, not just the player's x position like BOOM.
@@ -1499,7 +1527,7 @@ void G_Ticker ()
 				if (cmd->ucmd.forwardmove > TURBOTHRESHOLD &&
 					!(gametic&31) && ((gametic>>5)&(MAXPLAYERS-1)) == i )
 				{
-					Printf ("%s is turbo!\n", players[i].userinfo.netname);
+					Printf ("%s is turbo!\n", players[i].userinfo.GetName());
 				}
 			}
 		}
@@ -1640,8 +1668,7 @@ void G_Ticker ()
 
 		// Apply end level delay.
 		if (( g_ulEndLevelDelay ) &&
-			( NETWORK_GetState( ) != NETSTATE_CLIENT ) &&
-			( CLIENTDEMO_IsPlaying( ) == false ))
+			( NETWORK_InClientMode() == false ))
 		{
 			if ( --g_ulEndLevelDelay == 0 )
 			{
@@ -1873,6 +1900,11 @@ void G_PlayerFinishLevel (int player, EFinishLevelType mode, int flags)
 
 	p = &players[player];
 
+	if (p->morphTics != 0)
+	{ // Undo morph
+		P_UndoPlayerMorph (p, p, 0, true);
+	}
+
 	// [BB] Under some circumstances a client may come here with p->mo == NULL.
 	if ( (NETWORK_GetState() == NETSTATE_CLIENT) && (p->mo == NULL) )
 		return;
@@ -1899,9 +1931,17 @@ void G_PlayerFinishLevel (int player, EFinishLevelType mode, int flags)
 		// Unselect powered up weapons if the unpowered counterpart is pending
 		p->ReadyWeapon=p->PendingWeapon;
 	}
-	p->mo->flags &= ~MF_SHADOW; 		// cancel invisibility
-	p->mo->RenderStyle = STYLE_Normal;
-	p->mo->alpha = FRACUNIT;
+	// reset invisibility to default
+	if (p->mo->GetDefault()->flags & MF_SHADOW)
+	{
+		p->mo->flags |= MF_SHADOW;
+	}
+	else
+	{
+		p->mo->flags &= ~MF_SHADOW;
+	}
+	p->mo->RenderStyle = p->mo->GetDefault()->RenderStyle;
+	p->mo->alpha = p->mo->GetDefault()->alpha;
 	p->extralight = 0;					// cancel gun flashes
 	p->fixedcolormap = NOFIXEDCOLORMAP;	// cancel ir goggles
 	p->fixedlightlevel = -1;
@@ -1937,13 +1977,8 @@ void G_PlayerFinishLevel (int player, EFinishLevelType mode, int flags)
 		}
 	}
 
-	if (p->morphTics)
-	{ // Undo morph
-		P_UndoPlayerMorph (p, p, 0, true);
-	}
-
-	// Resets player health to default
-	if (flags & CHANGELEVEL_RESETHEALTH)
+	// Resets player health to default if not dead.
+	if ((flags & CHANGELEVEL_RESETHEALTH) && p->playerstate != PST_DEAD)
 	{
 		p->health = p->mo->health = p->mo->SpawnHealth();
 	}
@@ -1959,26 +1994,7 @@ void G_PlayerFinishLevel (int player, EFinishLevelType mode, int flags)
 	// Clears the entire inventory and gives back the defaults for starting a game
 	if (flags & CHANGELEVEL_RESETINVENTORY)
 	{
-		AInventory *inv = p->mo->Inventory;
-
-		while (inv != NULL)
-		{
-			AInventory *next = inv->Inventory;
-			if (!(inv->ItemFlags & IF_UNDROPPABLE))
-			{
-				inv->Destroy ();
-			}
-			else if (inv->GetClass() == RUNTIME_CLASS(AHexenArmor))
-			{
-				AHexenArmor *harmor = static_cast<AHexenArmor *> (inv);
-				harmor->Slots[3] = harmor->Slots[2] = harmor->Slots[1] = harmor->Slots[0] = 0;
-			}
-			inv = next;
-		}
-		p->ReadyWeapon = NULL;
-		p->PendingWeapon = WP_NOCHANGE;
-		p->psprites[ps_weapon].state = NULL;
-		p->psprites[ps_flash].state = NULL;
+		p->mo->ClearInventory();
 		p->mo->GiveDefaultInventory();
 	}
 }
@@ -1999,6 +2015,8 @@ void G_PlayerReborn (int player, bool bGiveInventory)
 	int			chasecam;
 	BYTE		currclass;
 	userinfo_t  userinfo;	// [RH] Save userinfo
+	// [BB]
+	//botskill_t  b_skill;	//Added by MC:
 	APlayerPawn *actor;
 	const PClass *cls;
 	FString		log;
@@ -2021,7 +2039,7 @@ void G_PlayerReborn (int player, bool bGiveInventory)
 	ULONG		ulPingAverages;
 	ULONG		ulWins;
 	ULONG		ulTime;
-	LONG		lCheats;
+	int			timefreezer;
 	FName		StartingWeaponName;
 
 	p = &players[player];
@@ -2031,7 +2049,7 @@ void G_PlayerReborn (int player, bool bGiveInventory)
 	itemcount = p->itemcount;
 	secretcount = p->secretcount;
 	currclass = p->CurrentPlayerClass;
-	memcpy (&userinfo, &p->userinfo, sizeof(userinfo));
+	userinfo.TransferFrom(p->userinfo);
 	actor = p->mo;
 	cls = p->cls;
 	log = p->LogText;
@@ -2058,7 +2076,7 @@ void G_PlayerReborn (int player, bool bGiveInventory)
 	ulPingAverages = p->ulPingAverages;
 	ulWins = p->ulWins;
 	ulTime = p->ulTime;
-	lCheats = p->cheats;
+	timefreezer = p->timefreezer;
 	StartingWeaponName = p->StartingWeaponName;
 	const bool bLagging = p->bLagging;
 
@@ -2071,7 +2089,7 @@ void G_PlayerReborn (int player, bool bGiveInventory)
 	p->itemcount = itemcount;
 	p->secretcount = secretcount;
 	p->CurrentPlayerClass = currclass;
-	memcpy (&p->userinfo, &userinfo, sizeof(userinfo));
+	p->userinfo.TransferFrom(userinfo);
 	p->mo = actor;
 	p->cls = cls;
 	p->LogText = log;
@@ -2103,8 +2121,7 @@ void G_PlayerReborn (int player, bool bGiveInventory)
 	p->ulTime = ulTime;
 	// [BB] Players who were able to move while a APowerTimeFreezer is active,
 	// should also be able to do so after being reborn.
-	if ( lCheats & CF_TIMEFREEZE )
-		p->cheats |= CF_TIMEFREEZE;
+	p->timefreezer = timefreezer;
 	p->StartingWeaponName = StartingWeaponName;
 	p->bLagging = bLagging;
 	p->bIsBot = p->pSkullBot ? true : false;
@@ -2132,7 +2149,7 @@ void G_PlayerReborn (int player, bool bGiveInventory)
 // because something is occupying it 
 //
 
-bool G_CheckSpot (int playernum, FMapThing *mthing)
+bool G_CheckSpot (int playernum, FPlayerStart *mthing)
 {
 	fixed_t x;
 	fixed_t y;
@@ -2143,10 +2160,10 @@ bool G_CheckSpot (int playernum, FMapThing *mthing)
 	y = mthing->y;
 	z = mthing->z;
 
-	// [CK] Setting to zero for now to prevent ground telefragging that happens
-	// NOTE to Torr: This will be fixed in ZDoom with a backport, this is a
-	// temporary fix.
-	z = 0;
+	if (!(level.flags & LEVEL_USEPLAYERSTARTZ))
+	{
+		z = 0;
+	}
 
 	z += P_PointInSector (x, y)->floorplane.ZatPoint (x, y);
 
@@ -2186,7 +2203,7 @@ bool G_CheckSpot (int playernum, FMapThing *mthing)
 //
 
 // [RH] Returns the distance of the closest player to the given mapthing
-static fixed_t PlayersRangeFromSpot (FMapThing *spot)
+static fixed_t PlayersRangeFromSpot (FPlayerStart *spot)
 {
 	fixed_t closest = INT_MAX;
 	fixed_t distance;
@@ -2208,7 +2225,7 @@ static fixed_t PlayersRangeFromSpot (FMapThing *spot)
 }
 
 // Returns the average distance this spot is from all the enemies of ulPlayer.
-static fixed_t TeamLMSPlayersRangeFromSpot( ULONG ulPlayer, FMapThing *spot )
+static fixed_t TeamLMSPlayersRangeFromSpot( ULONG ulPlayer, FPlayerStart *spot )
 {
 	ULONG	ulNumSpots;
 	fixed_t	distance = INT_MAX;
@@ -2236,10 +2253,10 @@ static fixed_t TeamLMSPlayersRangeFromSpot( ULONG ulPlayer, FMapThing *spot )
 }
 
 // [RH] Select the deathmatch spawn spot farthest from everyone.
-static FMapThing *SelectFarthestDeathmatchSpot( ULONG ulPlayer, size_t selections )
+static FPlayerStart *SelectFarthestDeathmatchSpot( ULONG ulPlayer, size_t selections )
 {
 	fixed_t bestdistance = 0;
-	FMapThing *bestspot = NULL;
+	FPlayerStart *bestspot = NULL;
 	unsigned int i;
 
 	for (i = 0; i < selections; i++)
@@ -2265,12 +2282,12 @@ static FMapThing *SelectFarthestDeathmatchSpot( ULONG ulPlayer, size_t selection
 
 
 // Try to find a deathmatch spawn spot farthest from our enemies.
-static FMapThing *SelectBestTeamLMSSpot( ULONG ulPlayer, size_t selections )
+static FPlayerStart *SelectBestTeamLMSSpot( ULONG ulPlayer, size_t selections )
 {
 	ULONG		ulIdx;
 	fixed_t		Distance;
 	fixed_t		BestDistance;
-	FMapThing	*pBestSpot;
+	FPlayerStart	*pBestSpot;
 
 	pBestSpot = NULL;
 	BestDistance = 0;
@@ -2296,7 +2313,7 @@ static FMapThing *SelectBestTeamLMSSpot( ULONG ulPlayer, size_t selections )
 }
 
 // [RH] Select a deathmatch spawn spot at random (original mechanism)
-static FMapThing *SelectRandomDeathmatchSpot (int playernum, unsigned int selections)
+static FPlayerStart *SelectRandomDeathmatchSpot (int playernum, unsigned int selections)
 {
 	unsigned int i, j;
 
@@ -2314,7 +2331,7 @@ static FMapThing *SelectRandomDeathmatchSpot (int playernum, unsigned int select
 }
 
 // Select a temporary team spawn spot at random.
-static FMapThing *SelectTemporaryTeamSpot( USHORT usPlayer, ULONG ulNumSelections )
+static FPlayerStart *SelectTemporaryTeamSpot( USHORT usPlayer, ULONG ulNumSelections )
 {
 	ULONG	ulNumAttempts;
 	ULONG	ulSelection;
@@ -2332,7 +2349,7 @@ static FMapThing *SelectTemporaryTeamSpot( USHORT usPlayer, ULONG ulNumSelection
 }
 
 // Select a team spawn spot at random.
-static FMapThing *SelectRandomTeamSpot( USHORT usPlayer, ULONG ulTeam, ULONG ulNumSelections )
+static FPlayerStart *SelectRandomTeamSpot( USHORT usPlayer, ULONG ulTeam, ULONG ulNumSelections )
 {
 	ULONG	ulNumAttempts;
 	ULONG	ulSelection;
@@ -2350,7 +2367,7 @@ static FMapThing *SelectRandomTeamSpot( USHORT usPlayer, ULONG ulTeam, ULONG ulN
 }
 
 // Select a cooperative spawn spot at random.
-FMapThing *SelectRandomCooperativeSpot( ULONG ulPlayer )
+FPlayerStart *SelectRandomCooperativeSpot( ULONG ulPlayer )
 {
 	ULONG		ulNumAttempts;
 	ULONG		ulSelection;
@@ -2399,7 +2416,7 @@ FMapThing *SelectRandomCooperativeSpot( ULONG ulPlayer )
 void G_DeathMatchSpawnPlayer( int playernum, bool bClientUpdate )
 {
 	unsigned int selections;
-	FMapThing *spot;
+	FPlayerStart *spot;
 
 	// [BB] If sv_useteamstartsindm is true, we want to use team starts in deathmatch
 	// game modes with teams, e.g. TDM, TLMS.
@@ -2436,14 +2453,14 @@ void G_DeathMatchSpawnPlayer( int playernum, bool bClientUpdate )
 	if ( spot == NULL )
 		I_Error( "Could not find a valid deathmatch spot! (this should not happen)" );
 
-	AActor *mo = P_SpawnPlayer( spot, bClientUpdate, &players[playernum] );
+	AActor *mo = P_SpawnPlayer( spot, playernum, bClientUpdate ? SPF_CLIENTUPDATE : 0 );
 	if (mo != NULL) P_PlayerStartStomp(mo);
 }
 
 void G_TemporaryTeamSpawnPlayer( ULONG ulPlayer, bool bClientUpdate )
 {
 	ULONG		ulNumSelections;
-	FMapThing	*pSpot;
+	FPlayerStart	*pSpot;
 
 	ulNumSelections = TemporaryTeamStarts.Size( );
 
@@ -2499,7 +2516,7 @@ void G_TemporaryTeamSpawnPlayer( ULONG ulPlayer, bool bClientUpdate )
 	if ( pSpot == NULL )
 		I_Error( "Could not find a valid temporary spot! (this should not happen)" );
 
-	AActor *mo = P_SpawnPlayer( pSpot, bClientUpdate, &players[ulPlayer] );
+	AActor *mo = P_SpawnPlayer( pSpot, ulPlayer, bClientUpdate ? SPF_CLIENTUPDATE : 0 );
 	if (mo != NULL)
 	{
 		P_PlayerStartStomp(mo);
@@ -2508,7 +2525,7 @@ void G_TemporaryTeamSpawnPlayer( ULONG ulPlayer, bool bClientUpdate )
 		if ( players[ulPlayer].bSpectating == false )
 		{
 			players[ulPlayer].bUnarmed = true;
-			DoClearInv(players[ulPlayer].mo);
+			players[ulPlayer].mo->ClearInventory();
 		}
 	}
 }
@@ -2516,7 +2533,7 @@ void G_TemporaryTeamSpawnPlayer( ULONG ulPlayer, bool bClientUpdate )
 void G_TeamgameSpawnPlayer( ULONG ulPlayer, ULONG ulTeam, bool bClientUpdate )
 {
 	ULONG		ulNumSelections;
-	FMapThing	*pSpot;
+	FPlayerStart	*pSpot;
 
 	ulNumSelections = teams[ulTeam].TeamStarts.Size( );
 	if ( ulNumSelections < 1 )
@@ -2529,7 +2546,7 @@ void G_TeamgameSpawnPlayer( ULONG ulPlayer, ULONG ulTeam, bool bClientUpdate )
 	if ( pSpot == NULL )
 		I_Error( "Could not find a valid temporary spot! (this should not happen)" );
 
-	AActor *mo = P_SpawnPlayer( pSpot, bClientUpdate, &players[ulPlayer] );
+	AActor *mo = P_SpawnPlayer( pSpot, ulPlayer, bClientUpdate ? SPF_CLIENTUPDATE : 0 );
 	if (mo != NULL) P_PlayerStartStomp(mo);
 }
 
@@ -2539,20 +2556,50 @@ void G_CooperativeSpawnPlayer( ULONG ulPlayer, bool bClientUpdate, bool bTempPla
 	// [BB] Don't do this, if we want to randomize starts.
 	if (( sv_randomcoopstarts == false ) && ( playerstarts[ulPlayer].type != 0 ) && ( G_CheckSpot( ulPlayer, &playerstarts[ulPlayer] )))
 	{
-		AActor *mo = P_SpawnPlayer( &playerstarts[ulPlayer], bClientUpdate, NULL, bTempPlayer );
+		AActor *mo = P_SpawnPlayer( &playerstarts[ulPlayer], ulPlayer, ( bTempPlayer ? SPF_TEMPPLAYER : 0 ) | ( bClientUpdate ? SPF_CLIENTUPDATE : 0 ) );
 		if (mo != NULL) P_PlayerStartStomp(mo);
 		return;
 	}
 
 	// Now, try to find a valid cooperative start.
-	FMapThing *pSpot = SelectRandomCooperativeSpot( ulPlayer );
+	FPlayerStart *pSpot = SelectRandomCooperativeSpot( ulPlayer );
 
 	// ANAMOLOUS HAPPENING!!!
 	if ( pSpot == NULL )
 		I_Error( "Could not find a valid deathmatch spot! (this should not happen)" );
 
-	AActor *mo = P_SpawnPlayer( pSpot, bClientUpdate, &players[ulPlayer], bTempPlayer );
-	if (mo != NULL) P_PlayerStartStomp(mo);
+	AActor *mo = P_SpawnPlayer( pSpot, ulPlayer, ( bTempPlayer ? SPF_TEMPPLAYER : 0 ) | ( bClientUpdate ? SPF_CLIENTUPDATE : 0 ) );
+}
+
+//
+// G_PickPlayerStart
+//
+FPlayerStart *G_PickPlayerStart(int playernum, int flags)
+{
+	if ((level.flags2 & LEVEL2_RANDOMPLAYERSTARTS) || (flags & PPS_FORCERANDOM))
+	{
+		if (!(flags & PPS_NOBLOCKINGCHECK))
+		{
+			TArray<FPlayerStart *> good_starts;
+			unsigned int i;
+
+			// Find all unblocked player starts.
+			for (i = 0; i < AllPlayerStarts.Size(); ++i)
+			{
+				if (G_CheckSpot(playernum, &AllPlayerStarts[i]))
+				{
+					good_starts.Push(&AllPlayerStarts[i]);
+				}
+			}
+			if (good_starts.Size() > 0)
+			{ // Pick an open spot at random.
+				return good_starts[pr_pspawn(good_starts.Size())];
+			}
+	}
+		// Pick a spot at random, whether it's open or not.
+		return &AllPlayerStarts[pr_pspawn(AllPlayerStarts.Size())];
+	}
+	return &playerstarts[playernum];
 }
 
 //
@@ -2589,8 +2636,7 @@ void G_CooperativeSpawnPlayer( ULONG ulPlayer, bool bClientUpdate, bool bTempPla
 void G_DoReborn (int playernum, bool freshbot)
 {
 	// All of this is done remotely.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -2613,9 +2659,6 @@ void G_DoReborn (int playernum, bool freshbot)
 	else
 	{
 		// respawn at the start
-		// [BB] ST doesn't need this variable.
-		// int i;
-
 		// first disassociate the corpse
 		AActor *pOldBody = players[playernum].mo; // [BB] ST still needs the old body pointer.
 		if (players[playernum].mo)
@@ -2637,46 +2680,23 @@ void G_DoReborn (int playernum, bool freshbot)
 		}
 
 		/* [BB] ST has its own way of doing this.
-		// spawn at random spot if in death match
+		// spawn at random spot if in deathmatch
 		if (deathmatch)
 		{
 			G_DeathMatchSpawnPlayer (playernum);
 			return;
 		}
 
-		if (G_CheckSpot (playernum, &playerstarts[playernum]) )
+		if (!(level.flags2 & LEVEL2_RANDOMPLAYERSTARTS) &&
+			G_CheckSpot (playernum, &playerstarts[playernum]))
 		{
-			AActor *mo = P_SpawnPlayer (&playerstarts[playernum]);
+			AActor *mo = P_SpawnPlayer(&playerstarts[playernum], playernum);
 			if (mo != NULL) P_PlayerStartStomp(mo);
 		}
 		else
-		{
-			// try to spawn at one of the other players' spots
-			for (i = 0; i < MAXPLAYERS; i++)
-			{
-				if (G_CheckSpot (playernum, &playerstarts[i]) )
-				{
-					int oldtype = playerstarts[i].type;
-
-					// fake as other player
-					// [RH] These numbers should be common across all games. Or better yet, not
-					// used at all outside P_SpawnMapThing().
-					if (playernum < 4)
-					{
-						playerstarts[i].type = playernum + 1;
-					}
-					else
-					{
-						playerstarts[i].type = playernum + gameinfo.player5start - 4;
-					}
-					AActor *mo = P_SpawnPlayer (&playerstarts[i]);
-					if (mo != NULL) P_PlayerStartStomp(mo);
-					playerstarts[i].type = oldtype; 			// restore 
-					return;
-				}
-				// he's going to be inside something.  Too bad.
-			}
-			AActor *mo = P_SpawnPlayer (&playerstarts[playernum]);
+		{ // try to spawn at any random player's spot
+			FPlayerStart *start = G_PickPlayerStart(playernum, PPS_FORCERANDOM);
+			AActor *mo = P_SpawnPlayer(start, playernum);
 			if (mo != NULL) P_PlayerStartStomp(mo);
 		}
 		*/
@@ -2699,7 +2719,46 @@ void G_DoReborn (int playernum, bool freshbot)
 	}
 }
 
+//*****************************************************************************
+//
+// Sets default dmflags based on gamemode
+//
+void GAME_SetDefaultDMFlags()
+{
+	int flags = dmflags;
+	int flags2 = dmflags2;
+
+	if ( deathmatch )
+	{
+		// Don't do "spawn farthest" for duels.
+		if ( duel )
+			flags |= DF_WEAPONS_STAY | DF_ITEMS_RESPAWN | DF_NO_MONSTERS | DF_NO_CROUCH;
+		else
+			flags |= DF_SPAWN_FARTHEST | DF_WEAPONS_STAY | DF_ITEMS_RESPAWN | DF_NO_MONSTERS | DF_NO_CROUCH;
+
+		flags2 |= DF2_YES_DOUBLEAMMO;
+	}
+	else if ( teamgame )
+	{
+		flags |= DF_WEAPONS_STAY | DF_ITEMS_RESPAWN | DF_NO_MONSTERS | DF_NO_CROUCH;
+		flags2 |= DF2_YES_DOUBLEAMMO;
+	}
+	else
+	{
+		flags &= ~DF_WEAPONS_STAY | ~DF_ITEMS_RESPAWN | ~DF_NO_MONSTERS | ~DF_NO_CROUCH;
+		flags2 &= ~DF2_YES_DOUBLEAMMO;
+	}
+
+	if ( dmflags != flags )
+		dmflags = flags;
+
+	if ( dmflags2 != flags2 )
+		dmflags2 = flags2;
+}
+
+//*****************************************************************************
 // Determine is a level is a deathmatch, CTF, etc. level by items that are placed on it.
+//
 void GAME_CheckMode( void )
 {
 	ULONG						ulFlags = (ULONG)dmflags;
@@ -2716,8 +2775,7 @@ void GAME_CheckMode( void )
 	TThinkerIterator<AActor>	iterator;
 
 	// Clients can't change flags/modes!
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -2758,17 +2816,6 @@ void GAME_CheckMode( void )
 		deathmatch.ForceSet( Val, CVAR_Bool );
 		Val.Bool = false;
 		teamgame.ForceSet( Val, CVAR_Bool );
-
-		// Allow the server to use their own dmflags.
-		if ( sv_defaultdmflags )
-		{
-			// Don't do "spawn farthest" for duels.
-			if ( duel )
-				ulFlags |= DF_WEAPONS_STAY | DF_ITEMS_RESPAWN | DF_NO_MONSTERS | DF_NO_CROUCH;
-			else
-				ulFlags |= DF_SPAWN_FARTHEST | DF_WEAPONS_STAY | DF_ITEMS_RESPAWN | DF_NO_MONSTERS | DF_NO_CROUCH;
-			ulFlags2 |= DF2_YES_DOUBLEAMMO;
-		}
 	}
 
 	// We have team starts, but nothing else.
@@ -2781,13 +2828,6 @@ void GAME_CheckMode( void )
 		teamgame.ForceSet( Val, CVAR_Bool );
 		Val.Bool = false;
 		deathmatch.ForceSet( Val, CVAR_Bool );
-
-		// Allow the server to use their own dmflags.
-		if ( sv_defaultdmflags )
-		{
-			ulFlags |= DF_WEAPONS_STAY | DF_ITEMS_RESPAWN | DF_NO_MONSTERS | DF_NO_CROUCH;
-			ulFlags2 |= DF2_YES_DOUBLEAMMO;
-		}
 
 		// Furthermore, we can determine between a ST and CTF level by whether or not
 		// there are skulls or flags placed on the level.
@@ -2848,13 +2888,6 @@ void GAME_CheckMode( void )
 		deathmatch.ForceSet( Val, CVAR_Bool );
 		teamgame.ForceSet( Val, CVAR_Bool );
 
-		// Allow the server to use their own dmflags.
-		if ( sv_defaultdmflags )
-		{
-			ulFlags &= ~DF_WEAPONS_STAY | ~DF_ITEMS_RESPAWN | ~DF_NO_MONSTERS | ~DF_NO_CROUCH;
-			ulFlags2 &= ~DF2_YES_DOUBLEAMMO;
-		}
-
 		// If invasion starts are present, load the map in invasion mode.
 		if ( GenericInvasionStarts.Size( ) > 0 )
 		{
@@ -2885,12 +2918,10 @@ void GAME_CheckMode( void )
 	}
 
 	// In a campaign, just use whatever dmflags are assigned.
-	if ( CAMPAIGN_InCampaign( ) == false )
+	if ( sv_defaultdmflags && ( CAMPAIGN_InCampaign() == false ))
 	{
-		if ( static_cast<unsigned> (dmflags) != ulFlags )
-			dmflags = ulFlags;
-		if ( static_cast<unsigned> (dmflags2) != ulFlags2 )
-			dmflags2 = ulFlags2;
+		// Allow servers to use their own dmflags.
+		GAME_SetDefaultDMFlags();
 	}
 
 	// If there aren't any pickup, blue return, or red return scripts, then use the
@@ -3085,8 +3116,6 @@ bool GAME_ZPositionMatchesOriginal( AActor *pActor )
 		else
 			return ( pActor->z == pActor->Sector->floorplane.ZatPoint( pActor->x, pActor->y ));
 	}
-	else if ( pActor->flags2 & MF2_FLOATBOB )
-		return ( pActor->z == (( pActor->SpawnPoint[2] ) + FloatBobOffsets[( pActor->FloatBobPhase + level.time ) & 63] ));
 	else
 		return ( pActor->z == ( pActor->Sector->floorplane.ZatPoint( pActor->x, pActor->y ) + ( pActor->SpawnPoint[2] )));
 }
@@ -3159,7 +3188,7 @@ void GAME_ResetScripts ( )
 
 	// Restart running any open scripts on this map, since we just destroyed them all!
 	// [BB] The server instructs the clients to start the CLIENTSIDE open scripts.
-	if ( NETWORK_InClientMode( ) == false )
+	if ( NETWORK_InClientMode() == false )
 		FBehavior::StaticStartTypedScripts( SCRIPT_Open, NULL, false );
 
 	delete ( pMap );
@@ -3231,8 +3260,7 @@ void GAME_ResetMap( bool bRunEnterScripts )
 	}
 
 	// This is all we do in client mode.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		// [BB] Clients still need to reset the automap.
 		for ( ulIdx = 0; ulIdx < (ULONG)numlines; ulIdx++ )
@@ -3545,11 +3573,11 @@ void GAME_ResetMap( bool bRunEnterScripts )
 			// No client update necessary here.
 		}
 
-		if (( sectors[ulIdx].SavedCeilingReflect != sectors[ulIdx].ceiling_reflect ) ||
-			( sectors[ulIdx].SavedFloorReflect != sectors[ulIdx].floor_reflect ))
+		if (( sectors[ulIdx].SavedCeilingReflect != sectors[ulIdx].reflect[sector_t::ceiling] ) ||
+			( sectors[ulIdx].SavedFloorReflect != sectors[ulIdx].reflect[sector_t::floor] ))
 		{
-			sectors[ulIdx].ceiling_reflect = sectors[ulIdx].SavedCeilingReflect;
-			sectors[ulIdx].floor_reflect = sectors[ulIdx].SavedFloorReflect;
+			sectors[ulIdx].reflect[sector_t::ceiling] = sectors[ulIdx].SavedCeilingReflect;
+			sectors[ulIdx].reflect[sector_t::floor] = sectors[ulIdx].SavedFloorReflect;
 
 			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
 				SERVERCOMMANDS_SetSectorReflection( ulIdx );
@@ -3969,7 +3997,7 @@ bool GAME_IsMapRestRequested( void )
 
 //*****************************************************************************
 //
-AActor* GAME_SelectRandomSpotForArtifact ( const PClass *pArtifactType, const TArray<FMapThing> &Spots )
+AActor* GAME_SelectRandomSpotForArtifact ( const PClass *pArtifactType, const TArray<FPlayerStart> &Spots )
 {
 	if ( Spots.Size() == 0 )
 		return NULL;
@@ -4122,18 +4150,16 @@ void G_ScreenShot (char *filename)
 
 
 
-
-
 //
 // G_InitFromSavegame
 // Can be called by the startup code or the menu task.
 //
-void G_LoadGame (const char* name)
+void G_LoadGame (const char* name, bool hidecon)
 {
 	if (name != NULL)
 	{
 		savename = name;
-		gameaction = ga_loadgame;
+		gameaction = !hidecon ? ga_loadgame : ga_loadgamehidecon;
 	}
 }
 
@@ -4193,11 +4219,13 @@ void G_DoLoadGame ()
 	char sigcheck[20];
 	char *text = NULL;
 	char *map;
+	bool hidecon;
 
 	if (gameaction != ga_autoloadgame)
 	{
 		demoplayback = false;
 	}
+	hidecon = gameaction == ga_loadgamehidecon;
 	gameaction = ga_nothing;
 
 	FILE *stdfile = fopen (savename.GetChars(), "rb");
@@ -4243,13 +4271,19 @@ void G_DoLoadGame ()
 		delete[] engine;
 	}
 
+	SaveVersion = 0;
 	if (!M_GetPNGText (png, "ZDoom Save Version", sigcheck, 20) ||
 		0 != strncmp (sigcheck, SAVESIG, 9) ||		// ZDOOMSAVE is the first 9 chars
 		(SaveVersion = atoi (sigcheck+9)) < MINSAVEVER)
 	{
-		Printf ("Savegame is from an incompatible version\n");
 		delete png;
 		fclose (stdfile);
+		Printf ("Savegame is from an incompatible version");
+		if (SaveVersion != 0)
+		{
+			Printf(": %d (%d is the oldest supported)", SaveVersion, MINSAVEVER);
+		}
+		Printf("\n");
 		return;
 	}
 
@@ -4265,6 +4299,13 @@ void G_DoLoadGame ()
 		Printf ("Savegame is missing the current map\n");
 		fclose (stdfile);
 		return;
+	}
+
+	// Now that it looks like we can load this save, hide the fullscreen console if it was up
+	// when the game was selected from the menu.
+	if (hidecon && gamestate == GS_FULLCONSOLE)
+	{
+		gamestate = GS_HIDECONSOLE;
 	}
 
 	// [BB] Remove all bots that are currently used. This isn't done automatically.
@@ -4296,6 +4337,7 @@ void G_DoLoadGame ()
 	}
 
 	G_ReadSnapshots (png);
+	STAT_Read(png);
 	FRandom::StaticReadRNGState (png);
 	P_ReadACSDefereds (png);
 
@@ -4347,7 +4389,7 @@ void G_DoLoadGame ()
 	fclose (stdfile);
 
 	// [BB] The NetID list is not saved, so we have to rebuild it after loading a saved game.
-	ACTOR_RebuildNetIDList();
+	g_NetIDList.rebuild();
 
 	demoplayback = false;
 	usergame = true;
@@ -4430,6 +4472,7 @@ FString G_BuildSaveName (const char *prefix, int slot)
 }
 
 CVAR (Int, autosavenum, 0, CVAR_NOSET|CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+static int nextautosave = -1;
 CVAR (Int, disableautosave, 0, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 CUSTOM_CVAR (Int, autosavecount, 4, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 {
@@ -4450,10 +4493,25 @@ void G_DoAutoSave ()
 	const char *readableTime;
 	int count = autosavecount != 0 ? autosavecount : 1;
 	
-	num.Int = (autosavenum + 1) % count;
+	if (nextautosave == -1) 
+	{
+		nextautosave = (autosavenum + 1) % count;
+	}
+
+	num.Int = nextautosave;
 	autosavenum.ForceSet (num, CVAR_Int);
 
-	file = G_BuildSaveName ("auto", num.Int);
+	file = G_BuildSaveName ("auto", nextautosave);
+
+	if (!(level.flags2 & LEVEL2_NOAUTOSAVEHINT))
+	{
+		nextautosave = (nextautosave + 1) % count;
+	}
+	else
+	{
+		// This flag can only be used once per level
+		level.flags2 &= ~LEVEL2_NOAUTOSAVEHINT;
+	}
 
 	readableTime = myasctime ();
 	strcpy (description, "Autosave ");
@@ -4521,8 +4579,7 @@ static void PutSavePic (FILE *file, int width, int height)
 	}
 	else
 	{
-		P_CheckPlayerSprites();
-		screen->WriteSavePic(&players[consoleplayer], file, width, height);
+		Renderer->WriteSavePic(&players[consoleplayer], file, width, height);
 	}
 }
 
@@ -4569,20 +4626,18 @@ void G_DoSaveGame (bool okForQuicksave, FString filename, const char *descriptio
 	G_WriteHubInfo(stdfile);
 
 	{
-		BYTE vars[4096], *vars_p;
-		vars_p = vars;
-		C_WriteCVars (&vars_p, CVAR_SERVERINFO);
-		*vars_p = 0;
-		M_AppendPNGText (stdfile, "Important CVARs", (char *)vars);
+		FString vars = C_GetMassCVarString(CVAR_SERVERINFO);
+		M_AppendPNGText (stdfile, "Important CVARs", vars.GetChars());
 	}
 
 	if (level.time != 0 || level.maptime != 0)
 	{
-		DWORD time[2] = { BigLong(TICRATE), BigLong(level.time) };
+		DWORD time[2] = { DWORD(BigLong(TICRATE)), DWORD(BigLong(level.time)) };
 		M_AppendPNGChunk (stdfile, MAKE_ID('p','t','I','c'), (BYTE *)&time, 8);
 	}
 
 	G_WriteSnapshots (stdfile);
+	STAT_Write(stdfile);
 	FRandom::StaticWriteRNGState (stdfile);
 	P_WriteACSDefereds (stdfile);
 
@@ -4605,10 +4660,10 @@ void G_DoSaveGame (bool okForQuicksave, FString filename, const char *descriptio
 		M_AppendPNGChunk (stdfile, MAKE_ID('s','n','X','t'), &next, 1);
 	}
 
-	M_NotifyNewSave (filename.GetChars(), description, okForQuicksave);
-
 	M_FinishPNG (stdfile);
 	fclose (stdfile);
+
+	M_NotifyNewSave (filename.GetChars(), description, okForQuicksave);
 
 	// Check whether the file is ok.
 	bool success = false;
@@ -4760,7 +4815,7 @@ void G_WriteDemoTiccmd (ticcmd_t *cmd, int player, int buf)
 void G_RecordDemo (const char* name)
 {
 	usergame = false;
-	strcpy (demoname, name);
+	demoname = name;
 	FixPathSeperator (demoname);
 	DefaultExtension (demoname, ".lmp");
 	maxdemosize = 0x20000;
@@ -4852,7 +4907,7 @@ FString defdemoname;
 void G_DeferedPlayDemo (const char *name)
 {
 	defdemoname = name;
-	gameaction = ga_playdemo;
+	gameaction = (gameaction == ga_loadgame) ? ga_loadgameplaydemo : ga_playdemo;
 }
 
 extern bool advancedemo;
@@ -4955,7 +5010,11 @@ bool G_ProcessIFFDemo (char *mapname)
 			mapname[8] = 0;
 			demo_p += 8;
 			rngseed = ReadLong (&demo_p);
-			FRandom::StaticClearRandom ();
+			// Only reset the RNG if this demo is not in conjunction with a savegame.
+			if (mapname[0] != 0)
+			{
+				FRandom::StaticClearRandom ();
+			}
 			consoleplayer = *demo_p++;
 			break;
 
@@ -5018,7 +5077,7 @@ bool G_ProcessIFFDemo (char *mapname)
 		int r = uncompress (uncompressed, &uncompSize, demo_p, uLong(zdembodyend - demo_p));
 		if (r != Z_OK)
 		{
-			Printf ("Could not decompress demo!\n");
+			Printf ("Could not decompress demo! %s\n", M_ZLibError(r).GetChars());
 			delete[] uncompressed;
 			return true;
 		}
@@ -5073,7 +5132,7 @@ void G_DoPlayDemo (void)
 
 	if (( i = ReadLong (&demo_p)) != FORM_ID)
 	{
-		const char *eek = "Cannot play non-ZDoom demos.\n(They would go out of sync badly.)\n";
+		const char *eek = "Cannot play non-ZDoom demos.\n";
 
 		C_ForgetCVars();
 		M_Free(demobuffer);
@@ -5100,7 +5159,14 @@ void G_DoPlayDemo (void)
 		// don't spend a lot of time in loadlevel 
 		precache = false;
 		demonew = true;
-		G_InitNew (mapname, false);
+		if (mapname[0] != 0)
+		{
+			G_InitNew (mapname, false);
+		}
+		else if (numsectors == 0)
+		{
+			I_Error("Cannot play demo without its savegame\n");
+		}
 		C_HideConsole ();
 		demonew = false;
 		precache = true;
@@ -5121,7 +5187,7 @@ void G_TimeDemo (const char* name)
 	singletics = true;
 
 	defdemoname = name;
-	gameaction = ga_playdemo;
+	gameaction = (gameaction == ga_loadgame) ? ga_loadgameplaydemo : ga_playdemo;
 }
 
 
@@ -5153,10 +5219,10 @@ bool G_CheckDemoStatus (void)
 
 		C_RestoreCVars ();		// [RH] Restore cvars demo might have changed
 		M_Free (demobuffer);
+		demobuffer = NULL;
 
 		P_SetupWeapons_ntohton();
 		demoplayback = false;
-		netdemo = false;
 //		netgame = false;
 //		multiplayer = false;
 		singletics = false;
@@ -5164,8 +5230,10 @@ bool G_CheckDemoStatus (void)
 			playeringame[i] = 0;
 		consoleplayer = 0;
 		players[0].camera = NULL;
-		StatusBar->AttachToPlayer (&players[0]);
-
+		if (StatusBar != NULL)
+		{
+			StatusBar->AttachToPlayer (&players[0]);
+		}
 		if (singledemo || timingdemo)
 		{
 			if (timingdemo)
@@ -5222,11 +5290,18 @@ bool G_CheckDemoStatus (void)
 		formlen = demobuffer + 4;
 		WriteLong (int(demo_p - demobuffer - 8), &formlen);
 
-		M_WriteFile (demoname, demobuffer, int(demo_p - demobuffer)); 
+		bool saved = M_WriteFile (demoname, demobuffer, int(demo_p - demobuffer)); 
 		M_Free (demobuffer); 
 		demorecording = false;
 		stoprecording = false;
-		Printf ("Demo %s recorded\n", demoname); 
+		if (saved)
+		{
+			Printf ("Demo %s recorded\n", demoname.GetChars()); 
+		}
+		else
+		{
+			Printf ("Demo %s could not be saved\n", demoname.GetChars());
+		}
 	}
 
 	return false; 
@@ -5255,9 +5330,10 @@ CCMD( freeze )
 
 		Printf( "Freeze mode %s\n", ( level.flags2 & LEVEL2_FROZEN ) ? "ON" : "OFF" );
 
+		const int freezemask = 1 << consoleplayer;
 		if ( level.flags2 & LEVEL2_FROZEN )
-			players[consoleplayer].cheats |= CF_TIMEFREEZE;
+			players[consoleplayer].timefreezer = freezemask;
 		else
-			players[consoleplayer].cheats &= ~CF_TIMEFREEZE;
+			players[consoleplayer].timefreezer &= ~freezemask;
 	}
 }

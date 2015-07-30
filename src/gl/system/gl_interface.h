@@ -1,12 +1,9 @@
 #ifndef R_RENDER
 #define R_RENDER
 
-// [AL] OpenGL on OS X
-#ifdef __APPLE__
+#if defined(__APPLE__)
 #define APIENTRY
-#define APIENTRYP *
 #endif // __APPLE__
-// [AL]
 
 #ifndef PFNGLMULTITEXCOORD2FPROC
 typedef void (APIENTRYP PFNGLMULTITEXCOORD2FPROC) (GLenum target, GLfloat s, GLfloat t);
@@ -19,20 +16,17 @@ enum RenderFlags
 {
 	RFL_NPOT_TEXTURE=1,
 	RFL_NOSTENCIL=2,
-	RFL_FRAGMENT_PROGRAM=4,
-	RFL_OCCLUSION_QUERY=16,
-	RFL_TEX_ENV_COMBINE4_NV=32,
-	RFL_TEX_ENV_COMBINE3_ATI=64,
+	RFL_OCCLUSION_QUERY=4,
 	// [BB] Added texture compression flags.
-	RFL_TEXTURE_COMPRESSION=128,
-	RFL_TEXTURE_COMPRESSION_S3TC=256,
+	RFL_TEXTURE_COMPRESSION=8,
+	RFL_TEXTURE_COMPRESSION_S3TC=16,
 
-	RFL_VBO = 512,
-	RFL_MAP_BUFFER_RANGE = 1024,
-	RFL_FRAMEBUFFER = 2048,
-	RFL_TEXTUREBUFFER = 4096,
-	RFL_NVIDIA = 8192,
-	RFL_ATI = 16384,
+	RFL_VBO = 32,
+	RFL_MAP_BUFFER_RANGE = 64,
+	RFL_FRAMEBUFFER = 128,
+	RFL_TEXTUREBUFFER = 256,
+	RFL_NVIDIA = 512,
+	RFL_ATI = 1024,
 
 
 	RFL_GL_20 = 0x10000000,
@@ -71,7 +65,7 @@ struct RenderContext
 	void (APIENTRY * SetTextureMode) (int type);
 	void (APIENTRY * PrintStartupLog) ();
 	BOOL (APIENTRY * SetVSync) (int on);
-#if !defined (unix) && !defined (__APPLE__) // [AL] OpenGL on OS X
+#if !defined (unix) && !defined (__APPLE__)
 	bool (APIENTRY * InitHardware) (HWND, bool allowsoftware, bool nostencil, int multisample);
 	void (APIENTRY * Shutdown) ();
 #else
@@ -98,6 +92,7 @@ struct RenderContext
 	void (APIENTRY * Color4fv) (const GLfloat *v);
 	void (APIENTRY * Color3f) (GLfloat red, GLfloat green, GLfloat blue);
 	void (APIENTRY * Color3ub) (GLubyte red, GLubyte green, GLubyte blue);
+	void (APIENTRY * Color4ub) (GLubyte red, GLubyte green, GLubyte blue, GLubyte alpha);
 
 	void (APIENTRY * BlendEquation) (GLenum);
 	void (APIENTRY * ColorMask) (GLboolean red, GLboolean green, GLboolean blue, GLboolean alpha);
