@@ -38,25 +38,61 @@ const char *GetGitDescription();
 const char *GetGitHash();
 const char *GetGitTime();
 const char *GetVersionString();
+// [BB]
+const char *GetVersionStringRev();
+unsigned int GetRevisionNumber();
 
 /** Lots of different version numbers **/
 
-#define VERSIONSTR "1.9pre"
+#define GAME_MAJOR_VERSION 3
+#define GAME_MINOR_VERSION 0
+#define GAMEVER_STRING "3.0"
+#define DOTVERSIONSTR GAMEVER_STRING "-alpha"
+#define VERSIONSTR DOTVERSIONSTR
 
-// The version as seen in the Windows resource
-#define RC_FILEVERSION 1,8,9999,0
-#define RC_PRODUCTVERSION 1,8,9999,0
-#define RC_PRODUCTVERSION2 "1.9pre"
+#define ZDVER_STRING "2.8pre"
+#define ZD_SVN_REVISION_STRING "4342"
+#define ZD_SVN_REVISION_NUMBER 4342
+
+// [BB] The version string that includes revision / compatibility data.
+#define DOTVERSIONSTR_REV DOTVERSIONSTR "-r" HG_TIME
+
+// [BC] What version of ZDoom is this based off of?
+#define	ZDOOMVERSIONSTR		ZDVER_STRING"-"ZD_SVN_REVISION_STRING
+
+/** Release code stuff */
+
+// Please maintain the existing structure as much as possible, because it's
+// used in communicating between servers and clients of different versions.
+#define BUILD_OTHER			0
+#define BUILD_RELEASE		1
+#define BUILD_INTERNAL		2
+#define BUILD_PRIVATE		3
+
+// [RC] Release code ID for this build.
+#define BUILD_ID			BUILD_INTERNAL
+#define BUILD_ID_STR		"Internal" // Used in the exe's metadata.
 
 // Version identifier for network games.
 // Bump it every time you do a release unless you're certain you
-// didn't change anything that will affect sync.
-#define NETGAMEVERSION 229
+// didn't change anything that will affect network protocol.
+// 003 = 0.97c2
+// 004 = 0.97c3
+// 005 = 0.97d-beta4
+// 006 = 0.97d-beta4.2
+// 007 = 0.97d-RC9
+// [BB] Use the revision number to automatically make builds from
+// different revisions incompatible. Skulltag only uses one byte
+// to transfer NETGAMEVERSION, so we need to limit its value to [0,255].
+#define NETGAMEVERSION (GetRevisionNumber() % 256)
 
 // Version stored in the ini's [LastRun] section.
 // Bump it if you made some configuration change that you want to
 // be able to migrate in FGameConfigFile::DoGlobalSetup().
 #define LASTRUNVERSION "210"
+
+// [TP] Same as above except for Zandronum-specific changes
+#define LASTZARUNVERSION "181"
 
 // Protocol version used in demos.
 // Bump it if you change existing DEM_ commands or add new ones.
@@ -85,20 +121,25 @@ const char *GetVersionString();
 #define DYNLIGHT
 
 // This is so that derivates can use the same savegame versions without worrying about engine compatibility
-#define GAMESIG "GZDOOM"
-#define BASEWAD "gzdoom.pk3"
+#define GAMESIG "ZANDRONUM"
+#define BASEWAD "zandronum.pk3"
 
 // More stuff that needs to be different for derivatives.
-#define GAMENAME "GZDoom"
-#define FORUM_URL "http://forum.drdteam.org"
-#define BUGS_FORUM_URL	"http://forum.drdteam.org/viewforum.php?f=24"
+#define GAMENAME "Zandronum"
+#define GAMENAMELOWERCASE "zandronum"
+#define DOMAIN_NAME "zandronum.com"
+#define FORUM_URL "http://" DOMAIN_NAME "/forum/"
+#define BUGS_FORUM_URL	"http://" DOMAIN_NAME "/tracker/"
+
+// [BC] This is what's displayed as the title for server windows.
+#define	SERVERCONSOLE_TITLESTRING	GAMENAME " v" DOTVERSIONSTR " Server"
 
 #ifdef unix
-#define GAME_DIR ".config/gzdoom"
+#define GAME_DIR ".config/" GAMENAMELOWERCASE
 #elif defined(__APPLE__)
 #define GAME_DIR GAMENAME
 #else
-#define CDROM_DIR "C:\\GZDOOMDAT"
+#define CDROM_DIR "C:\\ZDOOMDAT"
 #endif
 
 

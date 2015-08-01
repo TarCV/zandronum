@@ -2,6 +2,10 @@
 #include "a_weaponpiece.h"
 #include "doomstat.h"
 #include "farchive.h"
+// [BB] New #includes.
+#include "deathmatch.h"
+#include "network.h"
+#include "sv_commands.h"
 
 IMPLEMENT_CLASS (AWeaponHolder)
 
@@ -119,6 +123,11 @@ bool AWeaponPiece::TryPickup (AActor *&toucher)
 		{
 			FullWeapon= static_cast<AWeapon*>(Spawn(WeaponClass, 0, 0, 0, NO_REPLACE));
 			
+			// [BB] The collection of weapon pieces is handled on the server, so we
+			// need to tell the client that the weapon is completed.
+			if (( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( toucher ) && ( toucher->player ))
+				SERVERCOMMANDS_GiveInventory( ULONG( toucher->player - players ), FullWeapon );
+
 			// The weapon itself should not give more ammo to the player!
 			FullWeapon->AmmoGive1=0;
 			FullWeapon->AmmoGive2=0;
@@ -127,6 +136,11 @@ bool AWeaponPiece::TryPickup (AActor *&toucher)
 			FullWeapon->AmmoGive2=Defaults->AmmoGive2;
 		}
 	}
+
+	// [Dusk] Update the ammo counts to the client
+	if (( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( toucher ) && ( toucher->player ))
+		SERVERCOMMANDS_SyncPlayerAmmoAmount( ULONG( toucher->player - players ));
+
 	GoAwayAndDie();
 	return true;
 }
@@ -140,7 +154,7 @@ bool AWeaponPiece::PrivateShouldStay ()
 {
 	// We want a weapon piece to behave like a weapon, so follow the exact
 	// same logic as weapons when deciding whether or not to stay.
-	if (((multiplayer &&
+	if (((( NETWORK_GetState( ) != NETSTATE_SINGLE ) &&
 		(!deathmatch && !alwaysapplydmflags)) || (dmflags & DF_WEAPONS_STAY)) &&
 		!(flags&MF_DROPPED))
 	{

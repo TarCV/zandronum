@@ -114,6 +114,9 @@ public:
 	}
 
 
+	// [BC] Was this wad loaded automatically?
+	bool	bLoadedAutomatically;
+
 protected:
 	FileReader (const FileReader &other, long length);
 

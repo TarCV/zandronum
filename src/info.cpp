@@ -50,6 +50,10 @@
 #include "templates.h"
 #include "cmdlib.h"
 #include "g_level.h"
+// [BB] New #includes.
+#include "cl_commands.h"
+#include "cl_main.h"
+#include "network.h"
 
 extern void LoadActors ();
 extern void InitBotStuff();
@@ -130,7 +134,8 @@ void FActorInfo::StaticInit ()
 	Printf ("LoadActors: Load actor definitions.\n");
 	ClearStrifeTypes();
 	LoadActors ();
-	InitBotStuff();
+	// [BB] Zandronum uses different bot code.
+	//InitBotStuff();
 }
 
 //==========================================================================
@@ -536,6 +541,26 @@ static void SummonActor (int command, int command2, FCommandLine argv)
 			Printf ("Unknown class '%s'\n", argv[1]);
 			return;
 		}
+
+		if ( NETWORK_GetState( ) == NETSTATE_CLIENT )
+		{
+			const bool bSetAngle = ( argv.argc() > 2 );
+			const SHORT sAngle = bSetAngle ? atoi (argv[2]) : 0;
+			switch(command)
+			{
+			case DEM_SUMMON:
+				CLIENTCOMMANDS_SummonCheat( type->TypeName.GetChars( ), CLC_SUMMONCHEAT, bSetAngle, sAngle );
+				break;
+			case DEM_SUMMONFRIEND:
+				CLIENTCOMMANDS_SummonCheat( type->TypeName.GetChars( ), CLC_SUMMONFRIENDCHEAT, bSetAngle, sAngle );
+				break;
+			case DEM_SUMMONFOE:
+				CLIENTCOMMANDS_SummonCheat( type->TypeName.GetChars( ), CLC_SUMMONFOECHEAT, bSetAngle, sAngle );
+				break;
+			}
+			return;
+		}
+
 		Net_WriteByte (argv.argc() > 2 ? command2 : command);
 		Net_WriteString (type->TypeName.GetChars());
 

@@ -62,6 +62,13 @@
 #include "r_data/colormaps.h"
 #include "r_data/voxels.h"
 #include "p_local.h"
+// [BB] New #includes.
+#include "w_wad.h"
+#include "cl_demo.h"
+#include "deathmatch.h"
+#include "lastmanstanding.h"
+#include "network.h"
+#include "gamemode.h"
 
 // [RH] A c-buffer. Used for keeping track of offscreen voxel spans.
 
@@ -507,6 +514,9 @@ void R_ProjectSprite (AActor *thing, int fakeside, F3DFloor *fakefloor, F3DFloor
 
 	sector_t*			heightsec;			// killough 3/27/98
 
+	SWORD				TopOffset;
+	SWORD				LeftOffset;
+
 	// Don't waste time projecting sprites that are definitely not visible.
 	if (thing == NULL ||
 		(thing->renderflags & RF_INVISIBLE) ||
@@ -611,6 +621,18 @@ void R_ProjectSprite (AActor *thing, int fakeside, F3DFloor *fakefloor, F3DFloor
 	if (voxel == NULL && (tex == NULL || tex->UseType == FTexture::TEX_Null))
 	{
 		return;
+	}
+
+	// [BC] Render flag here for the random powerup, which has all of its frames centered.
+	if ( thing->renderflags & RF_RANDOMPOWERUPHACK )
+	{
+		TopOffset = tex->GetHeight( ) + 24 - ( tex->GetHeight( ) / 2 );
+		LeftOffset = tex->GetWidth( ) / 2;
+	}
+	else
+	{
+		TopOffset = tex->TopOffset;
+		LeftOffset = tex->LeftOffset;
 	}
 
 	// thing is behind view plane?
@@ -846,6 +868,10 @@ void R_ProjectSprite (AActor *thing, int fakeside, F3DFloor *fakefloor, F3DFloor
 	{ // fixed map
 		vis->Style.colormap = fixedcolormap;
 	}
+	// [BB] This makes sure that actors, which have lFixedColormap set, are renderes accordingly.
+	// For example a player using a doom sphere is rendered red for the other players.
+	else if ( ( thing->lFixedColormap != NOFIXEDCOLORMAP ) && ( thing->lFixedColormap >= 0 ) && ( unsigned ( thing->lFixedColormap ) < SpecialColormaps.Size() ) )
+		vis->Style.colormap = SpecialColormaps[ thing->lFixedColormap ].Colormap;
 	else
 	{
 		if (invertcolormap)
@@ -1534,7 +1560,8 @@ void R_SortVisSprites (bool (*compare)(vissprite_t *, vissprite_t *), size_t fir
 //
 // R_DrawSprite
 //
-void R_DrawSprite (vissprite_t *spr)
+// [BB] Added dummy argument to stop the current wallhack.
+void R_DrawSprite (vissprite_t * /*dummyArg*/, vissprite_t *spr)
 {
 	static short clipbot[MAXWIDTH];
 	static short cliptop[MAXWIDTH];
@@ -1949,9 +1976,19 @@ void R_DrawMaskedSingle (bool renew)
 	R_SplitVisSprites ();
 #endif
 
-	for (i = vsprcount; i > 0; i--)
+	// [BC] Potentially prevent spectators from viewing active players during LMS games.
+	if ((( teamlms || lastmanstanding ) &&
+		(( lmsspectatorsettings & LMS_SPF_VIEW ) == false ) &&
+		( players[consoleplayer].bSpectating ) &&
+		( players[consoleplayer].mo->CheckLocalView( consoleplayer )) &&
+		NETWORK_InClientMode() &&
+		( LASTMANSTANDING_GetState( ) == LMSS_INPROGRESS )) == false )
 	{
-		R_DrawSprite (spritesorter[i-1]);
+		for (i = vsprcount; i > 0; i--)
+		{
+			// [BB] Added dummy argument to stop the current wallhack.
+			R_DrawSprite (NULL, spritesorter[i-1]);
+		}
 	}
 
 	// render any remaining masked mid textures
