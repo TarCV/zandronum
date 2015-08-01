@@ -10,6 +10,9 @@
 #include "g_level.h"
 #include "r_state.h"
 #include "farchive.h"
+// [BC] New #includes.
+#include "network.h"
+#include "sv_commands.h"
 
 static FRandom pr_lightning ("Lightning");
 
@@ -87,13 +90,28 @@ void DLightningThinker::Tick ()
 	}
 	else
 	{
-		--NextLightningFlash;
+		// [Dusk] The server manages lightning. However, the client forces lightning
+		// by setting NextLightningFlash to 0. To work around this, we simply don't
+		// count the lightning flash down when in client mode.
+		if ( NETWORK_InClientMode() == false )
+			--NextLightningFlash;
+
 		if (Stopped) Destroy();
 	}
 }
 
 void DLightningThinker::LightningFlash ()
 {
+	// [BB] The server just tells the clients to call P_ForceLightning.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		SERVERCOMMANDS_Lightning( );
+
+		// [Dusk] The server runs LIGHTNING ACS scripts too and calculates
+		// the next lightning flash.
+		goto nextflash;
+	}
+
 	int i, j;
 	sector_t *tempSec;
 	BYTE flashLight;
@@ -168,7 +186,10 @@ void DLightningThinker::LightningFlash ()
 
 	level.flags |= LEVEL_SWAPSKIES;	// set alternate sky
 	S_Sound (CHAN_AUTO, "world/thunder", 1.0, ATTN_NONE);
-	FBehavior::StaticStartTypedScripts (SCRIPT_Lightning, NULL, false);	// [RH] Run lightning scripts
+
+nextflash: // [Dusk] Server jumps back in here
+	bool bClientOnly = NETWORK_InClientMode();
+	FBehavior::StaticStartTypedScripts (SCRIPT_Lightning, NULL, false, 0, false, bClientOnly);	// [RH] Run lightning scripts
 
 	// Calculate the next lighting flash
 	if (!NextLightningFlash)

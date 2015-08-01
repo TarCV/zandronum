@@ -71,6 +71,8 @@
 #include "p_lnspec.h"
 #include "m_crc32.h"
 #include "farchive.h"
+// [BB] New #includes.
+#include "deathmatch.h"
 
 CVAR(Int, savestatistics, 0, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 CVAR(String, statfile, "zdoomstat.txt", CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
@@ -378,7 +380,8 @@ static void LevelStatEntry(FSessionStatistics *es, const char *level, const char
 void STAT_StartNewGame(const char *mapname)
 {
 	LevelData.Clear();
-	if (!deathmatch && !multiplayer)
+	// [BB] !multiplayer -> ( NETWORK_GetState( ) == NETSTATE_SINGLE )
+	if (!deathmatch && ( NETWORK_GetState( ) == NETSTATE_SINGLE ))
 	{
 		for(unsigned int j=0;j<AllEpisodes.Size();j++)
 		{

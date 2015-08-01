@@ -12,6 +12,11 @@
 #include "g_level.h"
 #include "doomstat.h"
 #include "farchive.h"
+// [BB] New #includes.
+#include "cl_demo.h"
+#include "deathmatch.h"
+#include "network.h"
+#include "sv_commands.h"
 
 #define MAULATORTICS (25*35)
 
@@ -33,7 +38,13 @@ IMPLEMENT_CLASS(AMinotaur)
 void AMinotaur::Tick ()
 {
 	Super::Tick ();
-	
+
+	// [BC] Don't do this in client mode.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	// The unfriendly Minotaur (Heretic's) is invulnerable while charging
 	if (!(flags5 & MF5_SUMMONEDMONSTER))
 	{
@@ -42,12 +53,22 @@ void AMinotaur::Tick ()
 		if ((flags2 & MF2_INVULNERABLE) != flying)
 		{
 			flags2 ^= MF2_INVULNERABLE;
+
+			// [BC] If we're the server, tell clients to update this thing's flags.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetThingFlags( this, FLAGSET_FLAGS2 );
 		}
 	}
 }
 
 bool AMinotaur::Slam (AActor *thing)
 {
+	// [BC] Don't do this in client mode.
+	if ( NETWORK_InClientMode() )
+	{
+		return ( false );
+	}
+
 	// Slamming minotaurs shouldn't move non-creatures
 	if (!(thing->flags3&MF3_ISMONSTER) && !thing->player)
 	{
@@ -87,6 +108,12 @@ void AMinotaurFriend::Die (AActor *source, AActor *inflictor, int dmgflags)
 {
 	Super::Die (source, inflictor, dmgflags);
 
+	// [BC] Don't do this in client mode.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (tracer && tracer->health > 0 && tracer->player)
 	{
 		// Search thinker list for minotaur
@@ -116,6 +143,12 @@ void AMinotaurFriend::Die (AActor *source, AActor *inflictor, int dmgflags)
 
 bool AMinotaurFriend::OkayToSwitchTarget (AActor *other)
 {
+	// [BC] Don't do this in client mode.
+	if ( NETWORK_InClientMode() )
+	{
+		return ( false );
+	}
+
 	if (other == tracer) return false;		// Do not target the master
 	return Super::OkayToSwitchTarget (other);
 }
@@ -141,11 +174,22 @@ DEFINE_ACTION_FUNCTION(AActor, A_MinotaurAtk1)
 {
 	player_t *player;
 
+	// [BC] Don't do this in client mode.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (!self->target)
 	{
 		return;
 	}
 	S_Sound (self, CHAN_WEAPON, "minotaur/melee", 1, ATTN_NORM);
+
+	// [BC] If we're the server, tell clients to play this sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SoundActor( self, CHAN_WEAPON, "minotaur/melee", 1, ATTN_NORM );
+
 	if (self->CheckMeleeRange())
 	{
 		int damage = pr_minotauratk1.HitDice (4);
@@ -176,6 +220,12 @@ DEFINE_ACTION_FUNCTION(AActor, A_MinotaurDecide)
 	AActor *target;
 	int dist;
 
+	// [BC] Don't do this in client mode.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	target = self->target;
 	if (!target)
 	{
@@ -184,6 +234,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_MinotaurDecide)
 	if (!friendly)
 	{
 		S_Sound (self, CHAN_WEAPON, "minotaur/sight", 1, ATTN_NORM);
+
+		// [BC] If we're the server, tell clients to play this sound.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SoundActor( self, CHAN_WEAPON, "minotaur/sight", 1, ATTN_NORM );
 	}
 	dist = P_AproxDistance (self->x-target->x, self->y-target->y);
 	if (target->z+target->height > self->z
@@ -192,23 +246,43 @@ DEFINE_ACTION_FUNCTION(AActor, A_MinotaurDecide)
 		&& dist > 1*64*FRACUNIT
 		&& pr_minotaurdecide() < 150)
 	{ // Charge attack
+
+		// [BC] If we're the server, set the thing's state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingFrame( self, self->FindState ("Charge"), MAXPLAYERS, 0, false );
+
 		// Don't call the state function right away
 		self->SetState (self->FindState ("Charge"), true);
 		self->flags |= MF_SKULLFLY;
 		if (!friendly)
 		{ // Heretic's Minotaur is invulnerable during charge attack
 			self->flags2 |= MF2_INVULNERABLE;
+
+			// [BB] If we're the server, tell clients to update this thing's flags.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetThingFlags( self, FLAGSET_FLAGS2 );
 		}
 		A_FaceTarget (self);
 		angle = self->angle>>ANGLETOFINESHIFT;
 		self->velx = FixedMul (MNTR_CHARGE_SPEED, finecosine[angle]);
 		self->vely = FixedMul (MNTR_CHARGE_SPEED, finesine[angle]);
 		self->special1 = TICRATE/2; // Charge duration
+
+		// [BB] If we're the server, update the thing's momentum and set the MF_SKULLFLY flag.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			SERVERCOMMANDS_MoveThingExact( self, CM_MOMX|CM_MOMY );
+			SERVERCOMMANDS_SetThingFlags( self, FLAGSET_FLAGS );
+		}
 	}
 	else if (target->z == target->floorz
 		&& dist < 9*64*FRACUNIT
 		&& pr_minotaurdecide() < (friendly ? 100 : 220))
 	{ // Floor fire attack
+		// [BC] If we're the server, set the thing's state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingFrame( self, self->FindState ("Hammer") );
+
 		self->SetState (self->FindState ("Hammer"));
 		self->special2 = 0;
 	}
@@ -230,6 +304,12 @@ DEFINE_ACTION_FUNCTION(AActor, A_MinotaurCharge)
 {
 	AActor *puff;
 
+	// [BC] Don't do this in client mode.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (!self->target) return;
 
 	if (self->special1 > 0)
@@ -247,11 +327,27 @@ DEFINE_ACTION_FUNCTION(AActor, A_MinotaurCharge)
 		puff = Spawn (type, self->x, self->y, self->z, ALLOW_REPLACE);
 		puff->velz = 2*FRACUNIT;
 		self->special1--;
+
+		// [BC] If we're the server, tell clients to spawn the puff.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			SERVERCOMMANDS_SpawnThing( puff );
+			SERVERCOMMANDS_MoveThing( puff, CM_MOMZ );
+		}
 	}
 	else
 	{
 		self->flags &= ~MF_SKULLFLY;
 		self->flags2 &= ~MF2_INVULNERABLE;
+
+		// [BC] If we're the server, tell clients to update this thing's flags and state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			SERVERCOMMANDS_SetThingFlags( self, FLAGSET_FLAGS );
+			SERVERCOMMANDS_SetThingFlags( self, FLAGSET_FLAGS2 );
+			SERVERCOMMANDS_SetThingState( self, STATE_SEE );
+		}
+
 		self->SetState (self->SeeState);
 	}
 }
@@ -272,11 +368,22 @@ DEFINE_ACTION_FUNCTION(AActor, A_MinotaurAtk2)
 	fixed_t z;
 	bool friendly = !!(self->flags5 & MF5_SUMMONEDMONSTER);
 
+	// [BC] Don't do this in client mode.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (!self->target)
 	{
 		return;
 	}
 	S_Sound (self, CHAN_WEAPON, "minotaur/attack2", 1, ATTN_NORM);
+
+	// [BC] If we're the server, tell clients to play this sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SoundActor( self, CHAN_WEAPON, "minotaur/attack2", 1, ATTN_NORM );
+
 	if (self->CheckMeleeRange())
 	{
 		int damage;
@@ -295,10 +402,34 @@ DEFINE_ACTION_FUNCTION(AActor, A_MinotaurAtk2)
 //			S_Sound (mo, CHAN_WEAPON, "minotaur/attack2", 1, ATTN_NORM);
 			velz = mo->velz;
 			angle = mo->angle;
-			P_SpawnMissileAngleZ (self, z, fx, angle-(ANG45/8), velz);
-			P_SpawnMissileAngleZ (self, z, fx, angle+(ANG45/8), velz);
-			P_SpawnMissileAngleZ (self, z, fx, angle-(ANG45/16), velz);
-			P_SpawnMissileAngleZ (self, z, fx, angle+(ANG45/16), velz);
+
+			// [BC] If we're the server, tell clients to spawn this missile.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SpawnMissile( mo );
+
+			mo = P_SpawnMissileAngleZ (self, z, fx, angle-(ANG45/8), velz);
+		
+			// [BC] If we're the server, tell clients to spawn this missile.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SpawnMissile( mo );
+
+			mo = P_SpawnMissileAngleZ (self, z, fx, angle+(ANG45/8), velz);
+		
+			// [BC] If we're the server, tell clients to spawn this missile.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SpawnMissile( mo );
+
+			mo = P_SpawnMissileAngleZ (self, z, fx, angle-(ANG45/16), velz);
+		
+			// [BC] If we're the server, tell clients to spawn this missile.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SpawnMissile( mo );
+
+			mo = P_SpawnMissileAngleZ (self, z, fx, angle+(ANG45/16), velz);
+		
+			// [BC] If we're the server, tell clients to spawn this missile.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SpawnMissile( mo );
 		}
 	}
 }
@@ -317,11 +448,22 @@ DEFINE_ACTION_FUNCTION(AActor, A_MinotaurAtk3)
 	player_t *player;
 	bool friendly = !!(self->flags5 & MF5_SUMMONEDMONSTER);
 
+	// [BC] Don't do this in client mode.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (!self->target)
 	{
 		return;
 	}
 	S_Sound (self, CHAN_VOICE, "minotaur/attack3", 1, ATTN_NORM);
+
+	// [BC] If we're the server, tell clients to play this sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SoundActor( self, CHAN_WEAPON, "minotaur/attack3", 1, ATTN_NORM );
+
 	if (self->CheckMeleeRange())
 	{
 		int damage;
@@ -341,6 +483,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_MinotaurAtk3)
 		{
 			// only play the sound. 
 			S_Sound (self, CHAN_WEAPON, "minotaur/fx2hit", 1, ATTN_NORM);
+
+			// [BB] If we're the server, tell clients to play this sound.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SoundActor( self, CHAN_WEAPON, "minotaur/fx2hit", 1, ATTN_NORM );
 		}
 		else
 		{
@@ -348,11 +494,22 @@ DEFINE_ACTION_FUNCTION(AActor, A_MinotaurAtk3)
 			if (mo != NULL)
 			{
 				S_Sound (mo, CHAN_WEAPON, "minotaur/attack1", 1, ATTN_NORM);
+
+				// [BC] If we're the server, tell clients to spawn the missile and play this sound.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				{
+					SERVERCOMMANDS_SpawnMissile( mo );
+					SERVERCOMMANDS_SoundActor( mo, CHAN_WEAPON, "minotaur/attack1", 1, ATTN_NORM );
+				}
 			}
 		}
 	}
 	if (pr_minotauratk3() < 192 && self->special2 == 0)
 	{
+		// [BC] If we're the server, set the thing's state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingFrame( self, self->FindState ("HammerLoop") );
+
 		self->SetState (self->FindState ("HammerLoop"));
 		self->special2 = 1;
 	}
@@ -369,12 +526,23 @@ DEFINE_ACTION_FUNCTION(AActor, A_MntrFloorFire)
 	AActor *mo;
 	fixed_t x, y;
 
+	// [BC] Don't do this in client mode.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	self->z = self->floorz;
 	x = self->x + (pr_fire.Random2 () << 10);
 	y = self->y + (pr_fire.Random2 () << 10);
 	mo = Spawn("MinotaurFX3", x, y, self->floorz, ALLOW_REPLACE);
 	mo->target = self->target;
 	mo->velx = 1; // Force block checking
+
+	// [BC] If we're the server, tell clients to spawn this thing.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SpawnThing( mo );
+
 	P_CheckMissileSpawn (mo, self->radius);
 }
 
@@ -389,6 +557,12 @@ void P_MinotaurSlam (AActor *source, AActor *target)
 	angle_t angle;
 	fixed_t thrust;
 	int damage;
+
+	// [BC] Don't do this in client mode.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
 
 	angle = R_PointToAngle2 (source->x, source->y, target->x, target->y);
 	angle >>= ANGLETOFINESHIFT;
@@ -424,6 +598,12 @@ DEFINE_ACTION_FUNCTION(AActor, A_MinotaurRoam)
 {
 	// In case pain caused him to skip his fade in.
 	self->RenderStyle = STYLE_Normal;
+
+	// [BC] Don't do this in client mode.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
 
 	if (self->IsKindOf(RUNTIME_CLASS(AMinotaurFriend)))
 	{
@@ -470,6 +650,12 @@ DEFINE_ACTION_FUNCTION(AActor, A_MinotaurLook)
 	if (!self->IsKindOf(RUNTIME_CLASS(AMinotaurFriend)))
 	{
 		CALL_ACTION(A_Look, self);
+		return;
+	}
+
+	// [BC] Don't do this in client mode.
+	if ( NETWORK_InClientMode() )
+	{
 		return;
 	}
 
@@ -525,10 +711,18 @@ DEFINE_ACTION_FUNCTION(AActor, A_MinotaurLook)
 
 	if (self->target)
 	{
+		// [BC] If we're the server, set the thing's state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingState( self, STATE_SEE );
+
 		self->SetState (self->SeeState, true);
 	}
 	else
 	{
+		// [BC] If we're the server, set the thing's state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingFrame( self, self->FindState ("Roam") );
+
 		self->SetState (self->FindState ("Roam"), true);
 	}
 }
@@ -546,6 +740,20 @@ DEFINE_ACTION_FUNCTION(AActor, A_MinotaurChase)
 	// In case pain caused him to skip his fade in.
 	self1->RenderStyle = STYLE_Normal;
 
+	// [BC] Don't do this in client mode.
+	if ( NETWORK_InClientMode() )
+	{
+		A_Chase( self );
+
+		// Active sound
+		if (pr_minotaurchase() < 6)
+		{
+			self->PlayActiveSound ();
+		}
+
+		return;
+	}
+
 	if (self1->StartTime >= 0 && (level.maptime - self1->StartTime) >= MAULATORTICS)
 	{
 		P_DamageMobj (self1, NULL, NULL, TELEFRAG_DAMAGE, NAME_None);
@@ -558,6 +766,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_MinotaurChase)
 	if (!self1->target || (self1->target->health <= 0) ||
 		!(self1->target->flags&MF_SHOOTABLE))
 	{ // look for a new target
+		// [BC] If we're the server, set the thing's state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingFrame( self, self->FindState ("Spawn") );
+
 		self1->SetIdle();
 		return;
 	}
@@ -572,6 +784,14 @@ DEFINE_ACTION_FUNCTION(AActor, A_MinotaurChase)
 		{
 			S_Sound (self1, CHAN_WEAPON, self1->AttackSound, 1, ATTN_NORM);
 		}
+		// [BC] If we're the server, play the attack sound and update the thing's state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			if ( self1->AttackSound )
+				SERVERCOMMANDS_SoundActor( self1, CHAN_WEAPON, S_GetName( self1->AttackSound ), 1, ATTN_NORM );
+			SERVERCOMMANDS_SetThingState( self1, STATE_MELEE );
+		}
+
 		self1->SetState (self1->MeleeState);
 		return;
 	}
@@ -579,6 +799,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_MinotaurChase)
 	// Missile attack
 	if (self1->MissileState && P_CheckMissileRange(self1))
 	{
+		// [BC] If we're the server, update the thing's state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingState( self1, STATE_MISSILE );
+
 		self1->SetState (self1->MissileState);
 		return;
 	}

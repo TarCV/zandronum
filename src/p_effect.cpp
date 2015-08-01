@@ -51,8 +51,20 @@
 #include "gi.h"
 #include "v_palette.h"
 #include "colormatcher.h"
+// [BB] New #includes.
+#include "deathmatch.h"
+#include "network.h"
+#include "team.h" // [CK]
+#include "doomdata.h"
+#include "v_palette.h"
+
+// [CK] Prototypes
+static void MakeFountain (fixed_t x, fixed_t y, fixed_t z, fixed_t radius, fixed_t height, int color1, int color2);
 
 CVAR (Int, cl_rockettrails, 1, CVAR_ARCHIVE);
+CVAR (Int, cl_grenadetrails, 1, CVAR_ARCHIVE);
+CVAR (Int, cl_respawninvuleffect, 1, CVAR_ARCHIVE);
+CVAR (Bool, cl_showspawns, false, CVAR_ARCHIVE); // [CK] Particle fountains at spawns
 CVAR (Bool, r_rail_smartspiral, 0, CVAR_ARCHIVE);
 CVAR (Int, r_rail_spiralsparsity, 1, CVAR_ARCHIVE);
 CVAR (Int, r_rail_trailsparsity, 1, CVAR_ARCHIVE);
@@ -69,10 +81,11 @@ WORD			InactiveParticles;
 particle_t		*Particles;
 TArray<WORD>	ParticlesInSubsec;
 
-static int grey1, grey2, grey3, grey4, red, green, blue, yellow, black,
-		   red1, green1, blue1, yellow1, purple, purple1, white,
-		   rblue1, rblue2, rblue3, rblue4, orange, yorange, dred, grey5,
-		   maroon1, maroon2, blood1, blood2;
+static int grey1, grey2, grey3, grey4, red, red2, red3, red4, green, blue, yellow, black,
+		   red1, green1, blue1, yellow1, yellow2, yellow3, purple, purple1, purple2, purple3, white,
+		   rblue1, rblue2, rblue3, rblue4, orange, yorange, dred,  dred2,
+		   dred3, dred4, grey5, grey6, maroon1, maroon2, blood1, blood2, gold1, gold2, cyan1, cyan2, green2;
+
 
 static const struct ColorList {
 	int *color;
@@ -83,17 +96,26 @@ static const struct ColorList {
 	{&grey3,	50,  50,  50 },
 	{&grey4,	210, 210, 210},
 	{&grey5,	128, 128, 128},
+	{&grey6,	139, 139, 139},
 	{&red,		255, 0,   0  },  
-	{&green,	0,   200, 0  },  
-	{&blue,		0,   0,   255},
-	{&yellow,	255, 255, 0  },  
-	{&black,	0,   0,   0  },  
 	{&red1,		255, 127, 127},
+	{&red2,		227, 0,   0  },
+	{&red3,		255, 31,  31 },
+	{&red4,		203, 0,   0  },
+	{&green,	0,   200, 0  },  
 	{&green1,	127, 255, 127},
+	{&green2,	71,  131, 58 },
+	{&blue,		0,   0,   255},
 	{&blue1,	127, 127, 255},
+	{&yellow,	255, 255, 0  },  
 	{&yellow1,	255, 255, 180},
+	{&yellow2,	255, 255, 35 },  
+	{&yellow3,	255, 255, 71 },  
+	{&black,	0,   0,   0  },  
 	{&purple,	120, 0,   160},
 	{&purple1,	200, 30,  255},
+	{&purple2,	207, 0,   207},
+	{&purple3,	255, 0,   255},
 	{&white, 	255, 255, 255},
 	{&rblue1,	81,  81,  255},
 	{&rblue2,	0,   0,   227},
@@ -101,10 +123,30 @@ static const struct ColorList {
 	{&rblue4,	0,   0,   80 },
 	{&orange,	255, 120, 0  },
 	{&yorange,	255, 170, 0  },
-	{&dred,		80,  0,   0  },
+	{&dred,		91,  3,   3  },
+	{&dred2,	127, 3,   3  },
+	{&dred3,	227, 0,	  0  },
+	{&dred4,	255, 31,  31 },
 	{&maroon1,	154, 49,  49 },
 	{&maroon2,	125, 24,  24 },
+	{&gold1,	204, 168, 62 },
+	{&gold2,	186, 139, 44 },
+	{&cyan1,	0,   255, 255},
+	{&cyan2,	81,  255, 255},	
 	{NULL, 0, 0, 0 }
+};
+
+// [Dusk] Lookup table based on the old rainbow trail code
+static int g_rainbowParticleColorIndex = 0;
+static int* g_rainbowParticleColors[] =
+{
+	&red,
+	&orange,
+	&yellow,
+	&green,
+	&blue,
+	&purple,
+	&purple3,
 };
 
 inline particle_t *NewParticle (void)
@@ -284,6 +326,27 @@ void P_ThinkParticles ()
 	}
 }
 
+// [CK] Refactored code to generate a fountain.
+static void GenerateShowSpawnFountain ( FPlayerStart &ts, const int color, const int pnum )
+{
+	fixed_t floorZ;
+	sector_t *pSector;
+	int rejectnum;
+	pSector = P_PointInSector( ts.x, ts.y );
+
+	// Do not spawn particles if the sector is null
+	if ( pSector != NULL )
+	{
+		// Only draw the fountain if it's potentially visible
+		rejectnum = pnum + int(pSector - sectors);
+		if (rejectmatrix == NULL || !(rejectmatrix[rejectnum>>3] & (1 << (rejectnum & 7))))
+		{
+			floorZ = pSector->floorplane.ZatPoint( ts.x, ts.y );
+			MakeFountain( ts.x, ts.y, floorZ, 16 << FRACBITS, 0, color, color );
+		}
+	}
+}
+
 //
 // P_RunEffects
 //
@@ -306,6 +369,42 @@ void P_RunEffects ()
 			int rnum = pnum + int(actor->Sector - sectors);
 			if (rejectmatrix == NULL || !(rejectmatrix[rnum>>3] & (1 << (rnum & 7))))
 				P_RunEffect (actor, actor->effects);
+		}
+	}
+
+	// [CK] If the client wants to show particles at spawns, do so.
+	// Teams get special handling due to colors.
+	// [BB] DM and Coop starts need different treatment, too.
+	if ( cl_showspawns ) 
+	{
+		if ( teamgame ) 
+		{
+			for ( ULONG t = 0; t < teams.Size(); t++ )
+			{
+				const int r = RPART( teams[t].lPlayerColor );
+				const int g = GPART( teams[t].lPlayerColor );
+				const int b = BPART( teams[t].lPlayerColor );
+				const int color = (MAKERGB( r, g, b ) | (ColorMatcher.Pick( r, g, b ) << 24));
+				for ( ULONG i = 0; i < teams[t].TeamStarts.Size( ); i++ )
+				{
+					GenerateShowSpawnFountain( teams[t].TeamStarts[i], color, pnum );
+				}
+			}
+		}
+		else if ( deathmatch )
+		{
+			for ( ULONG i = 0; i < deathmatchstarts.Size( ); i++)
+			{
+				GenerateShowSpawnFountain( deathmatchstarts[i], grey4, pnum );
+			}
+		}
+		else
+		{
+			for ( ULONG i = 0; i < MAXPLAYERS; i++)
+			{
+				if ( playerstarts[i].type != 0 )
+					GenerateShowSpawnFountain( playerstarts[i], grey4, pnum );
+			}
 		}
 	}
 }
@@ -342,7 +441,8 @@ particle_t *JitterParticle (int ttl, float drift)
 	return particle;
 }
 
-static void MakeFountain (AActor *actor, int color1, int color2)
+// [CK] Refactored fountain that allows custom spawners to be used
+static void MakeFountain (fixed_t x, fixed_t y, fixed_t z, fixed_t radius, fixed_t height, int color1, int color2)
 {
 	particle_t *particle;
 
@@ -354,12 +454,12 @@ static void MakeFountain (AActor *actor, int color1, int color2)
 	if (particle)
 	{
 		angle_t an = M_Random()<<(24-ANGLETOFINESHIFT);
-		fixed_t out = FixedMul (actor->radius, M_Random()<<8);
+		fixed_t out = FixedMul (radius, M_Random()<<8);
 
-		particle->x = actor->x + FixedMul (out, finecosine[an]);
-		particle->y = actor->y + FixedMul (out, finesine[an]);
-		particle->z = actor->z + actor->height + FRACUNIT;
-		if (out < actor->radius/8)
+		particle->x = x + FixedMul (out, finecosine[an]);
+		particle->y = y + FixedMul (out, finesine[an]);
+		particle->z = z + height + FRACUNIT;
+		if (out < radius/8)
 			particle->velz += FRACUNIT*10/3;
 		else
 			particle->velz += FRACUNIT*3;
@@ -372,6 +472,15 @@ static void MakeFountain (AActor *actor, int color1, int color2)
 			particle->color = color1;
 		}
 	}
+}
+
+static void MakeFountain (AActor *actor, int color1, int color2)
+{
+	if ( actor == NULL )
+		return;
+
+	// [CK] We now use a general function
+	MakeFountain(actor->x, actor->y, actor->z, actor->radius, actor->height, color1, color2);
 }
 
 void P_RunEffect (AActor *actor, int effects)
@@ -586,8 +695,19 @@ void P_DrawSplash2 (int count, fixed_t x, fixed_t y, fixed_t z, angle_t angle, i
 	}
 }
 
+// [Dusk]
+static int P_RainbowParticleColor( )
+{
+	int index = g_rainbowParticleColorIndex++ % countof( g_rainbowParticleColors );
+	return *( g_rainbowParticleColors[index] );
+}
+
 void P_DrawRailTrail (AActor *source, const FVector3 &start, const FVector3 &end, int color1, int color2, float maxdiff, int flags, const PClass *spawnclass, angle_t angle, int duration, float sparsity, float drift)
 {
+	// [BC] The server has no need to draw a railgun trail.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
+
 	double length, lengthsquared;
 	int steps, i;
 	FAngle deg;
@@ -676,7 +796,10 @@ void P_DrawRailTrail (AActor *source, const FVector3 &start, const FVector3 &end
 		FVector3 spiral_step = step * r_rail_spiralsparsity * sparsity;
 		int spiral_steps = (int)(steps * r_rail_spiralsparsity / sparsity);
 		
-		color1 = color1 == 0 ? -1 : ParticleColor(color1);
+		// [BC] If color1 is -2, then we want a rainbow trail.
+		if ( color1 != -2 )
+			color1 = color1 == 0 ? -1 : ParticleColor(color1);
+
 		pos = start;
 		deg = FAngle(270);
 		for (i = spiral_steps; i; i--)
@@ -719,7 +842,13 @@ void P_DrawRailTrail (AActor *source, const FVector3 &start, const FVector3 &end
 				else
 					p->color = rblue4;
 			}
-			else 
+			// [BC] Handle the rainbow trail.
+			// [Dusk] Refactored.
+			else if ( color1 == -2 )
+			{
+				p->color = P_RainbowParticleColor();
+			}
+			else
 			{
 				p->color = color1;
 			}
@@ -732,7 +861,13 @@ void P_DrawRailTrail (AActor *source, const FVector3 &start, const FVector3 &end
 		FVector3 trail_step = step * r_rail_trailsparsity * sparsity;
 		int trail_steps = xs_FloorToInt(steps * r_rail_trailsparsity / sparsity);
 
-		color2 = color2 == 0 ? -1 : ParticleColor(color2);
+		// [BC] 
+		static LONG	s_lParticleColor = 0;
+
+		// [BC] If color1 is -2, then we want a rainbow trail.
+		if ( color2 != -2 )
+			color2 = color2 == 0 ? -1 : ParticleColor(color2);
+
 		FVector3 diff(0, 0, 0);
 
 		pos = start;
@@ -778,6 +913,12 @@ void P_DrawRailTrail (AActor *source, const FVector3 &start, const FVector3 &end
 					p->color = grey2;
 				else
 					p->color = grey1;
+			}
+			// [BC] Handle the rainbow trail.
+			// [Dusk] Refactored.
+			else if ( color1 == -2 )
+			{
+				p->color = P_RainbowParticleColor();
 			}
 			else 
 			{
