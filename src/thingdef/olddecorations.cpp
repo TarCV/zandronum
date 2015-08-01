@@ -49,6 +49,9 @@
 #include "i_system.h"
 #include "thingdef.h"
 #include "r_data/r_translate.h"
+// [BC] New #includes.
+#include "cl_demo.h"
+#include "network.h"
 
 // TYPES -------------------------------------------------------------------
 
@@ -78,6 +81,13 @@ public:
 
 	bool TryPickup (AActor *&toucher)
 	{
+		// [BC] The server told us we picked up the item; thus make it so!
+		if ( NETWORK_InClientMode() )
+		{
+			GoAwayAndDie( );
+			return ( true );
+		}
+
 		INTBOOL success = P_ExecuteSpecial(special, NULL, toucher, false,
 			args[0], args[1], args[2], args[3], args[4]);
 
@@ -575,6 +585,12 @@ static void ParseInsideDecoration (Baggage &bag, AActor *defaults,
 		{
 			sc.MustGetString ();
 			bag.Info->Class->Meta.SetMetaString(AIMETA_PickupMessage, sc.String);
+		}
+		// [BC]
+		else if (def == DEF_Pickup && sc.Compare ("PickupAnnouncerEntry"))
+		{
+			sc.MustGetString ();
+			sprintf( inv->szPickupAnnouncerEntry, "%s", sc.String );
 		}
 		else if (def == DEF_Pickup && sc.Compare ("Respawns"))
 		{

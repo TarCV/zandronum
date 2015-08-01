@@ -61,11 +61,23 @@ DEFINE_ACTION_FUNCTION(AActor, A_WizAtk3)
 	AActor *mo;
 
 	CALL_ACTION(A_GhostOff, self);
+
+	// [BB] This is server-side, the client only needs to run A_GhostOff.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (!self->target)
 	{
 		return;
 	}
 	S_Sound (self, CHAN_WEAPON, self->AttackSound, 1, ATTN_NORM);
+
+	// [BB] If we're the server, tell the clients to play the sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SoundActor( self, CHAN_WEAPON, S_GetName( self->AttackSound ), 1, ATTN_NORM );
+
 	if (self->CheckMeleeRange())
 	{
 		int damage = pr_wizatk3.HitDice (4);
@@ -77,7 +89,18 @@ DEFINE_ACTION_FUNCTION(AActor, A_WizAtk3)
 	mo = P_SpawnMissile (self, self->target, fx);
 	if (mo != NULL)
 	{
-		P_SpawnMissileAngle(self, fx, mo->angle-(ANG45/8), mo->velz);
-		P_SpawnMissileAngle(self, fx, mo->angle+(ANG45/8), mo->velz);
+		AActor *missile1 = P_SpawnMissileAngle(self, fx, mo->angle-(ANG45/8), mo->velz);
+		AActor *missile2 = P_SpawnMissileAngle(self, fx, mo->angle+(ANG45/8), mo->velz);
+
+		// [BB] If we're the server, tell the clients to spawn the missiles.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			SERVERCOMMANDS_SpawnMissile( mo );
+			if ( missile1 )
+				SERVERCOMMANDS_SpawnMissile( missile1 );
+			if ( missile2 )
+				SERVERCOMMANDS_SpawnMissile( missile2 );
+		}
+
 	}
 }

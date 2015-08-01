@@ -722,7 +722,12 @@ bool FScanner::GetFloat ()
 		Float = strtod (String, &stopper);
 		if (*stopper != 0)
 		{
-			ScriptError ("SC_GetFloat: Bad numeric constant \"%s\".", String);
+			ScriptError ("SC_GetFloat: Bad numeric constant \"%s\"."
+#ifndef WIN32
+				// [BB] Precompiled Linux binaries seem to have a problem parsing floats when the language setting uses ',' instead of '.' as float seperator.
+				"Perhaps a problem with your LANG enviroment variable, try \"export LANG=C\".\n"
+#endif
+				, String);
 		}
 		Number = (int)Float;
 		return true;

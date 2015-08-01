@@ -63,6 +63,15 @@ enum
 	CVAR_NOSAVE			= 4096, // when used with CVAR_SERVERINFO, do not save var to savegame
 	CVAR_MOD			= 8192,	// cvar was defined by a mod
 	CVAR_IGNORE			= 16384,// do not send cvar across the network/inaccesible from ACS (dummy mod cvar)
+
+	// [BC] Cvar cannot be set from console during campaign mode.
+	CVAR_CAMPAIGNLOCK	= 32768,
+
+	// [BC] Cvar is a password; don't display it when typed in the console, etc.
+	CVAR_PASSWORD		= 65536,
+
+	// [BB] This cvar may not be changed by ConsoleCommand.
+	CVAR_NOSETBYACS = 131072,
 };
 
 union UCVarValue
@@ -124,6 +133,11 @@ public:
 	static void ResetColors ();		// recalc color cvars' indices after screen change
 
 	static void ListVars (const char *filter, bool plain);
+
+	// [TP] Gah
+	virtual bool IsFlagCVar() { return false; }
+	virtual bool IsMaskCVar() { return false; }
+	bool IsServerInfo();
 
 protected:
 	FBaseCVar () {}
@@ -243,11 +257,15 @@ public:
 	inline operator int () const { return Value; }
 	inline int operator *() const { return Value; }
 
+	// [Dusk]
+	inline int GetPastValue() const { return PastValue; }
+
 protected:
 	virtual void DoSet (UCVarValue value, ECVarType type);
 
 	int Value;
 	int DefaultValue;
+	int PastValue; // [Dusk] What was this CVar before?
 
 	friend class FFlagCVar;
 };
@@ -340,6 +358,11 @@ public:
 	virtual UCVarValue GetFavoriteRepDefault (ECVarType *type) const;
 	virtual void SetGenericRepDefault (UCVarValue value, ECVarType type);
 
+	// [TP] More access functions
+	bool IsFlagCVar() { return true; }
+	inline FIntCVar* GetValueVar() const { return &ValueVar; }
+	inline uint32 GetBitVal() const { return BitVal; }
+
 	bool operator= (bool boolval)
 		{ UCVarValue val; val.Bool = boolval; SetGenericRep (val, CVAR_Bool); return boolval; }
 	bool operator= (FFlagCVar &flag)
@@ -370,6 +393,12 @@ public:
 
 	inline operator int () const { return (ValueVar & BitVal) >> BitNum; }
 	inline int operator *() const { return (ValueVar & BitVal) >> BitNum; }
+
+	// [TP] More access functions
+	bool IsMaskCVar() { return true; }
+	inline FIntCVar* GetValueVar() const { return &ValueVar; }
+	inline uint32 GetBitVal() const { return BitVal; }
+	inline int GetBitNum() const { return BitNum; }
 
 protected:
 	virtual void DoSet (UCVarValue value, ECVarType type);
@@ -420,6 +449,8 @@ void C_RestoreCVars (void);
 
 void C_ForgetCVars (void);
 
+// [Dusk] For CVar iteration
+FBaseCVar* C_GetRootCVar();
 
 #define CUSTOM_CVAR(type,name,def,flags) \
 	static void cvarfunc_##name(F##type##CVar &); \
