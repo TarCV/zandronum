@@ -45,6 +45,14 @@
 #include "gi.h"
 #include "templates.h"
 #include "g_level.h"
+// [BC] New #includes.
+#include "a_doomglobal.h"
+#include "sv_commands.h"
+#include "team.h"
+#include "a_keys.h"
+#include "invasion.h"
+#include "cl_demo.h"
+#include "cooperative.h"
 
 // Set of spawnable things for the Thing_Spawn and Thing_Projectile specials.
 TMap<int, const PClass *> SpawnableThings;
@@ -86,19 +94,55 @@ bool P_Thing_Spawn (int tid, AActor *source, int type, angle_t angle, bool fog, 
 		{
 			DWORD oldFlags2 = mobj->flags2;
 			mobj->flags2 |= MF2_PASSMOBJ;
-			if (P_TestMobjLocation (mobj))
+			// [BC] Potentially spawn this thing even if it's going to be blocked.
+			bool	bSpawn = true;
+
+			// [BC] Don't spawn it if it doesn't have a good place to spawn.
+			if ( P_TestMobjLocation( mobj ) == false )
+				bSpawn = false;
+
+			// [BC] However, SKULLTAG FLAGS/SKULLS MUST BE RESPAWNED!
+			for ( ULONG i = 0; i < teams.Size( ); i++ )
+			{
+				if (( mobj->GetClass( ) == TEAM_GetItem( i )))
+				{
+					bSpawn = true;
+					break;
+				}
+			}
+
+			if ( bSpawn )
 			{
 				rtn++;
 				mobj->angle = (angle != ANGLE_MAX ? angle : spot->angle);
 				if (fog)
 				{
-					Spawn<ATeleportFog> (spot->x, spot->y, spot->z + TELEFOGHEIGHT, ALLOW_REPLACE);
+					// [BC]
+					AActor	*pFog;
+
+					pFog = Spawn<ATeleportFog> (spot->x, spot->y, spot->z + TELEFOGHEIGHT, ALLOW_REPLACE);
+
+					// [BC] If we're the server, tell clients to spawn the thing.
+					if (( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( pFog ))
+						SERVERCOMMANDS_SpawnThing( pFog );
 				}
-				if (mobj->flags & MF_SPECIAL)
+
+				// [BC] Respawned keys in Skulltag CANNOT be dropped items.
+				if (( mobj->flags & MF_SPECIAL ) && ( mobj->GetClass( )->IsDescendantOf( RUNTIME_CLASS( AKey )) == false ))
 					mobj->flags |= MF_DROPPED;	// Don't respawn
 				mobj->tid = newtid;
 				mobj->AddToHash ();
 				mobj->flags2 = oldFlags2;
+
+				// [BC] Spawn the actor to clients.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				{
+					SERVERCOMMANDS_SpawnThing( mobj );
+
+					// Check and see if it's important that the client know the angle of the object.
+					if ( mobj->angle != 0 )
+						SERVERCOMMANDS_SetThingAngle( mobj );
+				}
 			}
 			else
 			{
@@ -120,6 +164,8 @@ bool P_Thing_Spawn (int tid, AActor *source, int type, angle_t angle, bool fog, 
 bool P_MoveThing(AActor *source, fixed_t x, fixed_t y, fixed_t z, bool fog)
 {
 	fixed_t oldx, oldy, oldz;
+	// [BC]
+	AActor	*pFog;
 
 	oldx = source->x;
 	oldy = source->y;
@@ -130,8 +176,17 @@ bool P_MoveThing(AActor *source, fixed_t x, fixed_t y, fixed_t z, bool fog)
 	{
 		if (fog)
 		{
-			Spawn<ATeleportFog> (x, y, z + TELEFOGHEIGHT, ALLOW_REPLACE);
-			Spawn<ATeleportFog> (oldx, oldy, oldz + TELEFOGHEIGHT, ALLOW_REPLACE);
+			pFog = Spawn<ATeleportFog> (x, y, z + TELEFOGHEIGHT, ALLOW_REPLACE);
+
+			// [BC] If we're the server, tell clients to spawn the fog.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SpawnThing( pFog );
+
+			pFog = Spawn<ATeleportFog> (oldx, oldy, oldz + TELEFOGHEIGHT, ALLOW_REPLACE);
+
+			// [BC] If we're the server, tell clients to spawn the fog.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SpawnThing( pFog );
 		}
 		source->PrevX = x;
 		source->PrevY = y;
@@ -140,6 +195,19 @@ bool P_MoveThing(AActor *source, fixed_t x, fixed_t y, fixed_t z, bool fog)
 		{
 			R_ResetViewInterpolation();
 		}
+
+		ULONG ulFlags = 0;
+		if ( oldx != source->x )
+			ulFlags |= CM_X;
+		if ( oldy != source->y )
+			ulFlags |= CM_Y;
+		if ( oldz != source->z )
+			ulFlags |= CM_Z;
+
+		// [BC] If we're the server, tell clients to move the object.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_MoveThing( source, ulFlags );
+
 		return true;
 	}
 	else
@@ -178,6 +246,8 @@ bool P_Thing_Projectile (int tid, AActor *source, int type, const char *type_nam
 	FActorIterator iterator (tid);
 	double fspeed = speed;
 	int defflags3;
+	// [BC]
+	bool	bMissileExplode;
 
 	if (type_name == NULL)
 	{
@@ -334,12 +404,15 @@ nolead:						mobj->angle = R_PointToAngle2 (mobj->x, mobj->y, targ->x, targ->y);
 					{
 						mobj->flags |= MF_DROPPED;
 					}
+					bMissileExplode = false;
 					if (mobj->flags & MF_MISSILE)
 					{
 						if (P_CheckMissileSpawn (mobj, spot->radius))
 						{
 							rtn = true;
 						}
+						else
+							bMissileExplode = true;
 					}
 					else if (!P_TestMobjLocation (mobj))
 					{
@@ -352,6 +425,36 @@ nolead:						mobj->angle = R_PointToAngle2 (mobj->x, mobj->y, targ->x, targ->y);
 					{
 						// It spawned fine.
 						rtn = 1;
+					}
+
+					// [BC] Spawn this actor to clients. It must be spawned as a missile because
+					// it can potentially have velocity, etc. 
+					if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					{
+						SERVERCOMMANDS_SpawnMissile( mobj );
+
+						// Determine which flags we need to update.
+						if ( mobj->flags != mobj->GetDefault( )->flags )
+							SERVERCOMMANDS_SetThingFlags( mobj, FLAGSET_FLAGS );
+						if ( mobj->flags2 != mobj->GetDefault( )->flags2 )
+							SERVERCOMMANDS_SetThingFlags( mobj, FLAGSET_FLAGS2 );
+						if ( mobj->flags3 != mobj->GetDefault( )->flags3 )
+							SERVERCOMMANDS_SetThingFlags( mobj, FLAGSET_FLAGS3 );
+						if ( mobj->flags4 != mobj->GetDefault( )->flags4 )
+							SERVERCOMMANDS_SetThingFlags( mobj, FLAGSET_FLAGS4 );
+						if ( mobj->flags5 != mobj->GetDefault( )->flags5 )
+							SERVERCOMMANDS_SetThingFlags( mobj, FLAGSET_FLAGS5 );
+						if ( mobj->ulSTFlags != mobj->GetDefault( )->ulSTFlags )
+							SERVERCOMMANDS_SetThingFlags( mobj, FLAGSET_FLAGSST );
+						// [BB] If necessary, also adjust gravity.
+						if ( mobj->gravity != mobj->GetDefault( )->gravity )
+							SERVERCOMMANDS_SetThingGravity( mobj );
+
+						// For missiles that exploded when P_CheckMissileSpawn() was
+						// called, we need to tell clients to explode the missile since
+						// it wasn't actually spawned at that point.
+						if ( bMissileExplode )
+							SERVERCOMMANDS_MissileExplode( mobj, NULL );
 					}
 				}
 			} while (dest != 0 && (targ = tit.Next()));
@@ -402,13 +505,62 @@ void P_RemoveThing(AActor * actor)
 	// Don't remove live players.
 	if (actor->player == NULL || actor != actor->player->mo)
 	{
+		// [BC] DESTROY!
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_DestroyThing( actor );
+
 		// be friendly to the level statistics. ;)
 		actor->ClearCounters();
-		actor->Destroy ();
+		// [BB] Added client update.
+		if (actor->CountsAsKill() && actor->health > 0)
+		{
+			// [BB] Since a monster was removed, we also need to correct the number of monsters in invasion mode.
+			INVASION_UpdateMonsterCount( actor, true );
+
+			// [BB] Inform the clients.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetMapNumTotalMonsters( );
+		}
+		// [BB] Added client update.
+		if (actor->flags&MF_COUNTITEM)
+		{
+			// [BB] Inform the clients.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetMapNumTotalItems( );
+		}
+
+		// [BB] Only destroy the actor if it's not needed for a map reset. Otherwise just hide it.
+		actor->HideOrDestroyIfSafe ();
 	}
 }
 
-bool P_Thing_Raise(AActor *thing)
+void P_Thing_SetVelocity(AActor *actor, fixed_t vx, fixed_t vy, fixed_t vz, bool add, bool setbob)
+{
+	if (actor != NULL)
+	{
+		if (!add)
+		{
+			actor->velx = actor->vely = actor->velz = 0;
+			if (actor->player != NULL) actor->player->velx = actor->player->vely = 0;
+		}
+		actor->velx += vx;
+		actor->vely += vy;
+		actor->velz += vz;
+		if (setbob && actor->player != NULL)
+		{
+			actor->player->velx += vx;
+			actor->player->vely += vy;
+		}
+		// [Dusk] Update momentum
+		SERVER_UpdateThingMomentum( actor, true );
+	}
+}
+
+// [BB] Added bIgnorePositionCheck: If the server instructs the client to raise
+// a thing with SERVERCOMMANDS_SetThingState, the client has to ignore the
+// P_CheckPosition check. For example this is relevant if an Archvile raised
+// the thing.
+bool P_Thing_Raise(AActor *thing, bool bIgnorePositionCheck)
 {
 	if (thing == NULL)
 		return false;	// not valid
@@ -435,7 +587,7 @@ bool P_Thing_Raise(AActor *thing)
 	thing->flags |= MF_SOLID;
 	thing->height = info->height;	// [RH] Use real height
 	thing->radius = info->radius;	// [RH] Use real radius
-	if (!P_CheckPosition (thing, thing->x, thing->y))
+	if (!P_CheckPosition (thing, thing->x, thing->y) && !bIgnorePositionCheck)
 	{
 		thing->flags = oldflags;
 		thing->radius = oldradius;
@@ -445,6 +597,10 @@ bool P_Thing_Raise(AActor *thing)
 
 	S_Sound (thing, CHAN_BODY, "vile/raise", 1, ATTN_IDLE);
 	
+	// [BC] If we're the server, tell clients to put the thing into its raise state.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SetThingState( thing, STATE_RAISE );
+
 	thing->SetState (RaiseState);
 	thing->flags = info->flags;
 	thing->flags2 = info->flags2;
@@ -452,6 +608,9 @@ bool P_Thing_Raise(AActor *thing)
 	thing->flags4 = info->flags4;
 	thing->flags5 = info->flags5;
 	thing->flags6 = info->flags6;
+	// [BC] Apply new ST flags as well.
+	thing->ulSTFlags = info->ulSTFlags;
+	thing->ulNetworkFlags = info->ulNetworkFlags;
 	thing->health = info->health;
 	thing->target = NULL;
 	thing->lastenemy = NULL;
@@ -460,28 +619,19 @@ bool P_Thing_Raise(AActor *thing)
 	if (thing->CountsAsKill())
 	{
 		level.total_monsters++;
-	}
-	return true;
-}
 
-void P_Thing_SetVelocity(AActor *actor, fixed_t vx, fixed_t vy, fixed_t vz, bool add, bool setbob)
-{
-	if (actor != NULL)
-	{
-		if (!add)
+		// [BC] Update invasion's HUD.
+		if (( invasion ) && ( NETWORK_InClientMode() == false ))
 		{
-			actor->velx = actor->vely = actor->velz = 0;
-			if (actor->player != NULL) actor->player->velx = actor->player->vely = 0;
-		}
-		actor->velx += vx;
-		actor->vely += vy;
-		actor->velz += vz;
-		if (setbob && actor->player != NULL)
-		{
-			actor->player->velx += vx;
-			actor->player->vely += vy;
+			INVASION_SetNumMonstersLeft( INVASION_GetNumMonstersLeft( ) + 1 );
+
+			// [BC] If we're the server, tell the client how many monsters are left.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetInvasionNumMonstersLeft( );
 		}
 	}
+
+	return true;
 }
 
 const PClass *P_GetSpawnableType(int spawnnum)

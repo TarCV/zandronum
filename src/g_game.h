@@ -26,11 +26,56 @@
 struct event_t;
 struct PNGHandle;
 
-
+struct FMapThing;
+struct FPlayerStart;
+struct line_t;
 //
 // GAME
 //
-void G_DeathMatchSpawnPlayer (int playernum);
+void G_DeathMatchSpawnPlayer( int playernum, bool bClientUpdate );
+void G_TemporaryTeamSpawnPlayer( ULONG ulPlayer, bool bClientUpdate );
+void G_TeamgameSpawnPlayer( ULONG ulPlayer, ULONG ulTeam, bool bClientUpdate );
+FPlayerStart *SelectRandomCooperativeSpot( ULONG ulPlayer );
+void G_CooperativeSpawnPlayer( ULONG ulPlayer, bool bClientUpdate, bool bTempPlayer = false );
+
+// [BB] Added bGiveInventory and moved the declaration to g_game.h.
+void G_PlayerReborn (int player, bool bGiveInventory = true);
+
+// [BC] Determines the game type by map spots and other items placed on the level.
+void	GAME_CheckMode( void );
+
+// [TP] Sets default dmflags
+void	GAME_SetDefaultDMFlags();
+
+// [BB] Backup certain initial properties of the line necessary for a map reset.
+void	GAME_BackupLineProperties ( line_t *li );
+
+// [BC] Function that reverts the map into its original state when it first loaded, without
+// actually reloading the map.
+void	GAME_ResetMap( bool bRunEnterScripts = false );
+
+// [BB] Allows to request a map reset at a time when GAME_ResetMap can't be called,
+// e.g. while executing a ACS function.
+void	GAME_RequestMapRest( void );
+bool	GAME_IsMapRestRequested( void );
+
+// [BC] Spawn the terminator artifact at a random deathmatch spot for terminator games.
+void	GAME_SpawnTerminatorArtifact( void );
+
+// [BC] Spawn the possession artifact at a random deathmatch spot for possession/team possession games.
+void	GAME_SpawnPossessionArtifact( void );
+
+// [BC] Access functions.
+void	GAME_SetEndLevelDelay( ULONG ulTicks );
+ULONG	GAME_GetEndLevelDelay( void );
+
+void	GAME_SetLevelIntroTicks( USHORT usTicks );
+USHORT	GAME_GetLevelIntroTicks( void );
+
+ULONG	GAME_CountLivingAndRespawnablePlayers( void );
+ULONG	GAME_CountActivePlayers( void );
+
+// [BC] End changes.
 
 struct FPlayerStart *G_PickPlayerStart (int playernum, int flags = 0);
 enum
@@ -95,5 +140,7 @@ extern int bodyqueslot;
 class AInventory;
 extern const AInventory *SendItemUse, *SendItemDrop;
 
+// [BB] Exported G_QueueBody.
+void G_QueueBody (AActor *body);
 
 #endif

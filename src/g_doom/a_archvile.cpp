@@ -54,6 +54,12 @@ void A_Fire(AActor *self, int height)
 	AActor *dest;
 	angle_t an;
 				
+	// [BC] Fire movement is server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	dest = self->tracer;
 	if (dest == NULL || self->target == NULL)
 		return;
@@ -67,6 +73,10 @@ void A_Fire(AActor *self, int height)
 	self->SetOrigin (dest->x + FixedMul (24*FRACUNIT, finecosine[an]),
 					 dest->y + FixedMul (24*FRACUNIT, finesine[an]),
 					 dest->z + height);
+
+	// [BC] Tell clients of the fire update.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_MoveThingExact( self, CM_X|CM_Y|CM_Z );
 }
 
 
@@ -81,6 +91,12 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_VileTarget)
 	ACTION_PARAM_CLASS(fire,0);
 	AActor *fog;
 		
+	// [BC] Fire movement is server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (!self->target)
 		return;
 
@@ -89,6 +105,10 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_VileTarget)
 	fog = Spawn (fire, self->target->x, self->target->y,
 		self->target->z, ALLOW_REPLACE);
 	
+	// [BC] If we're the server, tell clients to spawn the thing.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SpawnThing( fog );
+
 	self->tracer = fog;
 	fog->target = self;
 	fog->tracer = self->target;
@@ -114,6 +134,11 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_VileAttack)
 	AActor *fire, *target;
 	angle_t an;
 		
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (NULL == (target = self->target))
 		return;
 	
@@ -126,6 +151,10 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_VileAttack)
 	int newdam = P_DamageMobj (target, self, self, dmg, NAME_None);
 	P_TraceBleed (newdam > 0 ? newdam : dmg, target);
 		
+	// [BC] Tell clients to play the arch-vile sound on their end.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SoundActor( self, CHAN_WEAPON, "vile/stop", 1, ATTN_NORM );
+
 	an = self->angle >> ANGLETOFINESHIFT;
 	fire = self->tracer;
 
@@ -136,6 +165,10 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_VileAttack)
 						 target->y - FixedMul (24*FRACUNIT, finesine[an]),
 						 target->z);
 		
+		// [BC] Tell clients of the fire update.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_MoveThingExact( fire, CM_X|CM_Y|CM_Z );
+
 		P_RadiusAttack (fire, self, blastdmg, blastrad, dmgtype, 0);
 	}
 	target->velz = Scale(thrust, 1000, target->Mass);

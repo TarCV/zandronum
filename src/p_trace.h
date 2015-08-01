@@ -76,6 +76,9 @@ struct FTraceResults
 	sector_t *CrossedWater;		// For Boom-style, Transfer_Heights-based deep water
 	F3DFloor *Crossed3DWater;	// For 3D floor-based deep water
 	F3DFloor *ffloor;
+
+	// [BB] If Actor was reconciled while hit, we store the reconciliation offset here.
+	TVector3<fixed_t> unlaggedHitOffset;
 };
 
 enum

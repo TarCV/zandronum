@@ -264,8 +264,18 @@ void AActor::UnlinkFromWorld ()
 
 		if (prev != NULL)	// prev will be NULL if this actor gets deleted due to cleaning up from a broken savegame
 		{
-			if ((*prev = next))  // unlink from sector list
-				next->sprev = prev;
+			// [BB] If this condition is not fulfilled, UnlinkFromWorld erroneously has
+			// been called twice. Definitely this has to be caused by a bug in the code,
+			// nevertheless I don't want this to crash Skulltag. A warning should be
+			// sufficient to track down this bug.
+			if ( prev != (AActor **)(size_t)0xBeefCafe )
+			{
+				if ((*prev = next))  // unlink from sector list
+					next->sprev = prev;
+			}
+			else
+				Printf ( "\\cgWarning: 0xBeefCafe encountered!\n" );
+
 			snext = NULL;
 			sprev = (AActor **)(size_t)0xBeefCafe;	// Woo! Bug-catching value!
 
@@ -591,6 +601,9 @@ void AActor::SetOrigin (fixed_t ix, fixed_t iy, fixed_t iz)
 	floorz = Sector->floorplane.ZatPoint (ix, iy);
 	ceilingz = Sector->ceilingplane.ZatPoint (ix, iy);
 	P_FindFloorCeiling(this, FFCF_ONLYSPAWNPOS);
+
+	// [BC] Flag this actor as having moved.
+	ulSTFlags |= STFL_POSITIONCHANGED;
 }
 
 FBlockNode *FBlockNode::FreeBlocks = NULL;
