@@ -40,6 +40,12 @@ DEFINE_ACTION_FUNCTION(AActor, A_DripBlood)
 
 DEFINE_ACTION_FUNCTION(AActor, A_KnightAttack)
 {
+	// [BB] This is server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (!self->target)
 	{
 		return;
@@ -50,16 +56,30 @@ DEFINE_ACTION_FUNCTION(AActor, A_KnightAttack)
 		int newdam = P_DamageMobj (self->target, self, self, damage, NAME_Melee);
 		P_TraceBleed (newdam > 0 ? newdam : damage, self->target, self);
 		S_Sound (self, CHAN_BODY, "hknight/melee", 1, ATTN_NORM);
+
+		// [BB] If we're the server, tell the clients to play the sound.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SoundActor( self, CHAN_BODY, "hknight/melee", 1, ATTN_NORM );
+
 		return;
 	}
 	// Throw axe
 	S_Sound (self, CHAN_BODY, self->AttackSound, 1, ATTN_NORM);
 	if (self->flags & MF_SHADOW || pr_knightatk () < 40)
 	{ // Red axe
-		P_SpawnMissileZ (self, self->z + 36*FRACUNIT, self->target, PClass::FindClass("RedAxe"));
+		AActor *missile = P_SpawnMissileZ (self, self->z + 36*FRACUNIT, self->target, PClass::FindClass("RedAxe"));
+
+		// [BB] If we're the server, tell the clients to spawn this missile.
+		if ( ( NETWORK_GetState( ) == NETSTATE_SERVER ) && missile )
+			SERVERCOMMANDS_SpawnMissile( missile );
+
 		return;
 	}
 	// Green axe
-	P_SpawnMissileZ (self, self->z + 36*FRACUNIT, self->target, PClass::FindClass("KnightAxe"));
+	AActor *missile = P_SpawnMissileZ (self, self->z + 36*FRACUNIT, self->target, PClass::FindClass("KnightAxe"));
+
+	// [BB] If we're the server, tell the clients to spawn this missile.
+	if ( ( NETWORK_GetState( ) == NETSTATE_SERVER ) && missile )
+		SERVERCOMMANDS_SpawnMissile( missile );
 }
 

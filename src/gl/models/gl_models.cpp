@@ -59,6 +59,9 @@
 #include "gl/utility/gl_convert.h"
 #include "gl/renderer/gl_renderstate.h"
 
+// [BB] New #includes. 
+#include "r_main.h"
+
 static inline float GetTimeFloat()
 {
 	return (float)I_MSTime() * (float)TICRATE / 1000.0f;
@@ -66,6 +69,8 @@ static inline float GetTimeFloat()
 
 CVAR(Bool, gl_interpolate_model_frames, true, CVAR_ARCHIVE)
 CVAR(Bool, gl_light_models, true, CVAR_ARCHIVE)
+// [BB] Allow the user disable the use of any kind of models.
+CVAR(Bool, gl_use_models, true, CVAR_ARCHIVE)
 EXTERN_CVAR(Int, gl_fogmode)
 EXTERN_CVAR(Bool, gl_dynlight_shader)
 
@@ -457,6 +462,18 @@ void gl_InitModels()
 					{
 						smf.flags |= MDL_NOINTERPOLATION;
 					}
+					else if (sc.Compare("alignangle"))
+					{
+						smf.flags |= MDL_ALIGNANGLE;
+					}
+					else if (sc.Compare("alignpitch"))
+					{
+						smf.flags |= MDL_ALIGNPITCH;
+					}
+					else if (sc.Compare("rollagainstangle"))
+					{
+						smf.flags |= MDL_ROLLAGAINSTANGLE;
+					}
 					else if (sc.Compare("skin"))
 					{
 						sc.MustGetNumber();
@@ -577,6 +594,10 @@ EXTERN_CVAR (Bool, r_drawvoxels)
 
 FSpriteModelFrame * gl_FindModelFrame(const PClass * ti, int sprite, int frame, bool dropped)
 {
+	// [BB] The user doesn't want to use models, so just pretend that there is no model for this frame.
+	if ( gl_use_models == false )
+		return NULL;
+
 	if (GetDefaultByType(ti)->hasmodel)
 	{
 		FSpriteModelFrame smf;
@@ -671,7 +692,7 @@ void gl_RenderFrameModels( const FSpriteModelFrame *smf,
 					}
 				}
 				if ( inter != 0.0 )
-					smfNext = gl_FindModelFrame(ti, nextState->sprite, nextState->Frame, false);
+					smfNext = gl_FindModelFrame(ti, nextState->sprite, nextState->GetFrame(), false);
 			}
 		}
 	}
@@ -688,6 +709,21 @@ void gl_RenderFrameModels( const FSpriteModelFrame *smf,
 				mdl->RenderFrame(smf->skins[i], smf->modelframes[i], cm, translation);
 		}
 	}
+}
+
+// [BB] Small helper function for MDL_ROLLAGAINSTANGLE.
+float gl_RollAgainstAngleHelper ( const AActor *actor )
+{
+	float angleDiff = ANGLE_TO_FLOAT ( R_PointToAngle ( actor->x, actor->y ) ) - ANGLE_TO_FLOAT ( actor->angle );
+	if ( angleDiff > 180 )
+		angleDiff -= 360;
+	else if ( angleDiff < -180 )
+		angleDiff += 360;
+	if ( actor->z > viewz )
+		angleDiff *= -1;
+	if ( ( angleDiff < 90 ) && ( angleDiff > - 90 ) )
+		angleDiff *= -1;
+	return angleDiff;
 }
 
 void gl_RenderModel(GLSprite * spr, int cm)
@@ -769,9 +805,27 @@ void gl_RenderModel(GLSprite * spr, int cm)
 	
 	// Applying model transformations:
 	// 1) Applying actor angle, pitch and roll to the model
-	gl.Rotatef(-angle, 0, 1, 0);
-	gl.Rotatef(pitch, 0, 0, 1);
-	gl.Rotatef(-roll, 1, 0, 0);
+	if ( !(smf->flags & MDL_ALIGNANGLE) )
+		gl.Rotatef(-angle, 0, 1, 0);
+	// [BB] Change the angle so that the object is exactly facing the camera in the x/y plane.
+	else
+		gl.Rotatef( -ANGLE_TO_FLOAT ( R_PointToAngle ( spr->actor->x, spr->actor->y ) ), 0, 1, 0);
+
+	// [BB] Change the pitch so that the object is vertically facing the camera (only makes sense combined with MDL_ALIGNANGLE).
+	if ( (smf->flags & MDL_ALIGNPITCH) )
+	{
+		const fixed_t distance = R_PointToDist2( spr->actor->x - viewx, spr->actor->y - viewy );
+		const float pitch = RAD2DEG ( atan2( FIXED2FLOAT ( spr->actor->z - viewz ), FIXED2FLOAT ( distance ) ) );
+		gl.Rotatef(pitch, 0, 0, 1);
+	}
+	else
+		gl.Rotatef(pitch, 0, 0, 1);
+
+	// [BB] Special flag for flat, beam like models.
+	if ( (smf->flags & MDL_ROLLAGAINSTANGLE) )
+		gl.Rotatef( gl_RollAgainstAngleHelper ( spr->actor ), 1, 0, 0);
+	else
+		gl.Rotatef(-roll, 1, 0, 0);
 	
 	// 2) Applying Doomsday like rotation of the weapon pickup models
 	// The rotation angle is based on the elapsed time.

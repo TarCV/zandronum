@@ -51,6 +51,9 @@
 #include "i_system.h"
 #include "d_player.h"
 #include "farchive.h"
+// [BC] New #includes.
+#include "network.h"
+#include "cl_demo.h"
 
 // MACROS ------------------------------------------------------------------
 
@@ -1603,6 +1606,22 @@ void S_ShrinkPlayerSoundLists ()
 	DefPlayerClass = S_FindPlayerClass (DefPlayerClassName);
 }
 
+//==========================================================================
+//
+//	[BC] S_GetName
+//
+//	Returns the string name of a given sound.
+//
+//==========================================================================
+
+const char *S_GetName( LONG lSoundID )
+{
+	if ( (ULONG)lSoundID >= S_sfx.Size( ))
+		return ( NULL );
+	
+	return ( S_sfx[lSoundID].name.GetChars( ));
+}
+
 static int STACK_ARGS SortPlayerClasses (const void *a, const void *b)
 {
 	return stricmp (((const FPlayerClassLookup *)a)->Name,
@@ -2084,6 +2103,8 @@ public:
 	void Tick ();
 	void Activate (AActor *activator);
 	void Deactivate (AActor *activator);
+	// [BC]
+	bool IsActive( void );
 
 protected:
 	bool bActive;
@@ -2243,6 +2264,14 @@ void AAmbientSound::Activate (AActor *activator)
 
 	if (amb == NULL)
 	{
+		// [BC] In client mode, it's possible that the arguments haven't seen sent yet.
+		// Therefore, just break out without destroying the sound.
+		if ( NETWORK_InClientMode() )
+		{
+			bActive = true;
+			return;
+		}
+
 		Destroy ();
 		return;
 	}
@@ -2291,6 +2320,16 @@ void AAmbientSound::Deactivate (AActor *activator)
 	}
 }
 
+//=============================================================================
+//
+//	[BC] AAmbientSound::IsActive
+//
+//=============================================================================
+
+bool AAmbientSound::IsActive( void )
+{
+	return ( bActive );
+}
 
 //==========================================================================
 //
