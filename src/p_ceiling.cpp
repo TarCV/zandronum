@@ -30,6 +30,10 @@
 #include "r_state.h"
 #include "gi.h"
 #include "farchive.h"
+// [BB] New #includes.
+#include "cl_demo.h"
+#include "network.h"
+#include "sv_commands.h"
 
 //============================================================================
 //
@@ -79,7 +83,9 @@ void DCeiling::Serialize (FArchive &arc)
 		<< m_NewSpecial
 		<< m_Tag
 		<< m_OldDirection
-		<< m_Hexencrush;
+		<< m_Hexencrush
+		// [BC]
+		<< m_lCeilingID;
 }
 
 //============================================================================
@@ -128,8 +134,22 @@ void DCeiling::Tick ()
 		// UP
 		res = MoveCeiling (m_Speed, m_TopHeight, m_Direction);
 		
+		// [BC] Don't need to do anything more here if we're a client.
+		if ( NETWORK_InClientMode() )
+			break;
+
 		if (res == pastdest)
 		{
+			// [BC] If the sector has reached its destination, this is probably a good time to verify all the clients
+			// have the correct floor/ceiling height for this sector.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			{
+				if ( m_Sector->floorOrCeiling == 0 )
+					SERVERCOMMANDS_SetSectorFloorPlane( ULONG( m_Sector - sectors ));
+				else
+					SERVERCOMMANDS_SetSectorCeilingPlane( ULONG( m_Sector - sectors ));
+			}
+
 			switch (m_Type)
 			{
 			case ceilCrushAndRaise:
@@ -138,6 +158,20 @@ void DCeiling::Tick ()
 				m_Speed = m_Speed1;
 				if (!SN_IsMakingLoopingSound (m_Sector))
 					PlayCeilingSound ();
+
+				// [BC] If we're the server, send out a bunch of updates to clients.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				{
+					// Tell clients to change the direction of the ceiling.
+					SERVERCOMMANDS_ChangeCeilingDirection( m_lCeilingID, m_Direction );
+
+					// Tell clients to change the speed of the ceiling.
+					SERVERCOMMANDS_ChangeCeilingSpeed( m_lCeilingID, m_Speed );
+
+					// Potentially tell clients to stop playing a ceiling sound.
+					if ( SN_IsMakingLoopingSound( m_Sector ) == false )
+						SERVERCOMMANDS_PlayCeilingSound( m_lCeilingID );
+				}
 				break;
 				
 			// movers with texture change, change the texture then get removed
@@ -149,6 +183,14 @@ void DCeiling::Tick ()
 				m_Sector->SetTexture(sector_t::ceiling, m_Texture);
 				// fall through
 			default:
+
+				// [BC] If we're the server, tell the client to destroy this ceiling.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				{
+					SERVERCOMMANDS_StopSectorSequence( m_Sector );
+					SERVERCOMMANDS_DestroyCeiling( m_lCeilingID );
+				}
+
 				SN_StopSequence (m_Sector, CHAN_CEILING);
 				Destroy ();
 				break;
@@ -160,8 +202,22 @@ void DCeiling::Tick ()
 		// DOWN
 		res = MoveCeiling (m_Speed, m_BottomHeight, m_Crush, m_Direction, m_Hexencrush);
 		
+		// [BC] Don't need to do anything more here if we're a client.
+		if ( NETWORK_InClientMode() )
+			break;
+
 		if (res == pastdest)
 		{
+			// [BC] If the sector has reached its destination, this is probably a good time to verify all the clients
+			// have the correct floor/ceiling height for this sector.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			{
+				if ( m_Sector->floorOrCeiling == 0 )
+					SERVERCOMMANDS_SetSectorFloorPlane( ULONG( m_Sector - sectors ));
+				else
+					SERVERCOMMANDS_SetSectorCeilingPlane( ULONG( m_Sector - sectors ));
+			}
+
 			switch (m_Type)
 			{
 			case ceilCrushAndRaise:
@@ -171,6 +227,20 @@ void DCeiling::Tick ()
 				m_Direction = 1;
 				if (!SN_IsMakingLoopingSound (m_Sector))
 					PlayCeilingSound ();
+
+				// [BC] If we're the server, send out a bunch of updates to clients.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				{
+					// Tell clients to change the direction of the ceiling.
+					SERVERCOMMANDS_ChangeCeilingDirection( m_lCeilingID, m_Direction );
+
+					// Tell clients to change the speed of the ceiling.
+					SERVERCOMMANDS_ChangeCeilingSpeed( m_lCeilingID, m_Speed );
+
+					// Potentially tell clients to stop playing a ceiling sound.
+					if ( SN_IsMakingLoopingSound( m_Sector ) == false )
+						SERVERCOMMANDS_PlayCeilingSound( m_lCeilingID );
+				}
 				break;
 
 			// in the case of ceiling mover/changer, change the texture
@@ -183,6 +253,14 @@ void DCeiling::Tick ()
 				m_Sector->SetTexture(sector_t::ceiling, m_Texture);
 				// fall through
 			default:
+
+				// [BC] If we're the server, tell the client to destroy this ceiling.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				{
+					SERVERCOMMANDS_StopSectorSequence( m_Sector );
+					SERVERCOMMANDS_DestroyCeiling( m_lCeilingID );
+				}
+
 				SN_StopSequence (m_Sector, CHAN_CEILING);
 				Destroy ();
 				break;
@@ -199,8 +277,14 @@ void DCeiling::Tick ()
 				case ceilLowerAndCrush:
 				case ceilLowerAndCrushDist:
 					if (m_Speed1 == FRACUNIT && m_Speed2 == FRACUNIT)
+					{
 						m_Speed = FRACUNIT / 8;
-						break;
+
+						// [BC] If we're the server, tell clients to change the ceiling's speed.
+						if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+							SERVERCOMMANDS_ChangeCeilingSpeed( m_lCeilingID, m_Speed );
+					}
+					break;
 
 				default:
 					break;
@@ -209,6 +293,11 @@ void DCeiling::Tick ()
 		}
 		break;
 	}
+}
+
+void DCeiling::UpdateToClient( ULONG ulClient )
+{
+	SERVERCOMMANDS_DoCeiling( m_Type, m_Sector, m_Direction, m_BottomHeight, m_TopHeight, m_Speed, m_Crush, m_Hexencrush, m_Silent, m_lCeilingID, ulClient, SVCF_ONLYTHISCLIENT );
 }
 
 //============================================================================
@@ -220,6 +309,8 @@ void DCeiling::Tick ()
 DCeiling::DCeiling (sector_t *sec)
 	: DMovingCeiling (sec)
 {
+	// [BB]
+	m_lCeilingID = -1;
 }
 
 DCeiling::DCeiling (sector_t *sec, fixed_t speed1, fixed_t speed2, int silent)
@@ -230,6 +321,88 @@ DCeiling::DCeiling (sector_t *sec, fixed_t speed1, fixed_t speed2, int silent)
 	m_Speed = m_Speed1 = speed1;
 	m_Speed2 = speed2;
 	m_Silent = silent;
+	// [BB]
+	m_lCeilingID = -1;
+}
+
+LONG DCeiling::GetID( void )
+{
+	return ( m_lCeilingID );
+}
+
+void DCeiling::SetID( LONG lID )
+{
+	m_lCeilingID = lID;
+}
+
+fixed_t DCeiling::GetTopHeight( void )
+{
+	return ( m_TopHeight );
+}
+
+void DCeiling::SetTopHeight( fixed_t TopHeight )
+{
+	m_TopHeight = TopHeight;
+}
+
+fixed_t DCeiling::GetBottomHeight( void )
+{
+	return ( m_BottomHeight );
+}
+
+void DCeiling::SetBottomHeight( fixed_t BottomHeight )
+{
+	m_BottomHeight = BottomHeight;
+}
+
+fixed_t DCeiling::GetSpeed( void )
+{
+	return ( m_Speed );
+}
+
+void DCeiling::SetSpeed( fixed_t Speed )
+{
+	m_Speed = Speed;
+}
+
+LONG DCeiling::GetDirection( void )
+{
+	return ( m_Direction );
+}
+
+void DCeiling::SetDirection( LONG lDirection )
+{
+	m_Direction = lDirection;
+}
+
+DCeiling::ECeiling DCeiling::GetType( void )
+{
+	return ( m_Type );
+}
+
+void DCeiling::SetType( ECeiling Type )
+{
+	m_Type = Type;
+}
+
+LONG DCeiling::GetCrush( void )
+{
+	return ( m_Crush );
+}
+
+void DCeiling::SetCrush( LONG lCrush )
+{
+	m_Crush = lCrush;
+}
+
+bool DCeiling::GetHexencrush( void )
+{
+	return ( m_Hexencrush );
+}
+
+void DCeiling::SetHexencrush( bool Hexencrush )
+{
+	m_Hexencrush = Hexencrush;
 }
 
 //============================================================================
@@ -253,6 +426,10 @@ DCeiling *DCeiling::Create(sector_t *sec, DCeiling::ECeiling type, line_t *line,
 	// new door thinker
 	DCeiling *ceiling = new DCeiling (sec, speed, speed2, silent);
 	vertex_t *spot = sec->lines[0]->v1;
+
+	// [BC] If we're not a client, assign a network ID to the ceiling.
+	if ( NETWORK_InClientMode() == false ) 
+		ceiling->m_lCeilingID = P_GetFirstFreeCeilingID( );
 
 	switch (type)
 	{
@@ -418,6 +595,10 @@ DCeiling *DCeiling::Create(sector_t *sec, DCeiling::ECeiling type, line_t *line,
 		ceiling->StopInterpolation();
 	}
 
+	// [BC] If we're the server, tell clients to create a ceiling.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_DoCeiling( type, sec, ceiling->m_Direction, ceiling->m_BottomHeight, ceiling->m_TopHeight, ceiling->m_Speed, ceiling->m_Crush, ceiling->m_Hexencrush, ceiling->m_Silent, ceiling->m_lCeilingID );
+
 	// set texture/type change properties
 	if (change & 3)		// if a texture change is indicated
 	{
@@ -473,6 +654,11 @@ DCeiling *DCeiling::Create(sector_t *sec, DCeiling::ECeiling type, line_t *line,
 	}
 
 	ceiling->PlayCeilingSound ();
+
+	// [BC] If we're the server, tell clients to play the ceiling sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_PlayCeilingSound( ceiling->m_lCeilingID );
+
 	return ceiling;
 }
 
@@ -542,6 +728,14 @@ void P_ActivateInStasisCeiling (int tag)
 		{
 			scan->m_Direction = scan->m_OldDirection;
 			scan->PlayCeilingSound ();
+
+			// [BC] If we're the server, tell clients to change the ceiling direction, and
+			// play the ceiling sound.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			{
+				SERVERCOMMANDS_ChangeCeilingDirection( scan->GetID( ), scan->GetDirection( ));
+				SERVERCOMMANDS_PlayCeilingSound( scan->GetID( ));
+			}
 		}
 	}
 }
@@ -564,12 +758,53 @@ bool EV_CeilingCrushStop (int tag)
 	{
 		if (scan->m_Tag == tag && scan->m_Direction != 0)
 		{
+			// [BC] If we're stopping, this is probably a good time to verify all the clients
+			// have the correct floor/ceiling height for this sector.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			{
+				if ( scan->m_Sector->floorOrCeiling == 0 )
+					SERVERCOMMANDS_SetSectorFloorPlane( ULONG( scan->m_Sector - sectors ));
+				else
+					SERVERCOMMANDS_SetSectorCeilingPlane( ULONG( scan->m_Sector - sectors ));
+
+				// Tell clients to stop the floor's sound sequence.
+				SERVERCOMMANDS_StopSectorSequence( scan->m_Sector );
+			}
+
 			SN_StopSequence (scan->m_Sector, CHAN_CEILING);
 			scan->m_OldDirection = scan->m_Direction;
 			scan->m_Direction = 0;		// in-stasis;
 			rtn = true;
+
+			// [BB] Also tell the updated direction to the clients.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_ChangeCeilingDirection( scan->GetID( ), scan->GetDirection( ));
 		}
 	}
 
 	return rtn;
+}
+
+//*****************************************************************************
+//
+DCeiling *P_GetCeilingByID( LONG lID )
+{
+	DCeiling	*pCeiling;
+
+	TThinkerIterator<DCeiling>		Iterator;
+
+	while (( pCeiling = Iterator.Next( )))
+	{
+		if ( pCeiling->GetID( ) == lID )
+			return ( pCeiling );
+	}
+
+	return ( NULL );
+}
+
+//*****************************************************************************
+//
+LONG P_GetFirstFreeCeilingID( void )
+{
+	return NETWORK_GetFirstFreeID<DCeiling>();
 }

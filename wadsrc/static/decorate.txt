@@ -4,7 +4,7 @@
 #include "actors/shared/inventory.txt"
 #include "actors/shared/player.txt"
 #include "actors/shared/morph.txt"
-#include "actors/shared/botstuff.txt"
+//#include "actors/shared/botstuff.txt"
 #include "actors/shared/sharedmisc.txt"
 #include "actors/shared/blood.txt"
 #include "actors/shared/debris.txt"
@@ -57,6 +57,8 @@
 #include "actors/doom/doommisc.txt"
 #include "actors/doom/doomdecorations.txt"
 #include "actors/doom/doomweapons.txt"
+// [BC] Doom invasion spawners.
+#include "actors/doom/doomspawners.txt"
 #include "actors/doom/stealthmonsters.txt"
 #include "actors/doom/scriptedmarine.txt"
 
@@ -85,6 +87,8 @@
 #include "actors/heretic/ironlich.txt"
 #include "actors/heretic/dsparil.txt"
 #include "actors/heretic/chicken.txt"
+// [BC] Heretic invasion spawners.
+#include "actors/heretic/hereticspawners.txt"
 
 #include "actors/hexen/baseweapons.txt"
 #include "actors/hexen/korax.txt"
@@ -135,6 +139,17 @@
 #include "actors/hexen/spike.txt"
 #include "actors/hexen/wraith.txt"
 #include "actors/hexen/heresiarch.txt"
+// [BB] Hexen invasion spawners.
+#include "actors/hexen/hexenspawners.txt"
+
+// [BC] New Skulltag actor definitions.
+#include "actors/skulltag/skulltagarmor.txt"
+#include "actors/skulltag/skulltagartifacts.txt"
+#include "actors/skulltag/skulltaghealth.txt"
+#include "actors/skulltag/skulltagmisc.txt"
+#include "actors/skulltag/skulltagrunes.txt"
+#include "actors/skulltag/skulltagscorepillars.txt"
+#include "actors/skulltag/skulltagteamitems.txt"
 
 #include "actors/strife/strifehumanoid.txt"
 #include "actors/strife/strifeplayer.txt"
@@ -169,6 +184,8 @@
 #include "actors/strife/templar.txt"
 #include "actors/strife/zombie.txt"
 #include "actors/strife/sigil.txt"
+// [BB] Strife invasion spawners.
+#include "actors/strife/strifespawners.txt"
 
 #include "actors/chex/chexmonsters.txt"
 #include "actors/chex/chexkeys.txt"
