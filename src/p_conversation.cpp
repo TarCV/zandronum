@@ -933,7 +933,8 @@ public:
 		}
 
 		// [CW] Freeze the game depending on MAPINFO options.
-		if (ConversationPauseTic < gametic && !multiplayer && !(level.flags2 & LEVEL2_CONV_SINGLE_UNFREEZE))
+		// [BB] !multiplayer -> (NETWORK_GetState( ) == NETSTATE_SINGLE)
+		if (ConversationPauseTic < gametic && (NETWORK_GetState( ) == NETSTATE_SINGLE) && !(level.flags2 & LEVEL2_CONV_SINGLE_UNFREEZE))
 		{
 			menuactive = MENU_On;
 		}
@@ -1082,6 +1083,11 @@ void P_FreeStrifeConversations ()
 
 void P_StartConversation (AActor *npc, AActor *pc, bool facetalker, bool saveangle)
 {
+	// [BB] The server doesn't have a screen, so we have to return here as workaround for a crash.
+	// TODO: Make this work in the client/server architecture.
+	if ( NETWORK_GetState() == NETSTATE_SERVER )
+		return;
+
 	AActor *oldtarget;
 	int i;
 
