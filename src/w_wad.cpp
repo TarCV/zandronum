@@ -56,6 +56,16 @@
 #include "doomerrors.h"
 #include "resourcefiles/resourcefile.h"
 #include "md5.h"
+// [TP]
+#include "c_cvars.h"
+
+// [BB]
+extern TArray<FString> allwads;
+extern TArray<FString> autoloadedwads;
+extern TArray<FString> optionalwads; // [TP]
+
+// [TP] Should we try load all pwads as optional?
+CVAR ( Bool, preferoptionalwads, false, CVAR_ARCHIVE )
 
 // MACROS ------------------------------------------------------------------
 
@@ -162,7 +172,7 @@ void FWadCollection::DeleteAll ()
 //
 //==========================================================================
 
-void FWadCollection::InitMultipleFiles (TArray<FString> &filenames)
+void FWadCollection::InitMultipleFiles (/*TArray<FString> &filenames*/) // [BB] Removed argument.
 {
 	int numfiles;
 
@@ -170,10 +180,42 @@ void FWadCollection::InitMultipleFiles (TArray<FString> &filenames)
 	DeleteAll();
 	numfiles = 0;
 
-	for(unsigned i=0;i<filenames.Size(); i++)
+	for(unsigned i=0;i<allwads.Size(); i++) // [BB] Changed to allwads.
 	{
 		int baselump = NumLumps;
-		AddFile (filenames[i]);
+		// [BB] Special handling for automatically loded wads.
+		bool bLoadedAutomatically = false;
+		bool isOptional = false;
+		for ( unsigned int j = 0; j < autoloadedwads.Size(); ++j )
+		{
+			if ( autoloadedwads[j].Compare( allwads[i] ) == 0 )
+			{
+				bLoadedAutomatically = true;
+				break;
+			}
+		}
+
+		// [TP] Should we consider this wad optional?
+		if ( preferoptionalwads )
+		{
+			// If the cvar is set, try load everything as optional.
+			isOptional = true;
+		}
+		else
+		{
+			// If the cvar is not set, see if the wad was loaded through
+			// -optfile, in which case optionalwads will contain its name
+			for ( unsigned int j = 0; j < optionalwads.Size(); ++j )
+			{
+				if ( optionalwads[j].Compare( allwads[i] ) == 0 )
+				{
+					isOptional = true;
+					break;
+				}
+			}
+		}
+
+		AddFile (allwads[i], NULL, bLoadedAutomatically, isOptional);
 	}
 
 	NumLumps = LumpInfo.Size();
@@ -222,7 +264,9 @@ int FWadCollection::AddExternalFile(const char *filename)
 // [RH] Removed reload hack
 //==========================================================================
 
-void FWadCollection::AddFile (const char *filename, FileReader *wadinfo)
+// [BC] Edited a little.
+// [TP] Added isOptional
+void FWadCollection::AddFile (const char *filename, FileReader *wadinfo, bool bLoadedAutomatically, bool isOptional)
 {
 	int startlump;
 	bool isdir = false;
@@ -254,6 +298,10 @@ void FWadCollection::AddFile (const char *filename, FileReader *wadinfo)
 		}
 	}
 
+	// [BC] Mark whether or not the wad was loaded automatically.
+	if ( wadinfo )
+		wadinfo->bLoadedAutomatically = bLoadedAutomatically;
+
 	Printf (" adding %s", filename);
 	startlump = NumLumps;
 
@@ -278,6 +326,9 @@ void FWadCollection::AddFile (const char *filename, FileReader *wadinfo)
 			lump_p->wadnum = Files.Size();
 		}
 
+		// [TP] Handle isOptional
+		resfile->IsOptional = isOptional;
+
 		if (Files.Size() == IWAD_FILENUM && gameinfo.gametype == GAME_Strife && gameinfo.flags & GI_SHAREWARE)
 		{
 			resfile->FindStrifeTeaserVoices();
@@ -297,7 +348,8 @@ void FWadCollection::AddFile (const char *filename, FileReader *wadinfo)
 				FileReader *embedded = lump->NewReader();
 				strcpy(wadstr, lump->FullName);
 
-				AddFile(path, embedded);
+				// [BB] We consider all embedded files as being loaded automatically.
+				AddFile(path, embedded, true, isOptional);
 			}
 		}
 		return;
@@ -1230,6 +1282,63 @@ const char *FWadCollection::GetWadFullName (int wadnum) const
 
 //==========================================================================
 //
+// [BC] W_GetLoadedAutomatically
+//
+// Returns true if the wad was loaded automatically from being placed
+// in a certain autoload subdirectory (such as "/skins").
+//
+//==========================================================================
+
+bool FWadCollection::GetLoadedAutomatically( int wadnum ) const
+{
+	if ( (DWORD)wadnum >= Files.Size( ))
+	{
+		return ( false );
+	}
+
+	return ( Files[wadnum]->GetReader() && Files[wadnum]->GetReader()->bLoadedAutomatically );
+}
+
+//==========================================================================
+//
+// [BB] GetWadnumFromLumpnum
+//
+// Returns the number of the wad this given lump is in. Returns a negative
+// value if the lump doesn't exist.
+//
+//==========================================================================
+
+int FWadCollection::GetWadnumFromLumpnum( int lumpnum ) const
+{
+	if ((unsigned)lumpnum >= (unsigned)LumpInfo.Size())
+		return -1;
+
+	LumpRecord *l = &LumpInfo[lumpnum];
+	return l->wadnum;
+}
+
+//==========================================================================
+//
+// [BB] GetWadnumFromWadFullName
+//
+// Returns the number of the wad with the given full name.
+// Returns a negative value if no wad with this name is loaded.
+//
+//==========================================================================
+
+int FWadCollection::GetWadnumFromWadFullName ( const char *FullName ) const
+{
+	for ( unsigned int i = 0; i < Files.Size( ); ++i )
+	{
+		if ( strcmp ( Files[i]->Filename, FullName ) == 0 )
+			return ( i );
+	}
+
+	return -1;
+}
+
+//==========================================================================
+//
 // IsUncompressedFile
 //
 // Returns true when the lump is available as an uncompressed portion of
@@ -1270,6 +1379,83 @@ bool FWadCollection::IsEncryptedFile(int lump) const
 	return !!(LumpInfo[lump].lump->Flags & LUMPF_BLOODCRYPT);
 }
 
+//==========================================================================
+//
+// [TP] GetParentWad
+//
+// Returns the wadnum of the wad embedding the given wad
+//
+//==========================================================================
+
+int FWadCollection::GetParentWad( int wadnum ) const
+{
+	// [BB] Check whether this wad is embedded in another file.
+	if ( wadnum >= 0 )
+	{
+		FString wadName = Wads.GetWadFullName( wadnum );
+		int index = wadName.LastIndexOf( ":" );
+
+		if ( index > wadName.LastIndexOf( ":/" ) )
+		{
+			wadName.Truncate( index );
+			int containerWadNum = Wads.GetWadnumFromWadFullName( wadName );
+
+			if ( containerWadNum >= 0 )
+				wadnum = containerWadNum;
+		}
+	}
+
+	return wadnum;
+}
+
+//==========================================================================
+//
+// [TP] IsWadOptional
+//
+// Returns whether the given wad is optionally loaded (clients can omit
+// loading it)
+//
+//==========================================================================
+
+bool FWadCollection::IsWadOptional( int wadnum ) const
+{
+	// A wad is mandatory if its top level parent is mandatory.
+	return Files[GetParentWad( wadnum )]->IsOptional;
+}
+
+//==========================================================================
+//
+// [TP] LumpIsMandatory
+//
+// Marks the wad of the given lump as no longer optional
+//
+//==========================================================================
+
+void FWadCollection::LumpIsMandatory( int lumpnum )
+{
+	int wadnum = GetWadnumFromLumpnum( lumpnum );
+
+	// [TP] Resolve to top-level parent so we mark the correct wad as mandatory.
+	wadnum = GetParentWad( wadnum );
+
+	// [TP] If the user tried to load this WAD with -optfile (i.e. it's in optionalwads), exit now
+	// as we're unable to fulfill what the user wanted.
+	if ( Files[wadnum]->IsOptional )
+	{
+		for ( unsigned int i = 0; i < optionalwads.Size(); ++i )
+		{
+			if ( optionalwads[i].Compare( Files[wadnum]->Filename ) == 0 )
+			{
+				I_FatalError( "Cannot load PWAD '%s' as optional because it contains %s\n",
+					Files[wadnum]->Filename, GetLumpFullName ( lumpnum ));
+			}
+		}
+	}
+
+	Files[wadnum]->IsOptional = false;
+	DPrintf( "%s is mandatory because of lump %d (%s)\n",
+		Files[wadnum]->Filename, lumpnum, GetLumpFullName( lumpnum ));
+}
 
 // FWadLump -----------------------------------------------------------------
 
@@ -1290,10 +1476,18 @@ FWadLump::FWadLump (const FWadLump &copy)
 	if ((Lump = copy.Lump)) Lump->CacheLump();
 }
 
-#ifdef _DEBUG
+// [BB] The automatically generated assignment operator doesn't work properly (before ZDoom's rewrite of the resource system the reference counting of SourceData was broken).
+//#ifdef _DEBUG
 FWadLump & FWadLump::operator= (const FWadLump &copy)
 {
+	// [BB] Since the assignment overwrites Lump, we have to clean this first.
+	if (Lump != NULL)
+	{
+		Lump->ReleaseCache();
+	}
+
 	// Only the debug build actually calls this!
+	// [BB] No, also the release build calls (and needs to call) this.
 	File = copy.File;
 	Length = copy.Length;
 	FilePos = copy.FilePos;
@@ -1302,7 +1496,7 @@ FWadLump & FWadLump::operator= (const FWadLump &copy)
 	if ((Lump = copy.Lump)) Lump->CacheLump();
 	return *this;
 }
-#endif
+//#endif
 
 
 FWadLump::FWadLump(FResourceLump *lump, bool alwayscache)
@@ -1441,7 +1635,7 @@ FString::FString (ELumpNum lumpnum)
 //
 //==========================================================================
 
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(__WINE__)
 //#define WIN32_LEAN_AND_MEAN
 //#include <windows.h>
 

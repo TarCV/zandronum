@@ -60,6 +60,11 @@
 #pragma warning(disable:4244)
 #endif
 
+#define USE_WINDOWS_DWORD
+#include "network.h"
+#include "chat.h"
+#include "cl_main.h"
+
 // Compensate for w32api's lack
 #ifndef WM_WTSSESSION_CHANGE
 #define WM_WTSSESSION_CHANGE 0x02B1
@@ -160,6 +165,9 @@ BOOL AppActive = TRUE;
 int SessionState = 0;
 int BlockMouseMove; 
 
+// [BB] Allows to keep the sound turned on, when the client is not the active app.
+CVAR (Bool, cl_soundwhennotactive, true, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+
 CVAR (Bool, k_allowfullscreentoggle, true, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 
 CUSTOM_CVAR(Bool, norawinput, false, CVAR_ARCHIVE|CVAR_GLOBALCONFIG|CVAR_NOINITCALL)
@@ -175,7 +183,7 @@ static void I_CheckGUICapture ()
 
 	if (menuactive == MENU_Off)
 	{
-		wantCapt = ConsoleState == c_down || ConsoleState == c_falling || chatmodeon;
+		wantCapt = ConsoleState == c_down || ConsoleState == c_falling || CHAT_GetChatMode(); // [BB] chatmodeon becomes CHAT_GetChatMode()
 	}
 	else
 	{
@@ -283,7 +291,6 @@ bool GUIWndProcHook(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam, LRESU
 			return true;
 		}
 		break;
-
 	case WM_LBUTTONDOWN:
 	case WM_LBUTTONUP:
 	case WM_RBUTTONDOWN:
@@ -544,11 +551,12 @@ LRESULT CALLBACK WndProc (HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		{
 			SetPriorityClass (GetCurrentProcess (), INGAME_PRIORITY_CLASS);
 		}
-		else if (!noidle && !netgame)
+		else if (!noidle && NETWORK_GetState( ) != NETSTATE_CLIENT )
 		{
 			SetPriorityClass (GetCurrentProcess (), IDLE_PRIORITY_CLASS);
 		}
-		S_SetSoundPaused (wParam);
+		if ( ( NETWORK_GetState( ) != NETSTATE_CLIENT ) || ( cl_soundwhennotactive == false ) )
+			S_SetSoundPaused (wParam);
 		break;
 
 	case WM_WTSSESSION_CHANGE:
@@ -565,6 +573,7 @@ LRESULT CALLBACK WndProc (HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				// disconnecting it, and the session will be unlocked before reconnecting it.
 				// For our purposes, video output will only happen when the session is
 				// both unlocked and connected (that is, SessionState is 0).
+#ifndef __WINE__
 				switch (wParam)
 				{
 				case WTS_SESSION_LOCK:
@@ -582,6 +591,7 @@ LRESULT CALLBACK WndProc (HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 					//I_MovieResumeSound ();
 					break;
 				}
+#endif
 			}
 			else if (message == WM_POWERBROADCAST)
 			{
@@ -618,6 +628,10 @@ LRESULT CALLBACK WndProc (HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		}
 		break;
 
+#ifndef __WINE__
+#else
+		if (0)
+#endif
 	case WM_PALETTECHANGED:
 		if ((HWND)wParam == Window)
 			break;

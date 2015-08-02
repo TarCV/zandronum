@@ -11,7 +11,7 @@ ACTOR DoomWeapon : Weapon
 
 // --------------------------------------------------------------------------
 //
-// Fist 
+// Fist
 //
 // --------------------------------------------------------------------------
 
@@ -24,6 +24,7 @@ ACTOR Fist : Weapon
 	Tag "$TAG_FIST"
 	+WEAPON.WIMPY_WEAPON
 	+WEAPON.MELEEWEAPON
+	+WEAPON.ALLOW_WITH_RESPAWN_INVUL
 	States
 	{
 	Ready:
@@ -61,8 +62,12 @@ ACTOR Pistol : DoomWeapon 5010
 	Weapon.AmmoType "Clip"
 	Obituary "$OB_MPPISTOL"
 	+WEAPON.WIMPY_WEAPON
+	+WEAPON.ALLOW_WITH_RESPAWN_INVUL
 	Inventory.Pickupmessage "$PICKUP_PISTOL_DROPPED"
 	Tag "$TAG_PISTOL"
+	Radius 20
+	Height 16
+	Attacksound "weapons/pistol"
 	States
 	{
 	Ready:
@@ -109,6 +114,7 @@ ACTOR Chainsaw : Weapon 2005
 	Obituary "$OB_MPCHAINSAW"
 	Tag "$TAG_CHAINSAW"
 	+WEAPON.MELEEWEAPON		
+	+WEAPON.ALLOW_WITH_RESPAWN_INVUL
 	States
 	{
 	Ready:
@@ -148,6 +154,7 @@ ACTOR Shotgun : DoomWeapon 2001
 	Inventory.PickupMessage "$GOTSHOTGUN"
 	Obituary "$OB_MPSHOTGUN"
 	Tag "$TAG_SHOTGUN"
+	Attacksound "weapons/shotgf"
 	States
 	{
 	Ready:
@@ -180,7 +187,7 @@ ACTOR Shotgun : DoomWeapon 2001
 
 // --------------------------------------------------------------------------
 //
-// Shotgun
+// SuperShotgun
 //
 // --------------------------------------------------------------------------
 
@@ -195,6 +202,7 @@ ACTOR SuperShotgun : DoomWeapon 82
 	Inventory.PickupMessage "$GOTSHOTGUN2"
 	Obituary "$OB_MPSSHOTGUN"
 	Tag "$TAG_SUPERSHOTGUN"
+	Attacksound "weapons/sshotf"
 	States
 	{
 	Ready:
@@ -249,6 +257,7 @@ ACTOR Chaingun : DoomWeapon 2002
 	Inventory.PickupMessage "$GOTCHAINGUN"
 	Obituary "$OB_MPCHAINGUN"
 	Tag "$TAG_CHAINGUN"
+	Attacksound "weapons/chngun"
 	States
 	{
 	Ready:
@@ -327,10 +336,12 @@ ACTOR Rocket
 	Height 8
 	Speed 20
 	Damage 20
+	DamageType Fire
 	Projectile
 	+RANDOMIZE
 	+DEHEXPLOSION
 	+ROCKETTRAIL
+	+EXPLODEONDEATH
 	SeeSound "weapons/rocklf"
 	DeathSound "weapons/rocklx"
 	Obituary "$OB_MPROCKET"
@@ -349,11 +360,11 @@ ACTOR Rocket
 
 // --------------------------------------------------------------------------
 //
-// Grenade -- Taken and adapted from Skulltag, with MBF stuff added to it
+// Grenade -- [BB] Skulltag version, with MBF stuff added to it
 //
 // --------------------------------------------------------------------------
 
-ACTOR Grenade
+ACTOR Grenade native
 {
 	Game Doom
 	SpawnID 216
@@ -361,29 +372,32 @@ ACTOR Grenade
 	Height 8
 	Speed 25
 	Damage 20
+	ReactionTime 87
 	Projectile
 	-NOGRAVITY
+	+DOOMBOUNCE
 	+RANDOMIZE
 	+DEHEXPLOSION
 	+GRENADETRAIL
-	BounceType "Doom"
-	Gravity 0.25
+	+QUARTERGRAVITY
+	+EXPLODEONDEATH
+	+USESTBOUNCESOUND
 	SeeSound "weapons/grenlf"
 	DeathSound "weapons/grenlx"
-	BounceSound "weapons/grbnce"
 	Obituary "$OB_GRENADE"
 	DamageType Grenade
 
 	States
 	{
 	Spawn:
-		SGRN A 1 Bright 
+		SGRN A 1 bright A_CountDown
 		Loop
 	Death:
-		MISL B 8 Bright A_Explode
-		MISL C 6 Bright
-		MISL D 4 Bright
-		Stop
+		MISL B 0 Bright A_ChangeFlag ( "NoGravity", 1 )
+		MISL B 8 bright A_Explode
+		MISL C 6 bright
+		MISL D 4 bright
+		stop
 	Grenade:
 		MISL A 1000 A_Die
 		Wait
@@ -396,6 +410,7 @@ ACTOR Grenade
 		MISL B 8 A_Mushroom
 		Goto Death+1
 	}
+
 }
 
 // --------------------------------------------------------------------------
@@ -518,6 +533,7 @@ ACTOR BFG9000 : DoomWeapon 2006
 	Weapon.AmmoGive 40
 	Weapon.AmmoType "Cell"
 	+WEAPON.NOAUTOFIRE
+	+WEAPON.NOLMS
 	Inventory.PickupMessage "$GOTBFG9000"
 	Tag "$TAG_BFG9000"
 	States

@@ -97,6 +97,8 @@ struct MapData
 MapData * P_OpenMapData(const char * mapname, bool justcheck);
 bool P_CheckMapData(const char * mapname);
 
+// [BB]
+bool P_CheckIfMapExists(const char * mapname);
 
 // NOT called by W_Ticker. Fixme. [RH] Is that bad?
 //

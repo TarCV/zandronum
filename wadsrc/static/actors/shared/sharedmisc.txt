@@ -174,3 +174,42 @@ ACTOR SpeakerIcon : Unknown
 	}
 	Scale 0.125
 }
+
+// [BB] Some native base classes for the invasion spawners.
+ACTOR BaseMonsterInvasionSpot native
+{
+	+NOBLOCKMAP
+	+NOSECTOR
+	+NOGRAVITY
+	RenderStyle None
+}
+
+ACTOR CustomMonsterInvasionSpot : BaseMonsterInvasionSpot native
+{
+}
+
+ACTOR BasePickupInvasionSpot native
+{
+	+NOBLOCKMAP
+	+NOSECTOR
+	+NOGRAVITY
+	RenderStyle None
+}
+
+
+ACTOR CustomPickupInvasionSpot: BasePickupInvasionSpot native
+{
+}
+
+
+ACTOR BaseWeaponInvasionSpot native
+{
+	+NOBLOCKMAP
+	+NOSECTOR
+	+NOGRAVITY
+	RenderStyle None
+}
+
+ACTOR CustomWeaponInvasionSpot : BaseWeaponInvasionSpot native
+{
+}

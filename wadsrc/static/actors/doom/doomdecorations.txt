@@ -1,3 +1,4 @@
+// [BC] I've applied +USESPECIAL to all solid decorations.
 
 // Tech lamp ---------------------------------------------------------------
 
@@ -8,6 +9,7 @@ ACTOR TechLamp 85
 	Height 80
 	ProjectilePassHeight -16
 	+SOLID
+	+USESPECIAL
 	States
 	{
 	Spawn:
@@ -25,6 +27,7 @@ ACTOR TechLamp2 86
 	Height 60
 	ProjectilePassHeight -16
 	+SOLID
+	+USESPECIAL
 	States
 	{
 	Spawn:
@@ -42,6 +45,7 @@ ACTOR Column 2028
 	Height 48
 	ProjectilePassHeight -16
 	+SOLID
+	+USESPECIAL
 	States
 	{
 	Spawn:
@@ -59,6 +63,7 @@ ACTOR TallGreenColumn 30
 	Height 52
 	ProjectilePassHeight -16
 	+SOLID
+	+USESPECIAL
 	States
 	{
 	Spawn:
@@ -76,6 +81,7 @@ ACTOR ShortGreenColumn 31
 	Height 40
 	ProjectilePassHeight -16
 	+SOLID
+	+USESPECIAL
 	States
 	{
 	Spawn:
@@ -93,6 +99,7 @@ ACTOR TallRedColumn 32
 	Height 52
 	ProjectilePassHeight -16
 	+SOLID
+	+USESPECIAL
 	States
 	{
 	Spawn:
@@ -110,6 +117,7 @@ ACTOR ShortRedColumn 33
 	Height 40
 	ProjectilePassHeight -16
 	+SOLID
+	+USESPECIAL
 	States
 	{
 	Spawn:
@@ -127,6 +135,7 @@ ACTOR SkullColumn 37
 	Height 40
 	ProjectilePassHeight -16
 	+SOLID
+	+USESPECIAL
 	States
 	{
 	Spawn:
@@ -144,6 +153,7 @@ ACTOR HeartColumn 36
 	Height 40
 	ProjectilePassHeight -16
 	+SOLID
+	+USESPECIAL
 	States
 	{
 	Spawn:
@@ -161,6 +171,7 @@ ACTOR EvilEye 41
 	Height 54
 	ProjectilePassHeight -16
 	+SOLID
+	+USESPECIAL
 	States
 	{
 	Spawn:
@@ -178,6 +189,7 @@ ACTOR FloatingSkull 42
 	Height 26
 	ProjectilePassHeight -16
 	+SOLID
+	+USESPECIAL
 	States
 	{
 	Spawn:
@@ -195,6 +207,7 @@ ACTOR TorchTree 43
 	Height 56
 	ProjectilePassHeight -16
 	+SOLID
+	+USESPECIAL
 	States
 	{
 	Spawn:
@@ -212,6 +225,7 @@ ACTOR BlueTorch 44
 	Height 68
 	ProjectilePassHeight -16
 	+SOLID
+	+USESPECIAL
 	States
 	{
 	Spawn:
@@ -229,6 +243,7 @@ ACTOR GreenTorch 45
 	Height 68
 	ProjectilePassHeight -16
 	+SOLID
+	+USESPECIAL
 	States
 	{
 	Spawn:
@@ -246,6 +261,7 @@ ACTOR RedTorch 46
 	Height 68
 	ProjectilePassHeight -16
 	+SOLID
+	+USESPECIAL
 	States
 	{
 	Spawn:
@@ -263,6 +279,7 @@ ACTOR ShortBlueTorch 55
 	Height 37
 	ProjectilePassHeight -16
 	+SOLID
+	+USESPECIAL
 	States
 	{
 	Spawn:
@@ -280,6 +297,7 @@ ACTOR ShortGreenTorch 56
 	Height 37
 	ProjectilePassHeight -16
 	+SOLID
+	+USESPECIAL
 	States
 	{
 	Spawn:
@@ -297,6 +315,7 @@ ACTOR ShortRedTorch 57
 	Height 37
 	ProjectilePassHeight -16
 	+SOLID
+	+USESPECIAL
 	States
 	{
 	Spawn:
@@ -314,6 +333,7 @@ ACTOR Stalagtite 47
 	Height 40
 	ProjectilePassHeight -16
 	+SOLID
+	+USESPECIAL
 	States
 	{
 	Spawn:
@@ -331,6 +351,7 @@ ACTOR TechPillar 48
 	Height 128
 	ProjectilePassHeight -16
 	+SOLID
+	+USESPECIAL
 	States
 	{
 	Spawn:
@@ -364,6 +385,7 @@ ACTOR Candelabra 35
 	Height 60
 	ProjectilePassHeight -16
 	+SOLID
+	+USESPECIAL
 	States
 	{
 	Spawn:
@@ -513,6 +535,7 @@ ACTOR HeadOnAStick 27
 	Height 56
 	ProjectilePassHeight -16
 	+SOLID
+	+USESPECIAL
 	States
 	{
 	Spawn:
@@ -530,6 +553,7 @@ ACTOR HeadsOnAStick 28
 	Height 64
 	ProjectilePassHeight -16
 	+SOLID
+	+USESPECIAL
 	States
 	{
 	Spawn:
@@ -547,6 +571,7 @@ ACTOR HeadCandles 29
 	Height 42
 	ProjectilePassHeight -16
 	+SOLID
+	+USESPECIAL
 	States
 	{
 	Spawn:
@@ -564,6 +589,7 @@ ACTOR DeadStick 25
 	Height 64
 	ProjectilePassHeight -16
 	+SOLID
+	+USESPECIAL
 	States
 	{
 	Spawn:
@@ -581,6 +607,7 @@ ACTOR LiveStick 26
 	Height 64
 	ProjectilePassHeight -16
 	+SOLID
+	+USESPECIAL
 	States
 	{
 	Spawn:
@@ -599,6 +626,7 @@ ACTOR BigTree 54
 	Height 108
 	ProjectilePassHeight -16
 	+SOLID
+	+USESPECIAL
 	States
 	{
 	Spawn:
@@ -617,6 +645,7 @@ ACTOR BurningBarrel 70
 	Height 32
 	ProjectilePassHeight -16
 	+SOLID
+	+USESPECIAL
 	States
 	{
 	Spawn:
@@ -793,9 +822,13 @@ ACTOR BrainStem 81
 ACTOR Stalagmite 5050
 {
 	Game Doom
+	// [BB] Skulltag's Stalagmite also was defined for Heretic and Hexen
+	Game Heretic
+	Game Hexen
 	Radius 16
 	Height 48
 	+SOLID
+	+USESPECIAL
 	States
 	{
 	Spawn:
