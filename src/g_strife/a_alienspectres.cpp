@@ -22,6 +22,10 @@ AActor *P_SpawnSubMissile (AActor *source, const PClass *type, AActor *target);
 
 DEFINE_ACTION_FUNCTION(AActor, A_SpectreChunkSmall)
 {
+	// [BB] Clients may not do this.
+	if ( NETWORK_InClientMode() )
+		return;
+
 	AActor *foo = Spawn("AlienChunkSmall", self->x, self->y, self->z + 10*FRACUNIT, ALLOW_REPLACE);
 
 	if (foo != NULL)
@@ -35,11 +39,19 @@ DEFINE_ACTION_FUNCTION(AActor, A_SpectreChunkSmall)
 		foo->vely = (t - (pr_spectrechunk() & 7)) << FRACBITS;
 
 		foo->velz = (pr_spectrechunk() & 15) << FRACBITS;
+
+		// [BB] Tell clients to spawn the actor.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SpawnThing( foo );
 	}
 }
 
 DEFINE_ACTION_FUNCTION(AActor, A_SpectreChunkLarge)
 {
+	// [BB] Clients may not do this.
+	if ( NETWORK_InClientMode() )
+		return;
+
 	AActor *foo = Spawn("AlienChunkLarge", self->x, self->y, self->z + 10*FRACUNIT, ALLOW_REPLACE);
 
 	if (foo != NULL)
@@ -53,6 +65,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_SpectreChunkLarge)
 		foo->vely = (t - (pr_spectrechunk() & 15)) << FRACBITS;
 
 		foo->velz = (pr_spectrechunk() & 7) << FRACBITS;
+
+		// [BB] Tell clients to spawn the actor.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SpawnThing( foo );
 	}
 
 }
@@ -68,6 +84,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_Spectre3Attack)
 	foo->target = self;
 	foo->FriendPlayer = 0;
 	foo->tracer = self->target;
+
+	// [CW] Tell clients to spawn the actor.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SpawnMissile( foo );
 
 	self->angle -= ANGLE_180 / 20 * 10;
 	for (int i = 0; i < 20; ++i)
@@ -166,7 +186,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_AlienSpectreDeath)
 		ASigil *sigil;
 
 		player->GiveInventoryType (QuestItemClasses[25]);
-		if (!multiplayer)
+		if ( NETWORK_GetState( ) == NETSTATE_SINGLE )
 		{
 			player->GiveInventoryType (RUNTIME_CLASS(AUpgradeStamina));
 			player->GiveInventoryType (RUNTIME_CLASS(AUpgradeAccuracy));

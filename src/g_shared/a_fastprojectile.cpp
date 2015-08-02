@@ -4,6 +4,8 @@
 #include "g_level.h"
 #include "r_sky.h"
 #include "p_lnspec.h"
+// [BB] New #includes.
+#include "network.h"
 
 
 IMPLEMENT_CLASS(AFastProjectile)
@@ -34,7 +36,7 @@ void AFastProjectile::Tick ()
 	if (!(flags5 & MF5_NOTIMEFREEZE))
 	{
 		//Added by MC: Freeze mode.
-		if (bglobal.freeze || level.flags2 & LEVEL2_FROZEN)
+		if (/*bglobal.freeze ||*/ level.flags2 & LEVEL2_FROZEN)
 		{
 			return;
 		}
@@ -176,6 +178,11 @@ void AFastProjectile::Effect()
 				if (act != NULL)
 				{
 					act->angle = this->angle;
+
+					// [BB] Assume that the trail is just for decorative purposes and let the
+					// client spawn it on its own.
+					if ( NETWORK_InClientMode() )
+						act->ulNetworkFlags |= NETFL_CLIENTSIDEONLY;
 				}
 			}
 		}

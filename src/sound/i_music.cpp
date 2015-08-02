@@ -98,6 +98,7 @@ extern int MUSHeaderSearch(const BYTE *head, int len);
 EXTERN_CVAR (Int, snd_samplerate)
 EXTERN_CVAR (Int, snd_mididevice)
 
+
 static bool MusicDown = true;
 
 static BYTE *ungzip(BYTE *data, int *size);
@@ -154,7 +155,7 @@ void I_InitMusic (void)
 
 	snd_musicvolume.Callback ();
 
-	nomusic = !!Args->CheckParm("-nomusic") || !!Args->CheckParm("-nosound");
+	nomusic = !!Args->CheckParm("-nomusic") || !!Args->CheckParm("-nosound") || !!Args->CheckParm("-host");
 
 #ifdef _WIN32
 	I_InitMusicWin32 ();
@@ -737,8 +738,6 @@ CCMD(testmusicvol)
 		relative_volume = (float)strtod(argv[1], NULL);
 		snd_musicvolume.Callback();
 	}
-	else
-		Printf("Current relative volume is %1.2f\n", relative_volume);
 }
 
 //==========================================================================

@@ -24,11 +24,22 @@ static FRandom pr_pain ("BishopPainBlur");
 
 DEFINE_ACTION_FUNCTION(AActor, A_BishopAttack)
 {
+	// [BB] This is server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (!self->target)
 	{
 		return;
 	}
 	S_Sound (self, CHAN_BODY, self->AttackSound, 1, ATTN_NORM);
+
+	// [BB] If we're the server, tell the clients to play the sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SoundActor( self, CHAN_BODY, S_GetName(self->AttackSound), 1, ATTN_NORM );
+
 	if (self->CheckMeleeRange())
 	{
 		int damage = pr_atk.HitDice (4);
@@ -50,16 +61,33 @@ DEFINE_ACTION_FUNCTION(AActor, A_BishopAttack2)
 {
 	AActor *mo;
 
+	// [BB] This is server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (!self->target || !self->special1)
 	{
 		self->special1 = 0;
 		self->SetState (self->SeeState);
+
+		// [BB] If we're the server, tell the clients of the state change.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingState( self, STATE_SEE );
+
 		return;
 	}
 	mo = P_SpawnMissile (self, self->target, PClass::FindClass("BishopFX"));
 	if (mo != NULL)
 	{
 		mo->tracer = self->target;
+
+		// [BB] If we're the server, tell the clients to spawn this missile.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			SERVERCOMMANDS_SpawnMissile( mo );
+		}
 	}
 	self->special1--;
 }
@@ -83,12 +111,22 @@ DEFINE_ACTION_FUNCTION(AActor, A_BishopMissileWeave)
 
 DEFINE_ACTION_FUNCTION(AActor, A_BishopDecide)
 {
+	// [BB] This is server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (pr_decide() < 220)
 	{
 		return;
 	}
 	else
 	{
+		// [BB] If we're the server, tell the clients to update this thing's state.
+		if ( ( NETWORK_GetState( ) == NETSTATE_SERVER ) )
+			SERVERCOMMANDS_SetThingFrame( self, self->FindState ("Blur") );
+
 		self->SetState (self->FindState ("Blur"));
 	}		
 }
@@ -101,6 +139,12 @@ DEFINE_ACTION_FUNCTION(AActor, A_BishopDecide)
 
 DEFINE_ACTION_FUNCTION(AActor, A_BishopDoBlur)
 {
+	// [BB] This is server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	self->special1 = (pr_doblur() & 3) + 3; // Random number of blurs
 	if (pr_doblur() < 120)
 	{
@@ -115,6 +159,13 @@ DEFINE_ACTION_FUNCTION(AActor, A_BishopDoBlur)
 		P_ThrustMobj (self, self->angle, 11*FRACUNIT);
 	}
 	S_Sound (self, CHAN_BODY, "BishopBlur", 1, ATTN_NORM);
+
+	// [BB] If we're the server, update the thing's momentum and play the sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		SERVERCOMMANDS_MoveThingExact( self, CM_MOMX|CM_MOMY );
+		SERVERCOMMANDS_SoundActor( self, CHAN_BODY, "BishopBlur", 1, ATTN_NORM );
+	}
 }
 
 //============================================================================
@@ -125,18 +176,37 @@ DEFINE_ACTION_FUNCTION(AActor, A_BishopDoBlur)
 
 DEFINE_ACTION_FUNCTION(AActor, A_BishopSpawnBlur)
 {
+	// [BB] This is server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	AActor *mo;
 
 	if (!--self->special1)
 	{
 		self->velx = 0;
 		self->vely = 0;
+
+		// [BB] If we're the server, update the thing's momentum.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_MoveThingExact( self, CM_MOMX|CM_MOMY );
+
 		if (pr_sblur() > 96)
 		{
+			// [BB] If we're the server, tell the clients of the state change.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetThingState( self, STATE_SEE );
+
 			self->SetState (self->SeeState);
 		}
 		else
 		{
+			// [BB] If we're the server, tell the clients of the state change.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetThingState( self, STATE_MISSILE );
+			
 			self->SetState (self->MissileState);
 		}
 	}
@@ -144,6 +214,13 @@ DEFINE_ACTION_FUNCTION(AActor, A_BishopSpawnBlur)
 	if (mo)
 	{
 		mo->angle = self->angle;
+
+		// [BB] If we're the server, tell the clients to spawn the thing and set its angle.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			SERVERCOMMANDS_SpawnThing( mo );
+			SERVERCOMMANDS_SetThingAngle( mo );
+		}
 	}
 }
 
@@ -155,9 +232,20 @@ DEFINE_ACTION_FUNCTION(AActor, A_BishopSpawnBlur)
 
 DEFINE_ACTION_FUNCTION(AActor, A_BishopChase)
 {
+	// [BB] This is server-side. The z coordinate seems to go out of sync
+	// on client and server, if you make this client side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	self->z -= finesine[self->special2 << BOBTOFINESHIFT] * 4;
 	self->special2 = (self->special2 + 4) & 63;
 	self->z += finesine[self->special2 << BOBTOFINESHIFT] * 4;
+
+	// [BB] If we're the server, update the thing's z coordinate.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_MoveThingExact( self, CM_Z );
 }
 
 //============================================================================
@@ -187,8 +275,18 @@ DEFINE_ACTION_FUNCTION(AActor, A_BishopPainBlur)
 {
 	AActor *mo;
 
+	// [BB] This is server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (pr_pain() < 64)
 	{
+		// [BB] If we're the server, tell the clients to update this thing's state.
+		if ( ( NETWORK_GetState( ) == NETSTATE_SERVER ) )
+			SERVERCOMMANDS_SetThingFrame( self, self->FindState ("Blur") );
+
 		self->SetState (self->FindState ("Blur"));
 		return;
 	}
@@ -199,5 +297,12 @@ DEFINE_ACTION_FUNCTION(AActor, A_BishopPainBlur)
 	if (mo)
 	{
 		mo->angle = self->angle;
+
+		// [BB] If we're the server, tell the clients to spawn the thing and set its angle.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			SERVERCOMMANDS_SpawnThing( mo );
+			SERVERCOMMANDS_SetThingAngle( mo );
+		}
 	}
 }

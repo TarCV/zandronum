@@ -314,6 +314,9 @@ enum
 	MDL_NOINTERPOLATION				= 16,
 	MDL_INHERITACTORPITCH			= 32,
 	MDL_INHERITACTORROLL			= 64, // useless for now
+	MDL_ALIGNANGLE					= 128,
+	MDL_ALIGNPITCH					= 256,
+	MDL_ROLLAGAINSTANGLE			= 512,
 };
 
 struct FSpriteModelFrame

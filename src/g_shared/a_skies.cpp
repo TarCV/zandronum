@@ -37,6 +37,8 @@
 #include "p_local.h"
 #include "p_lnspec.h"
 #include "farchive.h"
+// [BB] New #includes.
+#include "network.h"
 
 // arg0 = Visibility*4 for this skybox
 
@@ -45,9 +47,11 @@ IMPLEMENT_POINTY_CLASS (ASkyViewpoint)
 END_POINTERS
 
 // If this actor has no TID, make it the default sky box
-void ASkyViewpoint::BeginPlay ()
+// [BB] The clients don't know the TIDs yet when calling
+// BeginPlay, so we have to do the following in PostBeginPlay.
+void ASkyViewpoint::PostBeginPlay ()
 {
-	Super::BeginPlay ();
+	Super::PostBeginPlay ();
 
 	if (tid == 0 && level.DefaultSkybox == NULL)
 	{
@@ -190,7 +194,10 @@ void ASkyPicker::PostBeginPlay ()
 			Sector->FloorSkyBox = box;
 		}
 	}
-	Destroy ();
+	// [BB] The server may not destroy the SkyPicker, otherwise he can't
+	// inform the client about it during a full update.
+	if( NETWORK_GetState() != NETSTATE_SERVER )
+		Destroy ();
 }
 
 //---------------------------------------------------------------------------

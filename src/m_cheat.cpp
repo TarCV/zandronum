@@ -46,6 +46,13 @@
 #include "d_dehacked.h"
 #include "gi.h"
 #include "farchive.h"
+// [BB] New #includes.
+#include "deathmatch.h"
+#include "announcer.h"
+#include "team.h"
+#include "gamemode.h"
+#include "cl_commands.h"
+#include "cl_demo.h"
 
 // [RH] Actually handle the cheat. The cheat code in st_stuff.c now just
 // writes some bytes to the network data stream, and the network code
@@ -446,10 +453,11 @@ void cht_DoCheat (player_t *player, int cheat)
 		{
 			Printf ("What do you want to kill outside of a game?\n");
 		}
-		else if (!deathmatch)
+		// else if (!deathmatch)
 		{
 			// Don't allow this in deathmatch even with cheats enabled, because it's
 			// a very very cheap kill.
+			// [Dusk] <jino> and summoning 5000 bfg balls isn't?
 			P_LineAttack (player->mo, player->mo->angle, PLAYERMISSILERANGE,
 				P_AimLineAttack (player->mo, player->mo->angle, PLAYERMISSILERANGE), TELEFRAG_DAMAGE,
 				NAME_MDK, NAME_BulletPuff);
@@ -504,6 +512,7 @@ void cht_DoCheat (player_t *player, int cheat)
 		msg = "Frozen player properties turned off";
 		break;
 
+/* [BB] Skulltag doesn't use this.
 	case CHT_FREEZE:
 		bglobal.changefreeze ^= 1;
 		if (bglobal.freeze ^ bglobal.changefreeze)
@@ -515,15 +524,23 @@ void cht_DoCheat (player_t *player, int cheat)
 			msg = GStrings("TXT_FREEZEOFF");
 		}
 		break;
+*/
 	}
 
 	if (!*msg)              // [SO] Don't print blank lines!
 		return;
 
-	if (player == &players[consoleplayer])
-		Printf ("%s\n", msg);
-	else if (cheat != CHT_CHASECAM)
-		Printf ("%s cheats: %s\n", player->userinfo.GetName(), msg);
+	if( ( cheat != CHT_CHASECAM )
+		|| ( !( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode( )) & GMF_COOPERATIVE )
+			&& ( player->bSpectating == false ) && !(dmflags2 & DF2_CHASECAM))){
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVER_Printf( PRINT_HIGH, "%s is a cheater: %s\n", player->userinfo.GetName(), msg );
+		else if ( player == &players[consoleplayer] || CLIENTDEMO_IsFreeSpectatorPlayer( player ) )
+			Printf ("%s\n", msg);
+		// [BB] The server already ensures that all clients see the cheater message.
+		else if ( NETWORK_GetState( ) != NETSTATE_CLIENT )
+			Printf ("%s is a cheater: %s\n", player->userinfo.GetName(), msg);
+	}
 }
 
 const char *cht_Morph (player_t *player, const PClass *morphclass, bool quickundo)
@@ -583,6 +600,9 @@ void GiveSpawner (player_t *player, const PClass *type, int amount)
 			else if (type->IsDescendantOf (RUNTIME_CLASS(ABasicArmorBonus)))
 			{
 				static_cast<ABasicArmorBonus*>(item)->SaveAmount *= amount;
+				// [BB]
+				static_cast<ABasicArmorBonus*>(item)->BonusCount *= amount;
+
 			}
 			else
 			{
@@ -594,6 +614,14 @@ void GiveSpawner (player_t *player, const PClass *type, int amount)
 		{
 			item->Destroy ();
 		}
+		else
+		{
+			// [BB] This construction is more or less a hack, but at least the give cheats are now working.
+			SERVER_GiveInventoryToPlayer( player, item );
+			// [BC] Play the announcer sound.
+			if ( players[consoleplayer].camera == players[consoleplayer].mo && cl_announcepickups )
+				ANNOUNCER_PlayEntry( cl_announcer, item->PickupAnnouncerEntry( ));
+		}
 	}
 }
 
@@ -603,7 +631,9 @@ void cht_Give (player_t *player, const char *name, int amount)
 	int i;
 	const PClass *type;
 
-	if (player != &players[consoleplayer])
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVER_Printf( PRINT_HIGH, "%s is a cheater: give %s\n", player->userinfo.GetName(), name );
+	else if (player != &players[consoleplayer])
 		Printf ("%s is a cheater: give %s\n", player->userinfo.GetName(), name);
 
 	if (player->mo == NULL || player->health <= 0)
@@ -646,6 +676,12 @@ void cht_Give (player_t *player, const char *name, int amount)
 				player->health = deh.GodHealth;
 			}
 		}
+		// [BB]: The server has to inform the clients that this player's health has changed.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			ULONG playerIdx = static_cast<ULONG> ( player - players );
+			SERVERCOMMANDS_SetPlayerHealth( playerIdx );
+		}
 	}
 
 	if (giveall || stricmp (name, "backpack") == 0)
@@ -682,6 +718,8 @@ void cht_Give (player_t *player, const char *name, int amount)
 				{
 					ammo->Amount = ammo->MaxAmount;
 				}
+				// [BB] This construction is more or less a hack, but at least the give cheats are now working.
+				SERVER_GiveInventoryToPlayer( player, ammo );
 			}
 		}
 
@@ -700,6 +738,11 @@ void cht_Give (player_t *player, const char *name, int amount)
 			{
 				armor->Destroy ();
 			}
+			else
+			{
+				// [BB] This construction is more or less a hack, but at least the give cheats are now working.
+				SERVER_GiveInventoryToPlayer( player, armor );
+			}
 		}
 		else
 		{
@@ -711,6 +754,15 @@ void cht_Give (player_t *player, const char *name, int amount)
 				if (!armor->CallTryPickup (player->mo))
 				{
 					armor->Destroy ();
+				}
+				else
+				{
+					// [BB] This construction is more or less a hack, but at least the give cheats are now working.
+					if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					{
+						SERVER_GiveInventoryToPlayer( player, armor );
+						SERVERCOMMANDS_SyncHexenArmorSlots ( static_cast<ULONG> ( player - players ) );
+					}
 				}
 			}
 		}
@@ -733,6 +785,11 @@ void cht_Give (player_t *player, const char *name, int amount)
 					{
 						key->Destroy ();
 					}
+					else
+					{
+						// [BB] This construction is more or less a hack, but at least the give cheats are now working.
+						SERVER_GiveInventoryToPlayer( player, key );
+					}
 				}
 			}
 		}
@@ -740,8 +797,12 @@ void cht_Give (player_t *player, const char *name, int amount)
 			return;
 	}
 
-	if (giveall || stricmp (name, "weapons") == 0)
+	if (giveall || stricmp (name, "weapons") == 0 || stricmp (name, "stdweapons") == 0)
 	{
+		// [BB] Don't give the ST weapons if this it true. Useful if you want
+		// to start a game in the middle of a Doom coop megawad for example.
+		bool stdweapons = (stricmp (name, "stdweapons") == 0);
+
 		AWeapon *savedpending = player->PendingWeapon;
 		for (unsigned int i = 0; i < PClass::m_Types.Size(); ++i)
 		{
@@ -759,6 +820,16 @@ void cht_Give (player_t *player, const char *name, int amount)
 					(type->ActorInfo->GameFilter & gameinfo.gametype) ||	
 					player->weapons.LocateWeapon(type, NULL, NULL))
 				{
+				if (stdweapons)
+				{
+					const char *WeaponName = type->TypeName.GetChars();
+					if ( !stricmp (WeaponName, "Railgun")
+					     || !stricmp (WeaponName, "Minigun")
+					     || !stricmp (WeaponName, "GrenadeLauncher")
+					     || !stricmp (WeaponName, "Bfg10K") )
+						continue;
+				}
+
 					AWeapon *def = (AWeapon*)GetDefaultByType (type);
 					if (giveall == ALL_YESYES || !(def->WeaponFlags & WIF_CHEATNOTWEAPON))
 					{
@@ -768,6 +839,27 @@ void cht_Give (player_t *player, const char *name, int amount)
 			}
 		}
 		player->PendingWeapon = savedpending;
+
+		// [BB] If we're the server, also tell the client to restore the original weapon.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			// [BB] We need to make sure that the client has its old weapon up instantly.
+			// Since there is no net command for this and I don't want to add another net command
+			// just for this cheat, we use a workaround here.
+			const bool playerHasInstantWeapSwitch = !!(player->cheats & CF_INSTANTWEAPSWITCH);
+			const ULONG ulPlayer = static_cast<ULONG>( player - players );
+			if ( playerHasInstantWeapSwitch == false )
+			{
+				player->cheats |= CF_INSTANTWEAPSWITCH;
+				SERVERCOMMANDS_SetPlayerCheats( ulPlayer );
+			}
+			SERVERCOMMANDS_WeaponChange( ulPlayer );
+			if ( playerHasInstantWeapSwitch == false )
+			{
+				player->cheats &= ~CF_INSTANTWEAPSWITCH;
+				SERVERCOMMANDS_SetPlayerCheats( ulPlayer );
+			}
+		}
 
 		if (!giveall)
 			return;
@@ -1114,6 +1206,13 @@ CCMD (mdk)
 {
 	if (CheckCheatmode ())
 		return;
+
+	// [Dusk] Online handling for mdk
+	if ( NETWORK_GetState() == NETSTATE_CLIENT )
+	{
+		CLIENTCOMMANDS_GenericCheat( CHT_MDK );
+		return;
+	}
 
 	Net_WriteByte (DEM_GENERICCHEAT);
 	Net_WriteByte (CHT_MDK);
