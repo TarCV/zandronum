@@ -141,6 +141,9 @@ class CommandDrawImage : public SBarInfoCommandFlowControl
 					sc.MustGetToken(',');
 					getImage = true;
 				}
+				// [BB]
+				else if(sc.Compare("runeicon"))
+					type = RUNEICON;
 				else if(sc.Compare("translatable"))
 				{
 					translatable = true;
@@ -286,6 +289,19 @@ class CommandDrawImage : public SBarInfoCommandFlowControl
 						return;
 				}
 			}
+			// [BB]
+			else if(type == RUNEICON)
+			{
+				AInventory *item = statusBar->CPlayer->mo->Inventory;
+				for(item = statusBar->CPlayer->mo->Inventory;item != NULL;item = item->Inventory)
+				{
+					if(item->Icon.isValid() && item->GetClass() != PClass::FindClass("Rune") && item->IsKindOf(PClass::FindClass("Rune")))
+					{
+						texture = TexMan[item->Icon];
+						break;
+					}
+				}
+			}
 			else if(type == INVENTORYICON)
 				texture = TexMan[sprite];
 			else if(type == SELECTEDINVENTORYICON && statusBar->CPlayer->mo->InvSel != NULL)
@@ -327,6 +343,8 @@ class CommandDrawImage : public SBarInfoCommandFlowControl
 			INVENTORYICON,
 			WEAPONSLOT,
 			SELECTEDINVENTORYICON,
+			// [BB]
+			RUNEICON,
 
 			NORMAL_IMAGE
 		};
@@ -1131,6 +1149,24 @@ class CommandDrawNumber : public CommandDrawString
 
 						if(parenthesized) sc.MustGetToken(')');
 					}
+					// [BB]
+					else if(sc.Compare("teamscore")) //Takes in a number for team
+					{
+						value = TEAMSCORE;
+						sc.MustGetToken(TK_StringConst);
+						int t = -1;
+						for(unsigned int i = 0;i < teams.Size();i++)
+						{
+							if(teams[i].Name.CompareNoCase(sc.String) == 0)
+							{
+								t = (int) i;
+								break;
+							}
+						}
+						if(t == -1)
+							sc.ScriptError("'%s' is not a valid team.", sc.String);
+						valueArgument = t;
+					}
 				}
 				if(value == INVENTORY)
 				{
@@ -1365,6 +1401,10 @@ class CommandDrawNumber : public CommandDrawString
 				case GLOBALARRAY:
 					num = ACS_GlobalArrays[valueArgument][consoleplayer];
 					break;
+				// [BB]
+				case TEAMSCORE:
+					num = TEAM_GetScore(valueArgument);
+					break;
 				case POWERUPTIME:
 				{
 					//Get the PowerupType and check to see if the player has any in inventory.
@@ -1487,6 +1527,8 @@ class CommandDrawNumber : public CommandDrawString
 			ACCURACY,
 			STAMINA,
 			KEYS,
+			// [BB]
+			TEAMSCORE,
 
 			CONSTANT
 		};
@@ -1742,10 +1784,20 @@ class CommandGameMode : public SBarInfoCommandFlowControl
 
 		void	Parse(FScanner &sc, bool fullScreenOffsets)
 		{
+			static bool warnUnknown = true;
 			do
 			{
 				sc.MustGetToken(TK_Identifier);
-				modes |= static_cast<GameModes> (1<<sc.MustMatchString(modeNames));
+				int mode = sc.MatchString(modeNames);
+				if(mode >= 0)
+					modes |= static_cast<GameModes> (1<<mode);
+				else if(warnUnknown)
+				{
+					// Only warn about unknowns for cross port compatibility
+					// Also only warn once to keep logs from getting messy.
+					warnUnknown = false;
+					FScriptPosition(sc).Message(MSG_WARNING, "Ignoring unknown gamemode %s (future cases will be silently ignored).", sc.String);
+				}
 			}
 			while(sc.CheckToken(','));
 			SBarInfoCommandFlowControl::Parse(sc, fullScreenOffsets);
@@ -1754,10 +1806,25 @@ class CommandGameMode : public SBarInfoCommandFlowControl
 		{
 			SBarInfoCommandFlowControl::Tick(block, statusBar, hudChanged);
 
-			SetTruth((!multiplayer && (modes & SINGLEPLAYER)) ||
+			// [BB] Changed !multiplayer to (NETWORK_GetState( ) == NETSTATE_SINGLE).
+			SetTruth(((NETWORK_GetState( ) == NETSTATE_SINGLE) && (modes & SINGLEPLAYER)) ||
 				(deathmatch && (modes & DEATHMATCH)) ||
-				(multiplayer && !deathmatch && (modes & COOPERATIVE)) ||
-				(teamplay && (modes & TEAMGAME)), block, statusBar);
+				// [BB] Skulltag needs to check for more than just !deathmatch.
+				((NETWORK_GetState( ) != NETSTATE_SINGLE) && ( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode( )) & GMF_COOPERATIVE ) && (modes & COOPERATIVE)) ||
+				(teamplay && (modes & TEAMGAME)) ||
+				((modes & CTF) && ctf) ||
+				((modes & ONEFLAGCTF) && oneflagctf) ||
+				((modes & SKULLTAG) && skulltag) ||
+				((modes & INVASION) && invasion) ||
+				((modes & POSSESSION) && possession) ||
+				((modes & TEAMPOSSESSION) && teampossession) ||
+				((modes & LASTMANSTANDING) && lastmanstanding) ||
+				((modes & TEAMLMS) && teamlms) ||
+				((modes & SURVIVAL) && survival) ||
+				((modes & INSTAGIB) && instagib) ||
+				((modes & BUCKSHOT) && buckshot) ||
+				((modes & DOMINATION) && domination) ||
+				((modes & CUSTOMTEAMGAME) && teamgame && !(oneflagctf || ctf || skulltag || domination)), block, statusBar);
 		}
 	protected:
 		static const char* const	modeNames[];
@@ -1766,7 +1833,21 @@ class CommandGameMode : public SBarInfoCommandFlowControl
 			SINGLEPLAYER	= 0x1,
 			COOPERATIVE		= 0x2,
 			DEATHMATCH		= 0x4,
-			TEAMGAME		= 0x8
+			TEAMGAME		= 0x8,
+			// [BB] Added Zandronum stuff
+			CTF = 0x10,
+			ONEFLAGCTF = 0x20,
+			SKULLTAG = 0x40,
+			INVASION = 0x80,
+			POSSESSION = 0x100,
+			TEAMPOSSESSION = 0x200,
+			LASTMANSTANDING = 0x400,
+			TEAMLMS = 0x800,
+			SURVIVAL = 0x1000,
+			INSTAGIB = 0x2000,
+			BUCKSHOT = 0x4000,
+			DOMINATION = 0x8000,
+			CUSTOMTEAMGAME = 0x10000
 		};
 
 		unsigned int	modes;
@@ -1778,6 +1859,21 @@ const char* const CommandGameMode::modeNames[] =
 	"cooperative",
 	"deathmatch",
 	"teamgame",
+	// [BB] Added Zandronum stuff
+	"ctf",
+	"oneflagctf",
+	"skulltag",
+	"invasion",
+	"possession",
+	"teampossession",
+	"lastmanstanding",
+	"teamlms",
+	"survival",
+	"instagib",
+	"buckshot",
+	"domination",
+	"customteamgame",
+
 	NULL
 };
 
@@ -2550,6 +2646,24 @@ class CommandDrawBar : public SBarInfoCommand
 
 				if(parenthesized) sc.MustGetToken(')');
 			}
+			// [BB]
+			else if(sc.Compare("teamscore")) //Takes in a number for team
+			{
+				type = TEAMSCORE;
+				sc.MustGetToken(TK_StringConst);
+				int t = -1;
+				for(unsigned int i = 0;i < teams.Size();i++)
+				{
+					if(teams[i].Name.CompareNoCase(sc.String) == 0)
+					{
+						t = (int) i;
+						break;
+					}
+				}
+				if(t == -1)
+					sc.ScriptError("'%s' is not a valid team.", sc.String);
+				typeArgument = t;
+			}
 			else
 			{
 				type = INVENTORY;
@@ -2691,6 +2805,11 @@ class CommandDrawBar : public SBarInfoCommand
 					value = level.found_secrets;
 					max = level.total_secrets;
 					break;
+				// [BB]
+				case TEAMSCORE:
+					value = TEAM_GetScore(typeArgument);
+					max = pointlimit;
+					break;
 				case INVENTORY:
 				{
 					AInventory *item = statusBar->CPlayer->mo->FindInventory(data.inventoryItem);
@@ -2807,7 +2926,9 @@ class CommandDrawBar : public SBarInfoCommand
 			ARMORCLASS,
 			POWERUPTIME,
 			AIRTIME,
-			SAVEPERCENT
+			SAVEPERCENT,
+			// [BB]
+			TEAMSCORE
 		};
 
 		struct AdditionalData
@@ -2832,6 +2953,7 @@ class CommandDrawBar : public SBarInfoCommand
 		int					foreground;
 		int					background;
 		ValueType			type;
+		int					typeArgument; // [BB]
 		AdditionalData		data;
 		SBarInfoCoordinate	x;
 		SBarInfoCoordinate	y;

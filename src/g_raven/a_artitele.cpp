@@ -8,6 +8,16 @@
 #include "m_random.h"
 #include "doomstat.h"
 #include "g_game.h"
+// [BB] New #includes.
+#include "cl_demo.h"
+#include "deathmatch.h"
+#include "network.h"
+#include "sv_commands.h"
+#include "teaminfo.h"
+#include "gamemode.h"
+#include "team.h"
+#include "g_game.h"
+#include "i_system.h"
 
 static FRandom pr_tele ("TeleportSelf");
 
@@ -28,7 +38,26 @@ bool AArtiTeleport::Use (bool pickup)
 	fixed_t destY;
 	angle_t destAngle;
 
-	if (deathmatch)
+	// [BC] Let the server decide where we go.
+	if ( NETWORK_InClientMode() )
+	{
+		return ( true );
+	}
+
+	// [BB] If this is a team game and there are valid team starts for the team
+	// the owner is on, teleport to one of the team starts.
+	const ULONG ownerTeam = Owner->player ? Owner->player->ulTeam : teams.Size( );
+	if ( ( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode( )) & GMF_PLAYERSONTEAMS )
+	     && TEAM_CheckIfValid ( ownerTeam )
+	     && ( teams[ownerTeam].TeamStarts.Size( ) > 0 ) )
+	{
+		unsigned int selections = teams[ownerTeam].TeamStarts.Size ();
+		unsigned int i = pr_tele() % selections;
+		destX = teams[ownerTeam].TeamStarts[i].x;
+		destY = teams[ownerTeam].TeamStarts[i].y;
+		destAngle = ANG45 * (teams[ownerTeam].TeamStarts[i].angle/45);
+	}
+	else if (deathmatch)
 	{
 		unsigned int selections = deathmatchstarts.Size ();
 		unsigned int i = pr_tele() % selections;
@@ -38,10 +67,22 @@ bool AArtiTeleport::Use (bool pickup)
 	}
 	else
 	{
-		FPlayerStart *start = G_PickPlayerStart(int(Owner->player - players));
-		destX = start->x;
-		destY = start->y;
-		destAngle = ANG45 * (start->angle/45);
+		FPlayerStart *pSpot = NULL;
+		// [BB] If there is a designated start for this player use it.
+		if ( playerstarts[Owner->player - players].type != 0 )
+			pSpot = &playerstarts[Owner->player - players];
+		// [BB] Otherwise we just have to select a start at random from all available player starts.
+		else
+			pSpot = SelectRandomCooperativeSpot( Owner->player - players );
+
+		if ( pSpot != NULL )
+		{
+			destX = pSpot->x;
+			destY = pSpot->y;
+			destAngle = ANG45 * (pSpot->angle/45);
+		}
+		else
+			I_Error( "ArtiTeleport: No player start found!" );
 	}
 	P_Teleport (Owner, destX, destY, ONFLOORZ, destAngle, true, true, false);
 	bool canlaugh = true;
@@ -56,6 +97,10 @@ bool AArtiTeleport::Use (bool pickup)
 	if (canlaugh)
  	{ // Full volume laugh
  		S_Sound (Owner, CHAN_VOICE, "*evillaugh", 1, ATTN_NONE);
+
+		// [BC] Play the laugh for clients.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SoundActor( Owner, CHAN_VOICE, "*evillaugh", 1, ATTN_NONE );
  	}
 	return true;
 }

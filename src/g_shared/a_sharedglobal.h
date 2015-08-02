@@ -3,6 +3,7 @@
 
 #include "info.h"
 #include "actor.h"
+#include "a_pickups.h"
 
 class FDecalTemplate;
 struct vertex_t;
@@ -93,7 +94,7 @@ class ASkyViewpoint : public AActor
 	HAS_OBJECT_POINTERS
 public:
 	void Serialize (FArchive &arc);
-	void BeginPlay ();
+	void PostBeginPlay ();
 	void Destroy ();
 	bool bInSkybox;
 	bool bAlways;
@@ -129,6 +130,70 @@ protected:
 
 	void SetBlend (float time);
 	DFlashFader ();
+};
+
+// [BC]
+class ATeamItem : public AInventory
+{
+	DECLARE_CLASS( ATeamItem, AInventory )
+public:
+	virtual bool ShouldRespawn( );
+	virtual bool TryPickup( AActor *&pToucher );
+	virtual bool HandlePickup( AInventory *pItem );
+	virtual LONG AllowFlagPickup( AActor *pToucher );
+	virtual void AnnounceFlagPickup( AActor *pToucher );
+	virtual void DisplayFlagTaken( AActor *pToucher );
+	virtual void MarkFlagTaken( bool bTaken );
+	virtual void ResetReturnTicks( void );
+	virtual void ReturnFlag( AActor *pReturner );
+	virtual void AnnounceFlagReturn( void );
+	virtual void DisplayFlagReturn( void );
+
+	LONG lTick;
+};
+
+class AFlag : public ATeamItem
+{
+	DECLARE_CLASS( AFlag, ATeamItem )
+public:
+	virtual bool HandlePickup( AInventory *pItem );
+	virtual LONG AllowFlagPickup( AActor *pToucher );
+	virtual void AnnounceFlagPickup( AActor *pToucher );
+	virtual void DisplayFlagTaken( AActor *pToucher );
+	virtual void MarkFlagTaken( bool bTaken );
+	virtual void ResetReturnTicks( void );
+	virtual void ReturnFlag( AActor *pReturner );
+	virtual void AnnounceFlagReturn( void );
+	virtual void DisplayFlagReturn( void );
+};
+
+class ASkull : public ATeamItem
+{
+	DECLARE_CLASS( ASkull, ATeamItem )
+protected:
+
+	virtual LONG AllowFlagPickup( AActor *pToucher );
+	virtual void AnnounceFlagPickup( AActor *pToucher );
+	virtual void DisplayFlagTaken( AActor *pToucher );
+	virtual void MarkFlagTaken( bool bTaken );
+	virtual void ResetReturnTicks( void );
+	virtual void ReturnFlag( AActor *pReturner );
+	virtual void AnnounceFlagReturn( void );
+	virtual void DisplayFlagReturn( void );
+};
+
+class AFloatyIcon : public AActor
+{
+	DECLARE_CLASS( AFloatyIcon, AActor )
+public:
+	void		Serialize( FArchive &arc );
+	void		BeginPlay( );
+	void		Tick( );
+
+	void		SetTracer( AActor *pTracer );
+
+	LONG		lTick;
+	bool		bTeamItemFloatyIcon;
 };
 
 class DEarthquake : public DThinker

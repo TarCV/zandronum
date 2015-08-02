@@ -57,6 +57,16 @@
 #include "d_net.h"
 #include "d_event.h"
 #include "r_data/colormaps.h"
+// [BC] New #includes.
+#include "cooperative.h"
+#include "deathmatch.h"
+#include "team.h"
+#include "announcer.h"
+#include "sv_commands.h"
+#include "network.h"
+#include "invasion.h"
+#include "cl_demo.h"
+#include "p_acs.h"
 
 #define FUNC(a) static int a (line_t *ln, AActor *it, bool backSide, \
 	int arg0, int arg1, int arg2, int arg3, int arg4)
@@ -895,6 +905,11 @@ FUNC(LS_Teleport_ZombieChanger)
 	if (it != NULL)
 	{
 		EV_Teleport (arg0, arg1, ln, backSide, it, false, false, false);
+
+		// [BC] If we're the server, tell clients to put this thing in its pain state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingState( it, STATE_PAIN );
+
 		if (it->health >= 0) it->SetState (it->FindState(NAME_Pain));
 		return true;
 	}
@@ -959,6 +974,10 @@ FUNC(LS_ThrustThing)
 
 static void ThrustThingHelper (AActor *it, angle_t angle, int force, INTBOOL nolimit)
 {
+	// [BB] This is server side.
+	if ( ( NETWORK_IsConsolePlayerOrNotInClientMode ( it->player ) == false ) && !( it->ulNetworkFlags & NETFL_CLIENTSIDEONLY ) )
+		return;
+
 	angle >>= ANGLETOFINESHIFT;
 	it->velx += force * finecosine[angle];
 	it->vely += force * finesine[angle];
@@ -967,6 +986,10 @@ static void ThrustThingHelper (AActor *it, angle_t angle, int force, INTBOOL nol
 		it->velx = clamp<fixed_t> (it->velx, -MAXMOVE, MAXMOVE);
 		it->vely = clamp<fixed_t> (it->vely, -MAXMOVE, MAXMOVE);
 	}
+
+	// [BC] If we're the server, update the thing's momentum.
+	// [Dusk] Use SERVER_UpdateThingMomentum
+	SERVER_UpdateThingMomentum( it, false );
 }
 
 FUNC(LS_ThrustThingZ)	// [BC]
@@ -985,19 +1008,38 @@ FUNC(LS_ThrustThingZ)	// [BC]
 
 		while ( (victim = iterator.Next ()) )
 		{
-			if (!arg3)
-				victim->velz = thrust;
-			else
-				victim->velz += thrust;
+			// [BB] This is server side.
+			if ( NETWORK_GetState( ) != NETSTATE_CLIENT )
+			{
+				if (!arg3)
+					victim->velz = thrust;
+				else
+					victim->velz += thrust;
+			}
+
+			// [BC] If we're the server, update the thing's momentum.
+			// [BB] Unfortunately there are sync issues, if we don't also update the actual position.
+			// Is there a way to fix this without sending the position?
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_MoveThingExact( victim, CM_Z|CM_MOMZ );
 		}
 		return true;
 	}
 	else if (it)
 	{
-		if (!arg3)
-			it->velz = thrust;
-		else
-			it->velz += thrust;
+		// [BB] This is server side.
+		if ( ( NETWORK_IsConsolePlayerOrNotInClientMode ( it->player ) ) || ( it->ulNetworkFlags & NETFL_CLIENTSIDEONLY ) )
+		{
+			if (!arg3)
+				it->velz = thrust;
+			else
+				it->velz += thrust;
+		}
+
+		// [BC] If we're the server, update the thing's momentum.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVER_UpdateThingMomentum ( it, true, false );
+
 		return true;
 	}
 	return false;
@@ -1044,6 +1086,10 @@ FUNC(LS_Thing_ChangeTID)
 			it->RemoveFromHash ();
 			it->tid = arg1;
 			it->AddToHash ();
+
+			// [BB] Notify the clients about the TID change.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetThingTID( it );
 		}
 	}
 	else
@@ -1062,6 +1108,10 @@ FUNC(LS_Thing_ChangeTID)
 				actor->RemoveFromHash ();
 				actor->tid = arg1;
 				actor->AddToHash ();
+
+				// [BB] Notify the clients about the TID change.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_SetThingTID( actor );
 			}
 		}
 	}
@@ -1108,12 +1158,27 @@ FUNC(LS_HealThing)
 
 		if (max == 0 || it->player == NULL)
 		{
-			P_GiveBody(it, arg0);
-			return true;
+			// [BC] If it's a regular player, we can still apply the player's max. health
+			// bonus to his maximum allowed health.
+			if ( it->player )
+			{
+				// [BC] Apply the prosperity power.
+				if ( it->player->cheats & CF_PROSPERITY )
+					max = deh.MaxSoulsphere + 50;
+				else
+					max = it->GetDefault()->health + it->player->lMaxHealthBonus;
+			}
+			else
+			{
+				// [BB] Check if P_GiveBody is correct here (ported from ZDoom).
+				P_GiveBody(it, arg0);
+				return true;
+			}
 		}
 		else if (max == 1)
 		{
-			max = deh.MaxSoulsphere;
+			// [BC] Include the player's max. health bonus in the max. allowed health.
+			max = deh.MaxSoulsphere + it->player->lMaxHealthBonus;
 		}
 
 		// If health is already above max, do nothing
@@ -1127,6 +1192,10 @@ FUNC(LS_HealThing)
 			if (it->player)
 			{
 				it->player->health = it->health;
+
+				// [BC] If we're the server, send out the health change.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_SetPlayerHealth( ULONG( it->player - players ));
 			}
 		}
 	}
@@ -1173,6 +1242,11 @@ FUNC(LS_Thing_Activate)
 			// Actor might remove itself as part of activation, so get next
 			// one before activating it.
 			AActor *temp = iterator.Next ();
+
+			// [BC] Tell clients to activate the thing.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_ThingActivate( actor, it );
+
 			DoActivateThing(actor, it);
 			actor = temp;
 			count++;
@@ -1182,6 +1256,10 @@ FUNC(LS_Thing_Activate)
 	}
 	else if (it != NULL)
 	{
+		// [BC] Tell clients to activate the thing.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_ThingActivate( it, it );
+
 		DoActivateThing(it, it);
 		return true;
 	}
@@ -1203,6 +1281,11 @@ FUNC(LS_Thing_Deactivate)
 			// Actor might removes itself as part of deactivation, so get next
 			// one before we activate it.
 			AActor *temp = iterator.Next ();
+
+			// [BC] Tell clients to deactivate the thing.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_ThingDeactivate( actor, it );
+
 			DoDeactivateThing(actor, it);
 			actor = temp;
 			count++;
@@ -1212,6 +1295,10 @@ FUNC(LS_Thing_Deactivate)
 	}
 	else if (it != NULL)
 	{
+		// [BC] Tell clients to deactivate the thing.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_ThingDeactivate( it, it );
+
 		DoDeactivateThing(it, it);
 		return true;
 	}
@@ -1443,7 +1530,14 @@ FUNC(LS_Thing_Hate)
 				hater->target = hatee;
 				if (!(hater->flags2 & MF2_DORMANT))
 				{
-					if (hater->health > 0) hater->SetState (hater->SeeState);
+					if (hater->health > 0)
+					{
+						// [BB] If we're the server, tell clients to put the thing into its see state.
+						if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+							SERVERCOMMANDS_SetThingState( hater, STATE_SEE );
+
+						hater->SetState (hater->SeeState);
+					}
 				}
 			}
 		}
@@ -1530,6 +1624,11 @@ FUNC(LS_Thing_Stop)
 		{
 			it->velx = it->vely = it->velz = 0;
 			if (it->player != NULL) it->player->velx = it->player->vely = 0;
+
+			// [Dusk] tell the clients about this
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_MoveThingExact( it, ( ( it->player == NULL ) ? (CM_X|CM_Y|CM_Z) : 0 )|CM_MOMX|CM_MOMY|CM_MOMZ );
+
 			ok = true;
 		}
 	}
@@ -1541,6 +1640,11 @@ FUNC(LS_Thing_Stop)
 		{
 			target->velx = target->vely = target->velz = 0;
 			if (target->player != NULL) target->player->velx = target->player->vely = 0;
+
+			// [Dusk] tell the clients about this
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_MoveThingExact( target, ( ( target->player == NULL ) ? (CM_X|CM_Y|CM_Z) : 0 )|CM_MOMX|CM_MOMY|CM_MOMZ );
+
 			ok = true;
 		}
 	}
@@ -1620,7 +1724,12 @@ FUNC(LS_Thing_SetTranslation)
 		{
 			ok = true;
 			it->Translation = range==0? it->GetDefault()->Translation : range;
-		}
+
+			// [BC] If we're the server, tell clients to set this thing's translation.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetThingTranslation( it );
+
+			}
 	}
 	else
 	{
@@ -1628,7 +1737,12 @@ FUNC(LS_Thing_SetTranslation)
 		{
 			ok = true;
 			target->Translation = range==0? target->GetDefault()->Translation : range;
-		}
+
+			// [BC] If we're the server, tell clients to set this thing's translation.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetThingTranslation( target );
+			}
+
 	}
 
 	return ok;
@@ -1641,6 +1755,14 @@ FUNC(LS_ACS_Execute)
 	const char *mapname = NULL;
 	int args[3] = { arg2, arg3, arg4 };
 	int flags = (backSide ? ACS_BACKSIDE : 0);
+
+	// [BC] If this script is client side, just let clients execute it themselves.
+	if (( NETWORK_GetState( ) == NETSTATE_SERVER ) &&
+		( ACS_IsScriptClientSide( arg0 )))
+	{
+		SERVERCOMMANDS_ACSScriptExecute( arg0, it, LONG( ln - lines ), arg1, backSide, arg2, arg3, arg4, false );
+		return ( true );
+	}
 
 	if (arg1 == 0)
 	{
@@ -1664,6 +1786,14 @@ FUNC(LS_ACS_ExecuteAlways)
 	const char *mapname = NULL;
 	int args[3] = { arg2, arg3, arg4 };
 	int flags = (backSide ? ACS_BACKSIDE : 0) | ACS_ALWAYS;
+
+	// [BC] If this script is client side, just let clients execute it themselves.
+	if (( NETWORK_GetState( ) == NETSTATE_SERVER ) &&
+		( ACS_IsScriptClientSide( arg0 )))
+	{
+		SERVERCOMMANDS_ACSScriptExecute( arg0, it, LONG( ln - lines ), arg1, backSide, arg2, arg3, arg4, true );
+		return ( true );
+	}
 
 	if (arg1 == 0)
 	{
@@ -1706,6 +1836,14 @@ FUNC(LS_ACS_ExecuteWithResult)
 	// with SetResultValue.
 	int args[4] = { arg1, arg2, arg3, arg4 };
 	int flags = (backSide ? ACS_BACKSIDE : 0) | ACS_ALWAYS | ACS_WANTRESULT;
+
+	// [BC] If this script is client side, just let clients execute it themselves.
+	if (( NETWORK_GetState( ) == NETSTATE_SERVER ) &&
+		( ACS_IsScriptClientSide( arg0 )))
+	{
+		SERVERCOMMANDS_ACSScriptExecute( arg0, it, LONG( ln - lines ), 0, backSide, arg2, arg3, arg4, true );
+		return ( false );
+	}
 
 	return P_StartScript (it, ln, arg0, level.mapname, args, 4, flags);
 }
@@ -1937,6 +2075,79 @@ FUNC(LS_Sector_ChangeFlags)
 	return rtn;
 }
 
+// [BC] Start of new Skulltag linespecials.
+
+FUNC( LS_Player_SetTeam )
+// Player_SetTeam( team id )
+{
+	// Don't set teams on the client end.
+	if ( NETWORK_InClientMode() )
+		return ( false );
+
+	// Break if we don't have a player.
+	if ( !it || !it->player )
+		return ( false );
+
+	// Verify that we're setting a valid team.
+	if ( TEAM_CheckIfValid( arg0 ) == false )
+		I_Error( "Tried to set player to bad team, %d\n", arg0 );
+
+	// Set the player's team.
+	PLAYER_SetTeam( it->player, arg0, false );
+	return ( true );
+}
+
+void SERVERCONSOLE_UpdatePlayerInfo( LONG lPlayer, ULONG ulUpdateFlags );
+void SERVERCONSOLE_UpdateScoreboard( void );
+FUNC( LS_Team_Score )
+// Team_Score (int howmuch, bool nogrin)
+{
+	// Scoring is not client side.
+	if ( NETWORK_InClientMode() )
+		return ( false );
+
+	// Nothing to do if we're not in teamgame mode.
+	if ( teamgame == false )
+		return ( false );
+
+	// Make sure a valid player is doing the scoring.
+	if ( !it || !it->player || it->player->bOnTeam == false )
+		return ( false );
+
+	TEAM_SetScore( it->player->ulTeam, TEAM_GetScore( it->player->ulTeam ) + arg0, true );
+	PLAYER_SetPoints ( it->player, it->player->lPointCount + arg0 );
+
+	return ( false );
+}
+
+FUNC( LS_Team_GivePoints )
+// Team_GivePoints( int iTeam, int iHowMuch, bool bAnnounce )
+{
+	// Scoring is not client side.
+	if ( NETWORK_InClientMode() )
+		return ( false );
+
+	// Nothing to do if we're not in teamgame mode.
+	if ( teamgame == false )
+		return ( false );
+
+	// Make sure this is a valid team.
+	if ( TEAM_CheckIfValid( arg0 ) == false )
+		return ( false );
+
+	// Give the point(s) to the team.
+	TEAM_SetScore( arg0, TEAM_GetScore( arg0 ) + arg1, !!arg2 );
+
+	if ( it && it->player && it->player->bOnTeam )
+	{
+		PLAYER_SetPoints ( it->player, it->player->lPointCount + arg1 );
+	}
+
+	return ( false );
+}
+
+// [BC] End of new Skulltag linespecials.
+
 struct FThinkerCollection
 {
 	int RefNum;
@@ -1980,6 +2191,10 @@ void AdjustPusher (int tag, int magnitude, int angle, DPusher::EPusher type)
 		}
 	}
 	Collection.Clear ();
+
+	// [BB] The server needs to tell the clients to do the same.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_AdjustPusher( tag, magnitude, angle, type );
 }
 
 FUNC(LS_Sector_SetWind)
@@ -2034,6 +2249,13 @@ FUNC(LS_Sector_SetLink)
 		int control = P_FindSectorFromTag(arg0, -1);
 		if (control >= 0)
 		{
+			// [BB] Inform the clients and remember the link to inform future clients.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			{
+				SERVER_AddSectorLink( control, arg1, arg2, arg3 );
+				SERVERCOMMANDS_SetSectorLink( control, arg1, arg2, arg3 );
+			}
+
 			return P_AddSectorLinks(&sectors[control], arg1, arg2, arg3);
 		}
 	}
@@ -2041,8 +2263,12 @@ FUNC(LS_Sector_SetLink)
 }
 
 
-static void SetWallScroller (int id, int sidechoice, fixed_t dx, fixed_t dy, int Where)
+/*static*/ void SetWallScroller (int id, int sidechoice, fixed_t dx, fixed_t dy, int Where)
 {
+	// [BB] The server has to tell the clients to call SetWallScroller.
+	if( NETWORK_GetState() == NETSTATE_SERVER )
+		SERVERCOMMANDS_SetWallScroller( id, sidechoice, dx, dy, Where );
+
 	Where &=7;
 	if (Where == 0) return;
 
@@ -2145,8 +2371,12 @@ FUNC(LS_Scroll_Wall)
 	return true;
 }
 
-static void SetScroller (int tag, DScroller::EScrollType type, fixed_t dx, fixed_t dy)
+/*static*/ void SetScroller (int tag, DScroller::EScrollType type, fixed_t dx, fixed_t dy)
 {
+	// [BB] The server has to tell the clients to call SetScroller.
+	if( NETWORK_GetState() == NETSTATE_SERVER )
+		SERVERCOMMANDS_SetScroller(type, dx, dy, tag);
+
 	TThinkerIterator<DScroller> iterator (STAT_SCROLLER);
 	DScroller *scroller;
 	int i;
@@ -2253,7 +2483,13 @@ FUNC(LS_Sector_SetGravity)
 	gravity = (float)arg1 + (float)arg2 * 0.01f;
 
 	while ((secnum = P_FindSectorFromTag (arg0, secnum)) >= 0)
+	{
 		sectors[secnum].gravity = gravity;
+
+		// [BC] If we're the server, tell clients that this sector's gravity is being altered.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetSectorGravity( secnum );
+	}
 
 	return true;
 }
@@ -2265,8 +2501,12 @@ FUNC(LS_Sector_SetColor)
 	
 	while ((secnum = P_FindSectorFromTag (arg0, secnum)) >= 0)
 	{
-		sectors[secnum].SetColor(arg1, arg2, arg3, arg4);
+		// [BB] Don't update the clients for each sector separately.
+		sectors[secnum].SetColor(arg1, arg2, arg3, arg4, false);
 	}
+	// [BB] Tell clients to set the color for all sectors with tag arg0.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SetSectorColorByTag( arg0, arg1, arg2, arg3, arg4 );
 
 	return true;
 }
@@ -2278,8 +2518,13 @@ FUNC(LS_Sector_SetFade)
 
 	while ((secnum = P_FindSectorFromTag (arg0, secnum)) >= 0)
 	{
-		sectors[secnum].SetFade(arg1, arg2, arg3);
+		// [BB] Don't update the clients for each sector separately.
+		sectors[secnum].SetFade(arg1, arg2, arg3, false);
 	}
+	// [BB] Tell clients to set the fade for all sectors with tag arg0.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SetSectorFadeByTag( arg0, arg1, arg2, arg3 );
+
 	return true;
 }
 
@@ -2294,6 +2539,10 @@ FUNC(LS_Sector_SetCeilingPanning)
 	{
 		sectors[secnum].SetXOffset(sector_t::ceiling, xofs);
 		sectors[secnum].SetYOffset(sector_t::ceiling, yofs);
+
+		// Tell clients about the floor panning update.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetSectorPanning( secnum );
 	}
 	return true;
 }
@@ -2309,6 +2558,10 @@ FUNC(LS_Sector_SetFloorPanning)
 	{
 		sectors[secnum].SetXOffset(sector_t::floor, xofs);
 		sectors[secnum].SetYOffset(sector_t::floor, yofs);
+
+		// Tell clients about the floor panning update.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetSectorPanning( secnum );
 	}
 	return true;
 }
@@ -2331,6 +2584,10 @@ FUNC(LS_Sector_SetFloorScale)
 			sectors[secnum].SetXScale(sector_t::floor, xscale);
 		if (yscale)
 			sectors[secnum].SetYScale(sector_t::floor, yscale);
+
+		// [BC] Tell clients about the scale update.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetSectorScale( secnum );
 	}
 	return true;
 }
@@ -2353,6 +2610,10 @@ FUNC(LS_Sector_SetCeilingScale)
 			sectors[secnum].SetXScale(sector_t::ceiling, xscale);
 		if (yscale)
 			sectors[secnum].SetYScale(sector_t::ceiling, yscale);
+
+		// [BC] Tell clients about the scale update.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetSectorScale( secnum );
 	}
 	return true;
 }
@@ -2373,6 +2634,10 @@ FUNC(LS_Sector_SetFloorScale2)
 			sectors[secnum].SetXScale(sector_t::floor, arg1);
 		if (arg2)
 			sectors[secnum].SetYScale(sector_t::floor, arg2);
+
+		// [BC] Tell clients about the scale update.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetSectorScale( secnum );
 	}
 	return true;
 }
@@ -2393,6 +2658,10 @@ FUNC(LS_Sector_SetCeilingScale2)
 			sectors[secnum].SetXScale(sector_t::ceiling, arg1);
 		if (arg2)
 			sectors[secnum].SetYScale(sector_t::ceiling, arg2);
+
+		// [BC] Tell clients about the scale update.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetSectorScale( secnum );
 	}
 	return true;
 }
@@ -2409,6 +2678,11 @@ FUNC(LS_Sector_SetRotation)
 		sectors[secnum].SetAngle(sector_t::floor, floor);
 		sectors[secnum].SetAngle(sector_t::ceiling, ceiling);
 	}
+
+	// [BB] Tell clients to set the the rotation for all sectors with tag arg0.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SetSectorRotationByTag( arg0, arg1, arg2 );
+
 	return true;
 }
 
@@ -2575,6 +2849,10 @@ FUNC(LS_Line_SetBlocking)
 	for(int line = -1; (line = P_FindLineFromID (arg0, line)) >= 0; )
 	{
 		lines[line].flags = (lines[line].flags & ~clearflags) | setflags;
+
+		// [Dusk] Update clients on the line flags
+		if ( NETWORK_GetState() == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetSomeLineFlags( line );
 	}
 	return true;
 }
@@ -2610,11 +2888,19 @@ FUNC(LS_ChangeCamera)
 				players[i].camera = camera;
 				if (arg2)
 					players[i].cheats |= CF_REVERTPLEASE;
+
+				// [BC] If we're the server, tell this player to change his camera.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_SetPlayerCamera( i, camera->lNetID, ( arg2 ) ? true : false );
 			}
 			else
 			{
 				players[i].camera = players[i].mo;
 				players[i].cheats &= ~CF_REVERTPLEASE;
+
+				// [BC] If we're the server, tell this player to change his camera.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_SetPlayerCamera( i, players[i].mo->lNetID, false );
 			}
 			if (oldcamera != players[i].camera)
 			{
@@ -2630,11 +2916,19 @@ FUNC(LS_ChangeCamera)
 			it->player->camera = camera;
 			if (arg2)
 				it->player->cheats |= CF_REVERTPLEASE;
+
+			// [BC] If we're the server, tell this player to change his camera.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetPlayerCamera( ULONG( it->player - players ), camera->lNetID, ( arg2 ) ? true : false );
 		}
 		else
 		{
 			it->player->camera = it;
 			it->player->cheats &= ~CF_REVERTPLEASE;
+
+			// [BC] If we're the server, tell this player to change his camera.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetPlayerCamera( ULONG( it->player - players ), it->lNetID, false );
 		}
 		if (oldcamera != it->player->camera)
 		{
@@ -2703,6 +2997,12 @@ FUNC(LS_SetPlayerProperty)
 
 		if (arg0 == 0)
 		{
+			// [WS] If the player is spectating, do nothing. The reason this check is put here and
+			// not at the beginning is because we may want the spectator to be able to puke a command
+			// that gets activated on all players that are currently spawned/(not spectating).
+			if ( it->player && it->player->bSpectating )
+				return false;
+
 			if (arg1)
 			{ // Give power to activator
 				if (power != 4)
@@ -2711,6 +3011,15 @@ FUNC(LS_SetPlayerProperty)
 					if (item != NULL && power == 0 && arg1 == 1) 
 					{
 						item->BlendColor = MakeSpecialColormap(INVERSECOLORMAP);
+					}
+
+					// [WS] Inform clients of the powerup and blend color.
+					if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					{
+						SERVERCOMMANDS_GivePowerup( ULONG( it->player - players ), item );
+						// [WS] If it is an invulnerability powerup, we need to inform the clients of the blend color.
+						if ( power == 0 )
+							SERVERCOMMANDS_SetPowerupBlendColor( ULONG( it->player - players ), item );
 					}
 				}
 				else if (it->player - players == consoleplayer)
@@ -2725,6 +3034,10 @@ FUNC(LS_SetPlayerProperty)
 					AInventory *item = it->FindInventory (powers[power], true);
 					if (item != NULL)
 					{
+						// [WS] Destroy the powerup.
+						if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+							SERVERCOMMANDS_TakeInventory( ULONG( it->player - players ), item->GetClass( )->TypeName.GetChars( ), 0 );
+
 						item->Destroy ();
 					}
 				}
@@ -2740,7 +3053,8 @@ FUNC(LS_SetPlayerProperty)
 
 			for (i = 0; i < MAXPLAYERS; i++)
 			{
-				if (!playeringame[i] || players[i].mo == NULL)
+				// [WS] Do not do this for spectators.
+				if (!playeringame[i] || players[i].mo == NULL || players[i].bSpectating)
 					continue;
 
 				if (arg1)
@@ -2752,6 +3066,10 @@ FUNC(LS_SetPlayerProperty)
 						{
 							item->BlendColor = MakeSpecialColormap(INVERSECOLORMAP);
 						}
+
+						// [WS] Inform clients of powerup.
+						if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+							SERVERCOMMANDS_GivePowerup( i, static_cast<APowerup *>( item ) );
 					}
 					else if (i == consoleplayer)
 					{
@@ -2765,6 +3083,10 @@ FUNC(LS_SetPlayerProperty)
 						AInventory *item = players[i].mo->FindInventory (powers[power]);
 						if (item != NULL)
 						{
+							// [WS] Destroy the powerup.
+							if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+								SERVERCOMMANDS_TakeInventory( i, item->GetClass( )->TypeName.GetChars( ), 0 );
+
 							item->Destroy ();
 						}
 					}
@@ -2803,6 +3125,8 @@ FUNC(LS_SetPlayerProperty)
 
 	if (arg0 == 0)
 	{
+		int oldCheats = it->player->cheats;
+
 		if (arg1)
 		{
 			it->player->cheats |= mask;
@@ -2821,6 +3145,14 @@ FUNC(LS_SetPlayerProperty)
 				it->flags &= ~MF_NOGRAVITY;
 			}
 		}
+
+		// [BB] Tell the client that his cheats have changed.
+		if ( NETWORK_GetState() == NETSTATE_SERVER && oldCheats != it->player->cheats )
+		{
+			SERVERCOMMANDS_SetPlayerCheats( ULONG( it->player - players ), ULONG( it->player - players ), SVCF_ONLYTHISCLIENT );
+			SERVERCOMMANDS_SetThingFlags( it, FLAGSET_FLAGS );
+			SERVERCOMMANDS_SetThingFlags( it, FLAGSET_FLAGS2 );
+		}
 	}
 	else
 	{
@@ -2835,6 +3167,8 @@ FUNC(LS_SetPlayerProperty)
 		{
 			if (!playeringame[i])
 				continue;
+
+			int oldCheats = players[i].cheats;
 
 			if (arg1)
 			{
@@ -2854,6 +3188,14 @@ FUNC(LS_SetPlayerProperty)
 					players[i].mo->flags &= ~MF_NOGRAVITY;
 				}
 			}
+
+			// [BB] Tell the client that his cheats have changed.
+			if ( NETWORK_GetState() == NETSTATE_SERVER && oldCheats != players[i].cheats )
+			{
+				SERVERCOMMANDS_SetPlayerCheats( i, i, SVCF_ONLYTHISCLIENT );
+				SERVERCOMMANDS_SetThingFlags( players[i].mo, FLAGSET_FLAGS );
+				SERVERCOMMANDS_SetThingFlags( players[i].mo, FLAGSET_FLAGS2 );
+			}
 		}
 	}
 
@@ -2867,6 +3209,11 @@ FUNC(LS_TranslucentLine)
 	while ((linenum = P_FindLineFromID (arg0, linenum)) >= 0)
 	{
 		lines[linenum].Alpha = Scale(clamp(arg1, 0, 255), FRACUNIT, 255);
+
+		// [BC] If we're the server, tell clients to adjust this line's alpha.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetLineAlpha( linenum );
+
 		if (arg2 == 0)
 		{
 			lines[linenum].flags &= ~ML_ADDTRANS;
@@ -2879,6 +3226,10 @@ FUNC(LS_TranslucentLine)
 		{
 			Printf ("Unknown translucency type used with TranslucentLine\n");
 		}
+
+		// [BB] If we're the server, tell clients the new ML_ADDTRANS setting.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetSomeLineFlags( linenum );
 	}
 
 	return true;
@@ -2955,19 +3306,37 @@ FUNC(LS_SendToCommunicator)
 		if (!arg3)
 		{
 			it->player->SetLogNumber (arg0);
+
+			// [BB] Set the log number on the clients.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetPlayerLogNumber ( static_cast<ULONG> ( it->player - players ), arg0 );
 		}
 
 		if (it->CheckLocalView (consoleplayer))
 		{
 			S_StopSound (CHAN_VOICE);
 			S_Sound (CHAN_VOICE, name, 1, ATTN_NORM);
+
+			// [BB] Play the sound on the client.
+			const ULONG ulPlayer = static_cast<ULONG> ( it->player - players );
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_Sound( CHAN_VOICE, name, 1, ATTN_NORM, ulPlayer, SVCF_ONLYTHISCLIENT );
+
 			if (arg2 == 0)
 			{
 				Printf (PRINT_CHAT, "Incoming Message\n");
+
+				// [BB] Print the message on the client.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVER_PrintfPlayer( PRINT_CHAT, ulPlayer, "Incoming Message\n" );
 			}
 			else if (arg2 == 1)
 			{
 				Printf (PRINT_CHAT, "Incoming Message from BlackBird\n");
+
+				// [BB] Print the message on the client.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVER_PrintfPlayer( PRINT_CHAT, ulPlayer, "Incoming Message from BlackBird\n" );
 			}
 		}
 		return true;
@@ -3006,6 +3375,17 @@ FUNC(LS_ClearForceField)
 				line->special = 0;
 				line->sidedef[0]->SetTexture(side_t::mid, FNullTextureID());
 				line->sidedef[1]->SetTexture(side_t::mid, FNullTextureID());
+
+				// [BC] Mark this line's texture change flags.
+				line->ulTexChangeFlags |= TEXCHANGE_FRONTMEDIUM|TEXCHANGE_BACKMEDIUM;
+
+				// [BC] If we're the server, tell clients that this line's textures and
+				// blocking status have been altered.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				{
+					SERVERCOMMANDS_SetLineTexture( ULONG( line - lines ));
+					SERVERCOMMANDS_SetSomeLineFlags( ULONG( line - lines ));
+				}
 			}
 		}
 	}
@@ -3019,6 +3399,11 @@ FUNC(LS_GlassBreak)
 	bool quest1, quest2;
 
 	ln->flags &= ~(ML_BLOCKING|ML_BLOCKEVERYTHING);
+
+	// [BC] If we're the server, update this line's blocking.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SetSomeLineFlags( ULONG( ln - lines ));
+
 	switched = P_ChangeSwitchTexture (ln->sidedef[0], false, 0, &quest1);
 	ln->special = 0;
 	if (ln->sidedef[1] != NULL)
@@ -3151,6 +3536,29 @@ FUNC(LS_Thing_SetConversation)
 		it->ConversationRoot = dlg_index;
 		it->Conversation = node;
 	}
+	return true;
+}
+
+// [BC] From GZDoom. Now in p_lnspec.cpp where it belongs.
+// Normally this would be better placed in p_lnspec.cpp.
+// But I have accidentally overwritten that file several times
+// so I'd rather place it here.
+FUNC(LS_Sector_SetPlaneReflection)
+// Sector_SetPlaneReflection (tag, floor, ceiling)
+{
+	int secnum = -1;
+
+	while ((secnum = P_FindSectorFromTag (arg0, secnum)) >= 0)
+	{
+		sector_t * s = &sectors[secnum];
+		if (s->floorplane.a==0 && s->floorplane.b==0) s->reflect[sector_t::floor] = arg1/255.f;
+		if (s->ceilingplane.a==0 && s->ceilingplane.b==0) sectors[secnum].reflect[sector_t::ceiling] = arg2/255.f;
+
+		// [BC] If we're the server, tell clients that this sector's reflection is being altered.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetSectorReflection( secnum );
+	}
+
 	return true;
 }
 
@@ -3302,21 +3710,21 @@ lnSpecFunc LineSpecials[256] =
 	/* 142 */ LS_NOP,
 	/* 143 */ LS_NOP,
 	/* 144 */ LS_NOP,
-	/* 145 */ LS_NOP,		// 145 Player_SetTeam
+	/* 145 */ LS_Player_SetTeam,
 	/* 146 */ LS_NOP,
 	/* 147 */ LS_NOP,
 	/* 148 */ LS_NOP,
 	/* 149 */ LS_NOP,
 	/* 150 */ LS_NOP,
 	/* 151 */ LS_NOP,
-	/* 152 */ LS_NOP,		// 152 Team_Score
-	/* 153 */ LS_NOP,		// 153 Team_GivePoints
+	/* 152 */ LS_Team_Score,
+	/* 153 */ LS_Team_GivePoints,
 	/* 154 */ LS_Teleport_NoStop,
 	/* 155 */ LS_NOP,
 	/* 156 */ LS_NOP,
 	/* 157 */ LS_NOP,		// SetGlobalFogParameter // in GZDoom
 	/* 158 */ LS_NOP,		// FS_Execute
-	/* 159 */ LS_NOP,		// Sector_SetPlaneReflection in GZDoom
+	/* 159 */ LS_Sector_SetPlaneReflection,
 	/* 160 */ LS_NOP,		// Sector_Set3DFloor
 	/* 161 */ LS_NOP,		// Sector_SetContents
 	/* 162 */ LS_NOP,		// Reserved Doom64 branch
