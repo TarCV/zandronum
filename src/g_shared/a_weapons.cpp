@@ -18,6 +18,16 @@
 #include "g_level.h"
 #include "d_net.h"
 #include "farchive.h"
+// [BB] New #includes.
+#include "deathmatch.h"
+#include "team.h"
+#include "cl_commands.h"
+#include "cl_demo.h"
+#include "network.h"
+#include "sv_commands.h"
+
+// [ZZ] PWO header file
+#include "pwo.h"
 
 #define BONUSADD 6
 
@@ -153,6 +163,17 @@ bool AWeapon::Use (bool pickup)
 	if (Owner->player != NULL && Owner->player->ReadyWeapon != useweap)
 	{
 		Owner->player->PendingWeapon = useweap;
+
+		// [BC] If we're a client, tell the server we're switching weapons.
+		if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) && (( Owner->player - players ) == consoleplayer ))
+		{
+			CLIENTCOMMANDS_WeaponSelect( useweap->GetClass( ));
+
+			if ( CLIENTDEMO_IsRecording( ))
+				CLIENTDEMO_WriteLocalCommand( CLD_LCMD_INVUSE, useweap->GetClass( )->TypeName.GetChars( ) );
+		}
+		else if ( ( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( Owner->player->bIsBot == true ) )
+			SERVERCOMMANDS_SetPlayerPendingWeapon( static_cast<ULONG> ( Owner->player - players ) );
 	}
 	// Return false so that the weapon is not removed from the inventory.
 	return false;
@@ -215,6 +236,10 @@ bool AWeapon::HandlePickup (AInventory *item)
 
 bool AWeapon::PickupForAmmo (AWeapon *ownedWeapon)
 {
+	// [BB] The server tells the client how much ammo he gets from the weapon,
+	if ( NETWORK_InClientMode() )
+		return false;
+
 	bool gotstuff = false;
 
 	// Don't take ammo if the weapon sticks around.
@@ -225,8 +250,23 @@ bool AWeapon::PickupForAmmo (AWeapon *ownedWeapon)
 		if (ownedWeapon->Ammo1 != NULL) oldamount1 = ownedWeapon->Ammo1->Amount;
 		if (ownedWeapon->Ammo2 != NULL) oldamount2 = ownedWeapon->Ammo2->Amount;
 
-		if (AmmoGive1 > 0) gotstuff = AddExistingAmmo (ownedWeapon->Ammo1, AmmoGive1);
-		if (AmmoGive2 > 0) gotstuff |= AddExistingAmmo (ownedWeapon->Ammo2, AmmoGive2);
+		if (AmmoGive1 > 0)
+		{
+			gotstuff = AddExistingAmmo (ownedWeapon->Ammo1, AmmoGive1);
+
+			// [BC] If we're the server, tell clients that they just received ammo.
+			if (( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( ownedWeapon->Owner ) && ( ownedWeapon->Owner->player ) && ( ownedWeapon->Ammo1 ))
+				SERVERCOMMANDS_GiveInventory( ownedWeapon->Owner->player - players, static_cast<AInventory *>( ownedWeapon->Ammo1 ));
+		}
+
+		if (AmmoGive2 > 0)
+		{
+			gotstuff |= AddExistingAmmo (ownedWeapon->Ammo2, AmmoGive2);
+
+			// [BC] If we're the server, tell clients that they just received ammo.
+			if (( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( ownedWeapon->Owner ) && ( ownedWeapon->Owner->player ) && ( ownedWeapon->Ammo2 ))
+				SERVERCOMMANDS_GiveInventory( ownedWeapon->Owner->player - players, static_cast<AInventory *>( ownedWeapon->Ammo2 ));
+		}
 
 		AActor *Owner = ownedWeapon->Owner;
 		if (gotstuff && Owner != NULL && Owner->player != NULL)
@@ -307,20 +347,109 @@ AInventory *AWeapon::CreateTossable ()
 
 void AWeapon::AttachToOwner (AActor *other)
 {
+	// [BC]
+	AWeapon		*pCompareWeapon;
+
 	Super::AttachToOwner (other);
 
-	Ammo1 = AddAmmo (Owner, AmmoType1, AmmoGive1);
-	Ammo2 = AddAmmo (Owner, AmmoType2, AmmoGive2);
+	// [BB] The server tells the client how much ammo he gets from the weapon,
+	// the client just initializes Ammo1 and Ammo2.
+	if ( NETWORK_InClientMode() == false )
+	{
+		Ammo1 = AddAmmo (Owner, AmmoType1, AmmoGive1);
+		Ammo2 = AddAmmo (Owner, AmmoType2, AmmoGive2);
+
+		if (( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( Owner ) && ( Owner->player ))
+		{
+			// [BB] We only need to tell the clients the amount, if the weapon actually gives ammo.
+			if ( Ammo1 && ( AmmoGive1 > 0 ) )
+				SERVERCOMMANDS_GiveInventory( Owner->player - players, static_cast<AInventory *>( Ammo1 ));
+			if ( Ammo2 && ( AmmoGive2 > 0 ) )
+				SERVERCOMMANDS_GiveInventory( Owner->player - players, static_cast<AInventory *>( Ammo2 ));
+		}
+	}
+	else
+	{
+		Ammo1 = AddAmmo (Owner, AmmoType1, 0);
+		Ammo2 = AddAmmo (Owner, AmmoType2, 0);
+	}
 	SisterWeapon = AddWeapon (SisterWeaponType);
 	if (Owner->player != NULL)
 	{
-		if (!Owner->player->userinfo.GetNeverSwitch() && !(WeaponFlags & WIF_NO_AUTO_SWITCH))
+		// [BB] We may not do this when playing a demo, since we don't know the switchonpickup
+		// setting of the one who recorded the demo.
+		if ( !(WeaponFlags & WIF_NO_AUTO_SWITCH) && (CLIENTDEMO_IsPlaying( ) == false))
 		{
-			Owner->player->PendingWeapon = this;
+			// [ZZ] Check if PWO is active
+			//		Also check if current player is console player
+			//		to prevent this client from trying to predict other players' switching
+			//		(not sure how Zandronum behaves here in network game)
+			// Added code from Torr to fix NETSTATE_SINGLE_MULTIPLAYER
+			const bool dofpwo = (NETWORK_GetState() != NETSTATE_SERVER) &&
+				(Owner->player->userinfo.GetSwitchOnPickup() == 3) &&
+				(Owner->player == &players[consoleplayer]);
+
+			// [BC] Decide which weapon to compare selection orders against.
+			if ( Owner->player->PendingWeapon != WP_NOCHANGE )
+				pCompareWeapon = Owner->player->PendingWeapon;
+			else
+				pCompareWeapon = Owner->player->ReadyWeapon;
+
+			// [ZZ] Changed code so it only treats switchonpickup == 2 as "always switch"
+			// [BC] Handle the "switchonpickup" userinfo cvar. If it's == 2, then
+			// we always want to switch our weapon when we pickup a new one.
+			if ( (Owner->player->userinfo.GetSwitchOnPickup() == 2) || ( zacompatflags & ZACOMPATF_OLD_WEAPON_SWITCH ) )
+			{
+				// [Spleen] Weapon switching is done client-side unless it's a bot.
+				if ( ( NETWORK_GetState( ) != NETSTATE_SERVER ) || ( Owner->player->bIsBot ) )
+					Owner->player->PendingWeapon = this;
+
+				// [BC] If we're a client, tell the server we're switching weapons.
+				if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) && (( Owner->player - players ) == consoleplayer ))
+				{
+					CLIENTCOMMANDS_WeaponSelect( this->GetClass( ));
+
+					if ( CLIENTDEMO_IsRecording( ))
+						CLIENTDEMO_WriteLocalCommand( CLD_LCMD_INVUSE, this->GetClass( )->TypeName.GetChars( ) );
+				}
+				else if ( ( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( Owner->player->bIsBot == true ) )
+					SERVERCOMMANDS_SetPlayerPendingWeapon( static_cast<ULONG> ( Owner->player - players ) );
+			}
+			// If it's 1, then only switch if it ranks higher than our current weapon.
+			else if (( pCompareWeapon == NULL ) ||
+				// [ZZ] Added weapon order overriding by PWO settings
+				((dofpwo && PWO_CheckWeapons(pCompareWeapon, this)) ||
+				(!dofpwo && ( Owner->player->userinfo.GetSwitchOnPickup() == 1 ) && ( SelectionOrder < pCompareWeapon->SelectionOrder ))))
+			{
+				// [BB] Because of ST's special switchonpickup == 1 handling, we have to make sure here
+				// that we don't pick a powered up version, if we don't have a PowerWeaponLevel2 active.
+				if( (WeaponFlags & WIF_POWERED_UP && Owner->FindInventory (RUNTIME_CLASS(APowerWeaponLevel2)))
+					|| !(WeaponFlags & WIF_POWERED_UP) )
+				{
+					// [Spleen] Weapon switching is done client-side unless it's a bot.
+					if ( ( NETWORK_GetState( ) != NETSTATE_SERVER ) || ( Owner->player->bIsBot ) )
+						Owner->player->PendingWeapon = this;
+
+					// [BC] If we're a client, tell the server we're switching weapons.
+					if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) && (( Owner->player - players ) == consoleplayer ))
+					{
+						CLIENTCOMMANDS_WeaponSelect( this->GetClass( ));
+
+						if ( CLIENTDEMO_IsRecording( ))
+							CLIENTDEMO_WriteLocalCommand( CLD_LCMD_INVUSE, this->GetClass( )->TypeName.GetChars( ) );
+					}
+					else if ( ( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( Owner->player->bIsBot == true ) )
+						SERVERCOMMANDS_SetPlayerPendingWeapon( static_cast<ULONG> ( Owner->player - players ) );
+				}
+			}
 		}
-		if (Owner->player->mo == players[consoleplayer].camera)
+		// [BC] The server doesn't have a status bar.
+		if ( NETWORK_GetState( ) != NETSTATE_SERVER )
 		{
-			StatusBar->ReceivedWeapon (this);
+			if (Owner->player->mo == players[consoleplayer].camera)
+			{
+				StatusBar->ReceivedWeapon (this);
+			}
 		}
 	}
 	GivenAsMorphWeapon = false; // will be set explicitly by morphing code
@@ -345,7 +474,7 @@ AAmmo *AWeapon::AddAmmo (AActor *other, const PClass *ammotype, int amount)
 
 	// [BC] This behavior is from the original Doom. Give 5/2 times as much ammo when
 	// we pick up a weapon in deathmatch.
-	if (( deathmatch ) && ( gameinfo.gametype & GAME_DoomChex ))
+	if (( deathmatch || teamgame ) && ( gameinfo.gametype & GAME_DoomChex ))
 		amount = amount * 5 / 2;
 
 	// extra ammo in baby mode and nightmare mode
@@ -432,7 +561,7 @@ AWeapon *AWeapon::AddWeapon (const PClass *weapontype)
 
 bool AWeapon::ShouldStay ()
 {
-	if (((multiplayer &&
+	if (((( NETWORK_GetState( ) != NETSTATE_SINGLE ) &&
 		(!deathmatch && !alwaysapplydmflags)) || (dmflags & DF_WEAPONS_STAY)) &&
 		!(flags & MF_DROPPED))
 	{
@@ -508,6 +637,13 @@ bool AWeapon::CheckAmmo (int fireMode, bool autoSwitch, bool requireAmmo, int am
 	{
 		return true;
 	}
+
+	// [BB] Clients should only handle out of ammo weapon switches for themself, since
+	// they sometimes don't know the exact ammount of ammo the other players have. They
+	// are informed by the server of the weapon change anyway.
+	if ( NETWORK_InClientMode() && ( Owner->player - players != consoleplayer ))
+		return false;
+
 	// out of ammo, pick a weapon to change to
 	if (autoSwitch)
 	{
@@ -609,11 +745,31 @@ void AWeapon::EndPowerup ()
 		{
 			if (Owner->player->PendingWeapon == NULL ||
 				Owner->player->PendingWeapon == WP_NOCHANGE)
+			{
 				Owner->player->PendingWeapon = SisterWeapon;
+
+				// [BC] If we're a client, tell the server we're switching weapons.
+				if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) && (( Owner->player - players ) == consoleplayer ))
+				{
+					CLIENTCOMMANDS_WeaponSelect( SisterWeapon->GetClass( ));
+
+					if ( CLIENTDEMO_IsRecording( ))
+						CLIENTDEMO_WriteLocalCommand( CLD_LCMD_INVUSE, SisterWeapon->GetClass( )->TypeName.GetChars( ) );
+				}
+			}
 		}
 		else
 		{
 			Owner->player->ReadyWeapon = SisterWeapon;
+
+			// [BC] If we're a client, tell the server we're switching weapons.
+			if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) && (( Owner->player - players ) == consoleplayer ))
+			{
+				CLIENTCOMMANDS_WeaponSelect( SisterWeapon->GetClass( ));
+
+				if ( CLIENTDEMO_IsRecording( ))
+					CLIENTDEMO_WriteLocalCommand( CLD_LCMD_INVUSE, SisterWeapon->GetClass( )->TypeName.GetChars( ) );
+			}
 		}
 	}
 }
@@ -873,6 +1029,7 @@ AWeapon *FWeaponSlot::PickWeapon(player_t *player, bool checkammo)
 	{
 		return NULL;
 	}
+
 	// Does this slot even have any weapons?
 	if (Weapons.Size() == 0)
 	{
@@ -895,7 +1052,8 @@ AWeapon *FWeaponSlot::PickWeapon(player_t *player, bool checkammo)
 
 					if (weap != NULL && weap->IsKindOf(RUNTIME_CLASS(AWeapon)))
 					{
-						if (!checkammo || weap->CheckAmmo(AWeapon::EitherFire, false))
+						// [BC] New cl_noammoswitch option: Allow users to switch to weapons even if they're out of ammo for them.
+						if ( cl_noammoswitch || !checkammo || weap->CheckAmmo(AWeapon::EitherFire, false))
 						{
 							return weap;
 						}
@@ -910,7 +1068,8 @@ AWeapon *FWeaponSlot::PickWeapon(player_t *player, bool checkammo)
 
 		if (weap != NULL && weap->IsKindOf(RUNTIME_CLASS(AWeapon)))
 		{
-			if (!checkammo || weap->CheckAmmo(AWeapon::EitherFire, false))
+			// [BC] New cl_noammoswitch option: Allow users to switch to weapons even if they're out of ammo for them.
+			if (cl_noammoswitch || !checkammo || weap->CheckAmmo(AWeapon::EitherFire, false))
 			{
 				return weap;
 			}
@@ -1121,6 +1280,10 @@ AWeapon *FWeaponSlots::PickNextWeapon(player_t *player)
 		{
 			startslot = NUM_WEAPON_SLOTS - 1;
 			startindex = Slots[startslot].Size() - 1;
+			// [BB] If the start slot is empty, we have to set startindex differently, otherwise
+			// the while loop won't terminate if the player has no weapons.
+			if ( startindex < 0 )
+				startindex = 0;
 		}
 
 		slot = startslot;
@@ -1138,7 +1301,8 @@ AWeapon *FWeaponSlots::PickNextWeapon(player_t *player)
 			}
 			const PClass *type = Slots[slot].GetWeapon(index);
 			AWeapon *weap = static_cast<AWeapon *>(player->mo->FindInventory(type));
-			if (weap != NULL && weap->CheckAmmo(AWeapon::EitherFire, false))
+			// [BC] New cl_noammoswitch option: Allow users to switch to weapons even if they're out of ammo for them.
+			if (weap != NULL && ( cl_noammoswitch || ( weap->CheckAmmo(AWeapon::EitherFire, false) )))
 			{
 				return weap;
 			}
@@ -1176,6 +1340,10 @@ AWeapon *FWeaponSlots::PickPrevWeapon (player_t *player)
 		{
 			startslot = 0;
 			startindex = 0;
+			// [BB] If the start slot is empty, we have to set startindex differently, otherwise
+			// the while loop won't terminate if the player has no weapons.
+			if ( Slots[startslot].Size() == 0 )
+				startindex = -1;
 		}
 
 		slot = startslot;
@@ -1193,7 +1361,8 @@ AWeapon *FWeaponSlots::PickPrevWeapon (player_t *player)
 			}
 			const PClass *type = Slots[slot].GetWeapon(index);
 			AWeapon *weap = static_cast<AWeapon *>(player->mo->FindInventory(type));
-			if (weap != NULL && weap->CheckAmmo(AWeapon::EitherFire, false))
+			// [BC] New cl_noammoswitch option: Allow users to switch to weapons even if they're out of ammo for them.
+			if (weap != NULL && ( cl_noammoswitch || ( weap->CheckAmmo(AWeapon::EitherFire, false) )))
 			{
 				return weap;
 			}

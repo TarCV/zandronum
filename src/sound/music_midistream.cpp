@@ -315,7 +315,9 @@ void MIDIStreamer::Play(bool looping, int subsong)
 		}
 		else if (devtype == MDEV_GUS)
 		{
+#ifdef USE_TIMIDITY
 			MIDI = new TimidityWaveWriterMIDIDevice(DumpFilename, 0);
+#endif
 		}
 	}
 	else

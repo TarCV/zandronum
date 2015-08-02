@@ -90,6 +90,9 @@ EXTERN_CVAR (Int, screenblocks)
 EXTERN_CVAR (Bool, cl_capfps)
 EXTERN_CVAR (Bool, r_deathcamera)
 
+// [BB]
+CVAR( Bool, cl_disallowfullpitch, false, CVAR_ARCHIVE )
+EXTERN_CVAR (Bool, cl_oldfreelooklimit)
 
 extern int viewpitch;
  
@@ -246,13 +249,32 @@ void FGLRenderer::SetCameraPos(fixed_t viewx, fixed_t viewy, fixed_t viewz, angl
 //
 //-----------------------------------------------------------------------------
 
-void FGLRenderer::SetProjection(float fov, float ratio, float fovratio)
+void FGLRenderer::SetProjection(float fov, float ratio, float fovratio, float eyeShift) // [BB] Added eyeShift from GZ3Doom.
 {
 	gl.MatrixMode(GL_PROJECTION);
 	gl.LoadIdentity();
 
 	float fovy = 2 * RAD2DEG(atan(tan(DEG2RAD(fov) / 2) / fovratio));
-	gluPerspective(fovy, ratio, 5.f, 65536.f);
+	// [BB] Added eyeShift from GZ3Doom.
+	if ( eyeShift == 0 )
+		gluPerspective(fovy, ratio, 5.f, 65536.f);
+	else
+	{
+		const float zNear = 5.0f;
+		const float zFar = 65536.0f;
+		const float pi = 3.1415926535897932384626433832795;
+		double fH = tan( fovy / 360 * pi ) * zNear;
+		double fW = fH * ratio;
+
+		float screenZ = 25.0;
+		float frustumShift = eyeShift * zNear / screenZ;
+
+		glFrustum( -fW - frustumShift, fW - frustumShift, 
+			-fH, fH, 
+			zNear, zFar);
+		glTranslatef(-eyeShift, 0, 0);
+	}
+
 	gl_RenderState.Set2DMode(false);
 }
 
@@ -510,8 +532,11 @@ void FGLRenderer::RenderScene(int recursion)
 
 	// flood all the gaps with the back sector's flat texture
 	// This will always be drawn like GLDL_PLAIN or GLDL_FOG, depending on the fog settings
-	
-	if (!(gl.flags&RFL_NOSTENCIL))	// needs a stencil to work!
+
+	// [BB] We may only do this when drawing the final eye.
+	GLint drawBuffer;
+	glGetIntegerv ( GL_DRAW_BUFFER, &drawBuffer );
+	if (!(gl.flags&RFL_NOSTENCIL) && (drawBuffer != GL_BACK_LEFT))	// needs a stencil to work!
 	{
 		gl.DepthMask(false);							// don't write to Z-buffer!
 		gl_RenderState.EnableFog(true);
@@ -850,6 +875,13 @@ void FGLRenderer::SetFixedColormap (player_t *player)
 
 sector_t * FGLRenderer::RenderViewpoint (AActor * camera, GL_IRECT * bounds, float fov, float ratio, float fovratio, bool mainview, bool toscreen)
 {       
+	// [BB] Check if stereo rendering is supported.
+	GLboolean supportsStereo = false;
+	GLboolean supportsBuffered = false;
+	glGetBooleanv(GL_STEREO, &supportsStereo);
+	glGetBooleanv(GL_DOUBLEBUFFER, &supportsBuffered);
+	const bool renderStereo = (supportsStereo && supportsBuffered && toscreen);
+
 	sector_t * retval;
 	R_SetupFrame (camera);
 	SetViewArea();
@@ -861,8 +893,9 @@ sector_t * FGLRenderer::RenderViewpoint (AActor * camera, GL_IRECT * bounds, flo
 
 
 
-	if (camera->player && camera->player-players==consoleplayer &&
-		((camera->player->cheats & CF_CHASECAM) || (r_deathcamera && camera->health <= 0)) && camera==camera->player->mo)
+	// [BB] consoleplayer should be able to toggle the chase cam.
+	if (camera->player && /*camera->player-players==consoleplayer &&*/
+		((/*camera->player->*/players[consoleplayer].cheats & CF_CHASECAM) || (r_deathcamera && camera->health <= 0)) && camera==camera->player->mo)
 	{
 		mViewActor=NULL;
 	}
@@ -875,15 +908,46 @@ sector_t * FGLRenderer::RenderViewpoint (AActor * camera, GL_IRECT * bounds, flo
 
 	SetViewport(bounds);
 	mCurrentFoV = fov;
-	SetProjection(fov, ratio, fovratio);	// switch to perspective mode and set up clipper
-	SetCameraPos(viewx, viewy, viewz, viewangle);
-	SetViewMatrix(false, false);
+	// [BB] Added stereo rendering based on one of the initial GZ3Doom revisions.
+	if ( renderStereo == false )
+	{
+		SetProjection(fov, ratio, fovratio);	// switch to perspective mode and set up clipper
+		SetCameraPos(viewx, viewy, viewz, viewangle);
+		SetViewMatrix(false, false);
 
-	clipper.Clear();
-	angle_t a1 = FrustumAngle();
-	clipper.SafeAddClipRangeRealAngles(viewangle+a1, viewangle-a1);
+		clipper.Clear();
+		angle_t a1 = FrustumAngle();
+		clipper.SafeAddClipRangeRealAngles(viewangle+a1, viewangle-a1);
 
-	ProcessScene(toscreen);
+		ProcessScene(toscreen);
+	}
+	else
+	{
+		SetCameraPos(viewx, viewy, viewz, viewangle);
+		SetViewMatrix(false, false);
+		angle_t a1 = FrustumAngle();
+
+		// Stereo 
+		// 1 doom unit = about 3 cm
+		float iod = 2.0; // intraocular distance
+
+		// Left eye
+		glDrawBuffer(GL_BACK_LEFT);
+		SetProjection(fov, ratio, fovratio, -iod/2);	// switch to perspective mode and set up clipper
+		clipper.Clear();
+		clipper.SafeAddClipRangeRealAngles(viewangle+a1, viewangle-a1);
+		ProcessScene(toscreen);
+
+		// Right eye
+		SetViewport(bounds);
+		glDrawBuffer(GL_BACK_RIGHT);
+		SetProjection(fov, ratio, fovratio, +iod/2);	// switch to perspective mode and set up clipper
+		clipper.Clear();
+		clipper.SafeAddClipRangeRealAngles(viewangle+a1, viewangle-a1);
+		ProcessScene(toscreen);
+
+		glDrawBuffer(GL_BACK);
+	}
 
 	gl_frameCount++;	// This counter must be increased right before the interpolations are restored.
 	interpolator.RestoreInterpolations ();
@@ -897,8 +961,51 @@ sector_t * FGLRenderer::RenderViewpoint (AActor * camera, GL_IRECT * bounds, flo
 //
 //-----------------------------------------------------------------------------
 
+#ifdef _WIN32 // [BB] Detect some kinds of glBegin hooking.
+extern char myGlBeginCharArray[4];
+int crashoutTic = 0;
+#endif
+
 void FGLRenderer::RenderView (player_t* player)
 {
+#ifdef _WIN32 // [BB] Detect some kinds of glBegin hooking.
+	// [BB] Continuously make this check, otherwise a hack could bypass the check by activating
+	// and deactivating itself at the right time interval.
+	{
+		if ( strncmp(reinterpret_cast<char *>(gl.Begin), myGlBeginCharArray, 4) )
+		{
+			I_FatalError ( "OpenGL malfunction encountered.\n" );
+		}
+		else
+		{
+			// [BB] Most GL wallhacks deactivate GL_DEPTH_TEST by manipulating glBegin.
+			// Here we try check if this is done.
+			GLboolean oldValue;
+			glGetBooleanv ( GL_DEPTH_TEST, &oldValue );
+			gl.Enable ( GL_DEPTH_TEST );
+			gl.Begin( GL_TRIANGLE_STRIP );
+			gl.End();
+			GLboolean valueTrue;
+			glGetBooleanv ( GL_DEPTH_TEST, &valueTrue );
+
+			// [BB] Also check if glGetBooleanv simply always returns true.
+			gl.Disable ( GL_DEPTH_TEST );
+			GLboolean valueFalse;
+			glGetBooleanv ( GL_DEPTH_TEST, &valueFalse );
+
+			if ( ( valueTrue == false ) || ( valueFalse == true ) )
+			{
+				I_FatalError ( "OpenGL malfunction encountered.\n" );
+			}
+
+			if ( oldValue )
+				gl.Enable ( GL_DEPTH_TEST );
+			else
+				gl.Disable ( GL_DEPTH_TEST );
+		}
+	}
+#endif
+
 	OpenGLFrameBuffer* GLTarget = static_cast<OpenGLFrameBuffer*>(screen);
 	AActor *&LastCamera = GLTarget->LastCamera;
 
@@ -987,6 +1094,12 @@ void FGLRenderer::WriteSavePic (player_t *player, FILE *file, int width, int hei
 	gl.ReadPixels(0,0,width, height,GL_RGB,GL_UNSIGNED_BYTE,scr);
 	M_CreatePNG (file, scr + ((height-1) * width * 3), NULL, SS_RGB, width, height, -width*3);
 	M_Free(scr);
+
+	// [BC] In GZDoom, this is called every frame, regardless of whether or not
+	// the view is active. In Skulltag, we don't so we have to call this here
+	// to reset everything, such as the viewport, after rendering our view to
+	// a canvas.
+	FGLRenderer::EndDrawScene( viewsector );
 }
 
 
@@ -1089,7 +1202,9 @@ EXTERN_CVAR(Float, maxviewpitch)
 
 int FGLInterface::GetMaxViewPitch(bool down)
 {
-	return int(maxviewpitch);
+	// [BB] Zandronum clamps the pitch differently
+	if (cl_disallowfullpitch) return down? 56 : ( cl_oldfreelooklimit ? 32 : 56 );
+	else return maxviewpitch;
 }
 
 //===========================================================================
