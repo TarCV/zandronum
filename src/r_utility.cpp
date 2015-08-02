@@ -55,6 +55,8 @@
 #include "r_renderer.h"
 #include "r_data/colormaps.h"
 #include "farchive.h"
+// [BB] New #includes.
+#include "sv_commands.h"
 
 
 // EXTERNAL DATA DECLARATIONS ----------------------------------------------
@@ -482,7 +484,8 @@ void R_ExecuteSetViewSize ()
 //
 //==========================================================================
 
-CUSTOM_CVAR (Int, screenblocks, 10, CVAR_ARCHIVE)
+// [BB] Zandronum uses 11 instead of 10 as default value.
+CUSTOM_CVAR (Int, screenblocks, 11, CVAR_ARCHIVE)
 {
 	if (self > 12)
 		self = 12;
@@ -580,6 +583,8 @@ void R_InterpolateView (player_t *player, fixed_t frac, InterpolationViewer *ivi
 	viewx = iview->oviewx + FixedMul (frac, iview->nviewx - iview->oviewx);
 	viewy = iview->oviewy + FixedMul (frac, iview->nviewy - iview->oviewy);
 	viewz = iview->oviewz + FixedMul (frac, iview->nviewz - iview->oviewz);
+	// [BC] This makes the mouse incredibly jerky for client games.
+/*
 	if (player != NULL &&
 		player - players == consoleplayer &&
 		camera == player->mo &&
@@ -591,7 +596,7 @@ void R_InterpolateView (player_t *player, fixed_t frac, InterpolationViewer *ivi
 		player->mo->reactiontime == 0 &&
 		!NoInterpolateView &&
 		!paused &&
-		(!netgame || !cl_noprediction) &&
+		( NETWORK_GetState( ) != NETSTATE_CLIENT || !cl_noprediction) &&
 		!LocalKeyboardTurner)
 	{
 		viewangle = iview->nviewangle + (LocalViewAngle & 0xFFFF0000);
@@ -625,6 +630,7 @@ void R_InterpolateView (player_t *player, fixed_t frac, InterpolationViewer *ivi
 		}
 	}
 	else
+*/
 	{
 		viewpitch = iview->oviewpitch + FixedMul (frac, iview->nviewpitch - iview->oviewpitch);
 		viewangle = iview->oviewangle + FixedMul (frac, iview->nviewangle - iview->oviewangle);
@@ -771,8 +777,9 @@ void R_SetupFrame (AActor *actor)
 		iview->oviewangle = iview->nviewangle;
 	}
 
+	// [BB] consoleplayer should be able to toggle the chase cam.
 	if (player != NULL && gamestate != GS_TITLELEVEL &&
-		((player->cheats & CF_CHASECAM) || (r_deathcamera && camera->health <= 0)))
+		((/*player->*/players[consoleplayer].cheats & CF_CHASECAM) || (r_deathcamera && camera->health <= 0)))
 	{
 		// [RH] Use chasecam view
 		P_AimCamera (camera, iview->nviewx, iview->nviewy, iview->nviewz, viewsector);
@@ -1101,3 +1108,18 @@ void FCanvasTextureInfo::Mark()
 	}
 }
 
+//==========================================================================
+//
+// [BC] FCanvasTextureInfo :: UpdateToClient
+//
+// Tell incoming clients about any camera->texture assignments.
+//
+//==========================================================================
+
+void FCanvasTextureInfo::UpdateToClient( ULONG ulClient )
+{
+	FCanvasTextureInfo	*pProbe;
+
+	for ( pProbe = List; pProbe != NULL; pProbe = pProbe->Next )
+		SERVERCOMMANDS_SetCameraToTexture( pProbe->Viewpoint, pProbe->Texture->Name, pProbe->FOV, ulClient, SVCF_ONLYTHISCLIENT );
+}

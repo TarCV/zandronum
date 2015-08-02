@@ -74,8 +74,24 @@
 #include "actorptrselect.h"
 #include "farchive.h"
 #include "decallib.h"
+// [BB] New #includes.
+#include "announcer.h"
+#include "deathmatch.h"
+#include "gamemode.h"
+#include "g_game.h"
+#include "team.h"
+#include "cl_demo.h"
+#include "cooperative.h"
+#include "invasion.h"
+#include "sv_commands.h"
+#include "network/nettraffic.h"
+#include "za_database.h"
+#include "cl_commands.h"
 
 #include "g_shared/a_pickups.h"
+
+// [BB] A std::pair inside TArray inside TArray didn't seem to work.
+std::vector<TArray<std::pair<FString, FString> > > g_dbQueries;
 
 extern FILE *Logfile;
 
@@ -175,6 +191,10 @@ inline int uallong(const int &foo)
 }
 #endif
 
+// [BC] When true, any console commands/line specials were executed via the ConsoleCommand p-code.
+static	bool	g_bCalledFromConsoleCommand = false;
+
+
 //============================================================================
 //
 // Global and world variables
@@ -231,6 +251,12 @@ FWorldGlobalArray ACS_GlobalArrays[NUM_GLOBALVARS];
 //----------------------------------------------------------------------------
 
 ACSStringPool GlobalACSStrings;
+
+// [BB] Extracted from PCD_SAVESTRING.
+int ACS_PushAndReturnDynamicString ( const FString &Work, const SDWORD *stack, int stackdepth )
+{
+	return GlobalACSStrings.AddString(strbin1(Work), stack, stackdepth);
+}
 
 ACSStringPool::ACSStringPool()
 {
@@ -574,11 +600,7 @@ int ACSStringPool::InsertString(FString &str, unsigned int h, unsigned int bucke
 	}
 	else
 	{ // Scan for the next free entry
-		unsigned int i;
-		for (i = FirstFreeEntry + 1; i < Pool.Size() && Pool[i].Next != FREE_ENTRY; ++i)
-		{
-		}
-		FirstFreeEntry = i;
+		FindFirstFreeEntry(FirstFreeEntry + 1);
 	}
 	PoolEntry *entry = &Pool[index];
 	entry->Str = str;
@@ -587,6 +609,23 @@ int ACSStringPool::InsertString(FString &str, unsigned int h, unsigned int bucke
 	entry->LockCount = 0;
 	PoolBuckets[bucketnum] = index;
 	return index | STRPOOL_LIBRARYID_OR;
+}
+
+//============================================================================
+//
+// ACSStringPool :: FindFirstFreeEntry
+//
+// Finds the first free entry, starting at base.
+//
+//============================================================================
+
+void ACSStringPool::FindFirstFreeEntry(unsigned base)
+{
+	while (base < Pool.Size() && Pool[base].Next != FREE_ENTRY)
+	{
+		base++;
+	}
+	FirstFreeEntry = base;
 }
 
 //============================================================================
@@ -637,6 +676,7 @@ void ACSStringPool::ReadStrings(PNGHandle *png, DWORD id)
 		{
 			delete[] str;
 		}
+		FindFirstFreeEntry(0);
 	}
 }
 
@@ -689,6 +729,32 @@ void ACSStringPool::Dump() const
 			Printf("%4u. (%2d) \"%s\"\n", i, Pool[i].LockCount, Pool[i].Str.GetChars());
 		}
 	}
+	Printf("First free %u\n", FirstFreeEntry);
+}
+
+//============================================================================
+//
+// ScriptPresentation
+//
+// Returns a presentable version of the script number.
+//
+//============================================================================
+
+static FString ScriptPresentation(int script)
+{
+	FString out = "script ";
+
+	if (script < 0)
+	{
+		FName scrname = FName(ENamedName(-script));
+		if (scrname.IsValidName())
+		{
+			out << '"' << scrname.GetChars() << '"';
+			return out;
+		}
+	}
+	out.AppendFormat("%d", script);
+	return out;
 }
 
 //============================================================================
@@ -754,31 +820,6 @@ CCMD(globstr)
 
 //============================================================================
 //
-// ScriptPresentation
-//
-// Returns a presentable version of the script number.
-//
-//============================================================================
-
-static FString ScriptPresentation(int script)
-{
-	FString out = "script ";
-
-	if (script < 0)
-	{
-		FName scrname = FName(ENamedName(-script));
-		if (scrname.IsValidName())
-		{
-			out << '"' << scrname.GetChars() << '"';
-			return out;
-		}
-	}
-	out.AppendFormat("%d", script);
-	return out;
-}
-
-//============================================================================
-//
 // P_ClearACSVars
 //
 //============================================================================
@@ -802,6 +843,10 @@ void P_ClearACSVars(bool alsoglobal)
 		// Since we cleared all ACS variables, we know nothing refers to them
 		// anymore.
 		GlobalACSStrings.Clear();
+
+		// [BB] When the global vars are cleared, our query handles surely shouldn't
+		// be needed anymore. So clear them in case mods forgot to do so.
+		g_dbQueries.clear();
 	}
 	else
 	{
@@ -1025,8 +1070,12 @@ static void ClearInventory (AActor *activator)
 //
 //============================================================================
 
-static void DoGiveInv (AActor *actor, const PClass *info, int amount)
+// [BB] I need this outside p_acs.cpp. Furthermore it now returns whether CallTryPickup was successful.
+/*static*/ bool DoGiveInv (AActor *actor, const PClass *info, int amount)
 {
+	// [BB]
+	bool bSuccess = true;
+
 	AWeapon *savedPendingWeap = actor->player != NULL
 		? actor->player->PendingWeapon : NULL;
 	bool hadweap = actor->player != NULL ? actor->player->ReadyWeapon != NULL : true;
@@ -1057,6 +1106,10 @@ static void DoGiveInv (AActor *actor, const PClass *info, int amount)
 	if (!item->CallTryPickup (actor))
 	{
 		item->Destroy ();
+		// [BC] Also set item to NULL.
+		item = NULL;
+		// [BB] CallTryPickup was not successful.
+		bSuccess = false;
 	}
 	// If the item was a weapon, don't bring it up automatically
 	// unless the player was not already using a weapon.
@@ -1064,6 +1117,30 @@ static void DoGiveInv (AActor *actor, const PClass *info, int amount)
 	{
 		actor->player->PendingWeapon = savedPendingWeap;
 	}
+
+	// [BB] Since SERVERCOMMANDS_GiveInventory overwrites the item amount
+	// of the client with item->Amount, we have have to set this to the
+	// correct amount the player has.
+	AInventory *pInventory = NULL;
+	if( actor->player )
+	{
+		if ( actor->player->mo )
+			pInventory = actor->player->mo->FindInventory( info );
+	}
+	if ( pInventory != NULL && item != NULL )
+		item->Amount = pInventory->Amount;
+
+	// [BC] If we're the server, give the item to clients.
+	if (( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( actor->player ) && ( item ))
+	{
+		SERVERCOMMANDS_GiveInventory( actor->player - players, item );
+		// [BB] The armor display amount has to be updated separately.
+		if( item->GetClass()->IsDescendantOf (RUNTIME_CLASS(AArmor)))
+			SERVERCOMMANDS_SetPlayerArmor( actor->player - players );
+	}
+
+	// [BB]
+	return bSuccess;
 }
 
 //============================================================================
@@ -1122,7 +1199,15 @@ static void DoTakeInv (AActor *actor, const PClass *info, int amount)
 	AInventory *item = actor->FindInventory (info);
 	if (item != NULL)
 	{
+		// [BB] Save the original amount.
+		const int oldAmount = item->Amount;
+
 		item->Amount -= amount;
+		// [BC] If we're the server, tell clients to take the item away.
+		// [BB] We may not pass a negative amount to SERVERCOMMANDS_TakeInventory.
+		// [BB] Also only inform the client if it had actually had something that could be taken.
+		if (( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( actor->player ) && ( ( oldAmount > 0 ) || ( amount < 0 ) ) )
+			SERVERCOMMANDS_TakeInventory( actor->player - players, item->GetClass( )->TypeName.GetChars( ), MAX ( 0, item->Amount ) );
 		if (item->Amount <= 0)
 		{
 			// If it's not ammo or an internal armor, destroy it.
@@ -1281,6 +1366,174 @@ static int CheckInventory (AActor *activator, const char *type)
 	const PClass *info = PClass::FindClass (type);
 	AInventory *item = activator->FindInventory (info);
 	return item ? item->Amount : 0;
+}
+
+//============================================================================
+//
+// GetTeamScore
+//
+// [Dusk] Moved this out of ACSF_GetTeamScore
+//
+//============================================================================
+static LONG GetTeamScore (ULONG team) {
+	if ( GAMEMODE_GetFlags(GAMEMODE_GetCurrentMode()) & GMF_PLAYERSEARNFRAGS )
+		return TEAM_GetFragCount( team );
+	else if ( GAMEMODE_GetFlags(GAMEMODE_GetCurrentMode()) & GMF_PLAYERSEARNWINS )
+		return TEAM_GetWinCount( team );
+	return TEAM_GetScore( team );
+}
+
+//============================================================================
+//
+// [Dusk] GetTeamProperty
+//
+// Returns some information of a team
+//
+//============================================================================
+static int GetTeamProperty (unsigned int team, int prop, const SDWORD *stack, int stackdepth) {
+	switch (prop) {
+		case TPROP_NumLivePlayers:
+			return TEAM_CountLivingAndRespawnablePlayers (team);
+		case TPROP_IsValid:
+			return TEAM_CheckIfValid (team);
+		case TPROP_Score:
+			return GetTeamScore (team);
+		case TPROP_TextColor:
+			return TEAM_GetTextColor (team);
+		case TPROP_PlayerStartNum:
+			return TEAM_GetPlayerStartThingNum (team);
+		case TPROP_Spread:
+			return TEAM_GetSpread (team, &GetTeamScore);
+		case TPROP_Assister:
+		{
+			// [Dusk] Assister is MAXPLAYERS if there is nobody eligible for an assist.
+			// We return -1 instead of MAXPLAYERS for consistency (see PlayerNumber()).
+			// It's also easier to check against in ACS due to lack of MAXPLAYERS in ACS.
+			if (TEAM_GetAssistPlayer (team) == MAXPLAYERS)
+				return -1;
+			return TEAM_GetAssistPlayer (team);
+		}
+		case TPROP_Carrier:
+			// [Dusk] However, carrier player is a player_t* and is NULL if there is no carrier.
+			if (!TEAM_GetCarrier (team))
+				return -1;
+			return TEAM_GetCarrier (team) - players;
+		case TPROP_FragCount:
+			return TEAM_GetFragCount (team);
+		case TPROP_DeathCount:
+			return TEAM_GetDeathCount (team);
+		case TPROP_WinCount:
+			return TEAM_GetWinCount (team);
+		case TPROP_PointCount:
+			return TEAM_GetScore (team);
+		case TPROP_ReturnTics:
+			return TEAM_GetReturnTicks (team);
+		case TPROP_NumPlayers:
+			return TEAM_CountPlayers (team);
+		// [Dusk] Now for the strings! Using dynamic strings for this.
+		case TPROP_TeamItem:
+		case TPROP_WinnerTheme:
+		case TPROP_LoserTheme:
+		case TPROP_Name:
+		{
+			FString work;
+			int res;
+
+			STRINGBUILDER_START(work);
+			switch (prop) {
+			case TPROP_TeamItem:
+				work += TEAM_GetTeamItemName (team);
+				break;
+			case TPROP_WinnerTheme:
+			case TPROP_LoserTheme:
+				work += TEAM_GetIntermissionTheme (team, prop == TPROP_WinnerTheme);
+				break;
+			case TPROP_Name:
+				work += TEAM_GetName (team);
+				break;
+			}
+
+			// [Dusk]
+			res = ACS_PushAndReturnDynamicString ( work, stack, stackdepth );
+
+			STRINGBUILDER_FINISH(work);
+			return res;
+		}
+	}
+	return 0;
+}
+
+// ================================================================================================
+//
+// [TP] FBehavior :: RepresentScript
+//
+// Returns a string representation of the given script number.
+//
+// ================================================================================================
+
+FString FBehavior::RepresentScript ( int script )
+{
+	FString result;
+
+	if ( script >= 0 )
+		result.Format( "%d", script );
+	else
+		result.Format( "\"%s\"", FName (( ENamedName ) -script ).GetChars() );
+
+	return result;
+}
+
+// ================================================================================================
+//
+// [TP] RequestScriptPuke
+//
+// Requests execution of a NET script on the server.
+//
+// ================================================================================================
+
+static int RequestScriptPuke ( FBehavior* module, int script, int* args, int argCount )
+{
+	const ScriptPtr* scriptdata = FBehavior::StaticFindScript (script, module);
+	FString rep = FBehavior::RepresentScript( script );
+
+	// [TP] Don't do anything on the server.
+	if ( NETWORK_GetState() == NETSTATE_SERVER )
+	{
+		Printf( "RequestScriptPuke can only be invoked from CLIENTSIDE scripts "
+			"(attempted to call script %s).\n", rep.GetChars() );
+		return 0;
+	}
+
+	if (( scriptdata->Flags & SCRIPTF_Net ) == 0 )
+	{
+		// [TP] If the script is not NET, print a warn and don't run any scripts.
+		Printf( "RequestScriptPuke: Script %s must be NET but isn't.", rep.GetChars() );
+		return 0;
+	}
+
+	// [TP] This is no-op with demos
+	if ( CLIENTDEMO_IsPlaying() )
+		return 1;
+
+	// [TP] If we're offline we can just run the script.
+	if (( NETWORK_GetState() == NETSTATE_SINGLE )
+		|| ( NETWORK_GetState() == NETSTATE_SINGLE_MULTIPLAYER ))
+	{
+		P_StartScript ( players[consoleplayer].mo, NULL, script, NULL, args, argCount,
+			ACS_ALWAYS | ACS_NET );
+		return 1;
+	}
+
+	// [TP]
+	int scriptArgs[4] = { 0, 0, 0, 0 };
+
+	for ( int i = 0; i < MIN( argCount, 4 ); ++i )
+		scriptArgs[i] = args[i];
+
+	DPrintf( "RequestScriptPuke: Requesting puke of script %s (%d, %d, %d, %d)\n",
+		rep.GetChars(), args[0], args[1], args[2], args[3] );
+	CLIENTCOMMANDS_Puke( script, scriptArgs, true );
+	return 1;
 }
 
 //---- Plane watchers ----//
@@ -1677,7 +1930,6 @@ FBehavior::FBehavior (int lumpnum, FileReader * fr, int len)
 	memset (MapVarStore, 0, sizeof(MapVarStore));
 	ModuleName[0] = 0;
 	FunctionProfileData = NULL;
-
 	// Now that everything is set up, record this module as being among the loaded modules.
 	// We need to do this before resolving any imports, because an import might (indirectly)
 	// need to resolve exports in this module. The only things that can be exported are
@@ -1691,8 +1943,6 @@ FBehavior::FBehavior (int lumpnum, FileReader * fr, int len)
     LibraryID = StaticModules.Push (this) << LIBRARYID_SHIFT;
 
 	if (fr == NULL) len = Wads.LumpLength (lumpnum);
-
-
 
 	// Any behaviors smaller than 32 bytes cannot possibly contain anything useful.
 	// (16 bytes for a completely empty behavior + 12 bytes for one script header
@@ -2632,7 +2882,7 @@ const char *FBehavior::LookupString (DWORD index) const
 	}
 }
 
-void FBehavior::StaticStartTypedScripts (WORD type, AActor *activator, bool always, int arg1, bool runNow)
+void FBehavior::StaticStartTypedScripts (WORD type, AActor *activator, bool always, int arg1, bool runNow, bool onlyClientSideScripts, int arg2, int arg3) // [BB] Added arg2+arg3
 {
 	static const char *const TypeNames[] =
 	{
@@ -2655,11 +2905,11 @@ void FBehavior::StaticStartTypedScripts (WORD type, AActor *activator, bool alwa
 		type < countof(TypeNames) ? TypeNames[type] : TypeNames[SCRIPT_Lightning - 1]);
 	for (unsigned int i = 0; i < StaticModules.Size(); ++i)
 	{
-		StaticModules[i]->StartTypedScripts (type, activator, always, arg1, runNow);
+		StaticModules[i]->StartTypedScripts (type, activator, always, arg1, runNow, onlyClientSideScripts, arg2, arg3); // [BB] Added arg2+arg3
 	}
 }
 
-void FBehavior::StartTypedScripts (WORD type, AActor *activator, bool always, int arg1, bool runNow)
+void FBehavior::StartTypedScripts (WORD type, AActor *activator, bool always, int arg1, bool runNow, bool onlyClientSideScripts, int arg2, int arg3) // [BB] Added arg2+arg3
 {
 	const ScriptPtr *ptr;
 	int i;
@@ -2669,8 +2919,24 @@ void FBehavior::StartTypedScripts (WORD type, AActor *activator, bool always, in
 		ptr = &Scripts[i];
 		if (ptr->Type == type)
 		{
+			// [BB] This is not a client side script, so skip it if onlyClientSideScripts is true.
+			if ( onlyClientSideScripts && !ACS_IsScriptClientSide( ptr ) )
+			{
+				continue;
+			}
+
+			// [BC] If this script is client side, just let clients execute it themselves.
+			if (( NETWORK_GetState( ) == NETSTATE_SERVER ) &&
+				ACS_IsScriptClientSide( ptr ))
+			{
+				SERVERCOMMANDS_ACSScriptExecute( ptr->Number, activator, 0, 0, 0, arg1, arg2, arg3, always );
+				continue;
+			}
+
+			// [BB] Added arg2+arg3
+			int arg[3] = { arg1, arg2, arg3 };
 			DLevelScript *runningScript = P_GetScriptGoing (activator, NULL, ptr->Number,
-				ptr, this, &arg1, 1, always ? ACS_ALWAYS : 0);
+				ptr, this, arg, 3, always ? ACS_ALWAYS : 0);
 			if (runNow)
 			{
 				runningScript->RunScript ();
@@ -2678,6 +2944,38 @@ void FBehavior::StartTypedScripts (WORD type, AActor *activator, bool always, in
 		}
 	}
 }
+
+// [BC] These next two functions count how many of a type of script are present on the map.
+int FBehavior::StaticCountTypedScripts( WORD type )
+{
+	int	iCount;
+
+	iCount = 0;
+	for (unsigned int i = 0; i < StaticModules.Size(); ++i)
+	{
+		iCount += StaticModules[i]->CountTypedScripts (type);
+	}
+
+	return ( iCount );
+}
+
+int FBehavior::CountTypedScripts( WORD type )
+{
+	const ScriptPtr *ptr;
+	int i;
+	int	iCount;
+
+	iCount = 0;
+	for (i = 0; i < NumScripts; ++i)
+	{
+		ptr = &Scripts[i];
+		if (ptr->Type == type)
+			iCount++;
+	}
+
+	return ( iCount );
+}
+// [BC] End of new functions.
 
 // FBehavior :: StaticStopMyScripts
 //
@@ -2842,6 +3140,36 @@ void DACSThinker::StopScriptsFor (AActor *actor)
 	}
 }
 
+void DACSThinker::StopAndDestroyAllScripts ()
+{
+	// [BB] Unlink and destroy all running scripts.
+	ScriptMap::Iterator it(RunningScripts);
+	ScriptMap::Pair *pair;
+
+	while (it.NextPair(pair))
+	{
+		DLevelScript *script = pair->Value;
+		if ( script != NULL )
+		{
+			script->Unlink ();
+			pair->Value = NULL;
+			script->Destroy ();
+		}
+	}
+	RunningScripts.Clear();
+
+	DLevelScript *script = Scripts;
+
+	// [BB] Now remove all remaining scripts.
+	while (script != NULL)
+	{
+		DLevelScript *next = script->next;
+		script->Unlink ();
+		script->Destroy ();
+		script = next;
+	}
+}
+
 IMPLEMENT_POINTY_CLASS (DLevelScript)
  DECLARE_POINTER(next)
  DECLARE_POINTER(prev)
@@ -2896,8 +3224,11 @@ void DLevelScript::Serialize (FArchive &arc)
 		pc = activeBehavior->Ofs2PC (i);
 	}
 
-	arc << activefont
-		<< hudwidth << hudheight;
+	// [BC] The server doesn't have an active font.
+	if ( NETWORK_GetState( ) != NETSTATE_SERVER )
+		arc << activefont;
+
+	arc << hudwidth << hudheight;
 	if (SaveVersion >= 3960)
 	{
 		arc << ClipRectLeft << ClipRectTop << ClipRectWidth << ClipRectHeight
@@ -3121,6 +3452,13 @@ void DLevelScript::ChangeFlat (int tag, int name, bool floorOrCeiling)
 	{
 		int pos = floorOrCeiling? sector_t::ceiling : sector_t::floor;
 		sectors[secnum].SetTexture(pos, flat);
+
+		// [BC] Update clients about this flat change.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetSectorFlat( secnum );
+
+		// [BC] Also, mark this sector as having its flat changed.
+		sectors[secnum].bFlatChange = true;
 	}
 }
 
@@ -3128,8 +3466,9 @@ int DLevelScript::CountPlayers ()
 {
 	int count = 0, i;
 
+	// [BB] Skulltag doesn't count spectators as players.
 	for (i = 0; i < MAXPLAYERS; i++)
-		if (playeringame[i])
+		if (( playeringame[i] ) && ( players[i].bSpectating == false ))
 			count++;
 
 	return count;
@@ -3156,6 +3495,32 @@ void DLevelScript::SetLineTexture (int lineid, int side, int position, int name)
 		if (sidedef == NULL)
 			continue;
 
+		// [BC] Line texture changed during the course of the level.
+		{
+			ULONG	ulShift;
+
+			ulShift = 0;
+			ulShift += position;
+			if ( side )
+				ulShift += 3;
+
+			lines[linenum].ulTexChangeFlags |= 1 << ulShift;
+/*
+			if (( 1 << ulShift ) == TEXCHANGE_FRONTTOP )
+				Printf( "FRONT TOP: %d\n", linenum );
+			if (( 1 << ulShift ) ==  TEXCHANGE_FRONTMEDIUM )
+				Printf( "FRONT MED: %d\n", linenum );
+			if (( 1 << ulShift ) == TEXCHANGE_FRONTBOTTOM )
+				Printf( "FRONT BOT: %d\n", linenum );
+			if (( 1 << ulShift ) == TEXCHANGE_BACKTOP )
+				Printf( "BACK TOP: %d\n", linenum );
+			if (( 1 << ulShift ) == TEXCHANGE_BACKMEDIUM )
+				Printf( "BACK MED: %d\n", linenum );
+			if (( 1 << ulShift ) == TEXCHANGE_BACKBOTTOM )
+				Printf( "BACK BOT: %d\n", linenum );
+*/
+		}
+
 		switch (position)
 		{
 		case TEXTURE_TOP:
@@ -3170,8 +3535,11 @@ void DLevelScript::SetLineTexture (int lineid, int side, int position, int name)
 		default:
 			break;
 		}
-
 	}
+
+	// [BB] If we're the server, tell clients about this texture change.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SetLineTextureByID( lineid, side, position, texname );
 }
 
 void DLevelScript::ReplaceTextures (int fromnamei, int tonamei, int flags)
@@ -3182,6 +3550,12 @@ void DLevelScript::ReplaceTextures (int fromnamei, int tonamei, int flags)
 
 	if (fromname == NULL)
 		return;
+
+	// [BB] If we're the server, tell the clients to call DLevelScript::ReplaceTextures with the same
+	// arguments. This way the amount of nettraffic needed is fixed and doesn't depend of the number
+	// of lines or sectors that use the replaced texture.
+	if (( NETWORK_GetState( ) == NETSTATE_SERVER ))
+		SERVERCOMMANDS_ReplaceTextures ( fromnamei, tonamei, flags );
 
 	if ((flags ^ (NOT_BOTTOM | NOT_MIDDLE | NOT_TOP)) != 0)
 	{
@@ -3198,6 +3572,13 @@ void DLevelScript::ReplaceTextures (int fromnamei, int tonamei, int flags)
 				if (!(flags & bits[j]) && wal->GetTexture(j) == picnum1)
 				{
 					wal->SetTexture(j, picnum2);
+
+					// [BB] We have to mark the texture as changed to restore it when the map resets.
+					ULONG ulShift = 0;
+					ulShift += j;
+					if ( wal->linedef->sidedef[1] == wal )
+						ulShift += 3;
+					wal->linedef->ulTexChangeFlags |= 1 << ulShift;
 				}
 			}
 		}
@@ -3212,9 +3593,19 @@ void DLevelScript::ReplaceTextures (int fromnamei, int tonamei, int flags)
 			sector_t *sec = &sectors[i];
 
 			if (!(flags & NOT_FLOOR) && sec->GetTexture(sector_t::floor) == picnum1) 
+			{
 				sec->SetTexture(sector_t::floor, picnum2);
+
+				// [BB] Mark this sector as having its flat changed.
+				sec->bFlatChange = true;
+			}
 			if (!(flags & NOT_CEILING) && sec->GetTexture(sector_t::ceiling) == picnum1)	
+			{
 				sec->SetTexture(sector_t::ceiling, picnum2);
+
+				// [BB] Mark this sector as having its flat changed.
+				sec->bFlatChange = true;
+			}
 		}
 	}
 }
@@ -3241,12 +3632,30 @@ int DLevelScript::DoSpawn (int type, fixed_t x, fixed_t y, fixed_t z, int tid, i
 					actor->flags |= MF_DROPPED;  // Don't respawn
 				actor->flags2 = oldFlags2;
 				spawncount++;
+
+				// [BC] If we're the server, tell clients to spawn the thing.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				{
+					SERVERCOMMANDS_SpawnThing( actor );
+
+					if ( actor->angle != 0 )
+						SERVERCOMMANDS_SetThingAngle( actor );
+
+					// [TP] If we're the server, sync the tid to clients (if this actor has one)
+					if ( actor->tid != 0 )
+						SERVERCOMMANDS_SetThingTID( actor );
+				}
 			}
 			else
 			{
 				// If this is a monster, subtract it from the total monster
 				// count, because it already added to it during spawning.
 				actor->ClearCounters();
+
+				// [BB] The monster didn't spawn at all, so we need to correct the number of monsters in invasion mode.
+				if (actor->CountsAsKill())
+					INVASION_UpdateMonsterCount( actor, true );
+
 				actor->Destroy ();
 				actor = NULL;
 			}
@@ -3347,6 +3756,10 @@ showme:
 					viewer->BlendG = fg2;
 					viewer->BlendB = fb2;
 					viewer->BlendA = fa2;
+
+					// [BB] Inform the clients about the blend.
+					if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+						SERVERCOMMANDS_SetPlayerBlend ( ULONG ( viewer - players ) );
 				}
 				else
 				{
@@ -3367,6 +3780,7 @@ showme:
 							fa1 = viewer->BlendA;
 						}
 					}
+
 					new DFlashFader (fr1, fg1, fb1, fa1, fr2, fg2, fb2, fa2, ftime, viewer->mo);
 				}
 			}
@@ -3378,6 +3792,18 @@ void DLevelScript::DoSetFont (int fontnum)
 {
 	const char *fontname = FBehavior::StaticLookupString (fontnum);
 	activefont = V_GetFont (fontname);
+
+	// [BC] Since the server doesn't have a screen, we have to save the active font some
+	// other way.
+	// [TP] activefont is a member, it cannot be stored as a single variable on the server.
+	activefontname = activefont ? fontname : "SmallFont";
+
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		SERVER_SetCurrentFont( activefontname );
+		return;
+	}
+
 	if (activefont == NULL)
 	{
 		activefont = SmallFont;
@@ -3471,6 +3897,7 @@ static AActor *SingleActorFromTID (int tid, AActor *defactor)
 	}
 }
 
+/* [BB] Moved to p_acs.h. Skulltag also needs this enum outside p_acs.cpp.
 enum
 {
 	APROP_Health		= 0,
@@ -3513,6 +3940,7 @@ enum
 	APROP_ReactionTime  = 37,
 	APROP_MeleeRange	= 38,
 };
+*/
 
 // These are needed for ACS's APROP_RenderStyle
 static const int LegacyRenderStyleIndices[] =
@@ -3554,6 +3982,14 @@ void DLevelScript::DoSetActorProperty (AActor *actor, int property, int value)
 	{
 		return;
 	}
+
+	// [WS/BB] Do not do this for spectators.
+	if ( actor->player && actor->player->bSpectating )
+		return;
+
+	// [BB]
+	int oldValue = 0;
+
 	switch (property)
 	{
 	case APROP_Health:
@@ -3566,6 +4002,13 @@ void DLevelScript::DoSetActorProperty (AActor *actor, int property, int value)
 		if (actor->player != NULL)
 		{
 			actor->player->health = value;
+
+			// [BC/BB] If we're the server, tell all clients about the new health value.
+			if (( NETWORK_GetState( ) == NETSTATE_SERVER ) &&
+				( SERVER_IsValidClient( actor->player - players )))
+			{
+				SERVERCOMMANDS_SetPlayerHealth( static_cast<ULONG>( actor->player - players ) );
+			}
 		}
 		// If the health is set to a non-positive value, properly kill the actor.
 		if (value <= 0)
@@ -3575,7 +4018,15 @@ void DLevelScript::DoSetActorProperty (AActor *actor, int property, int value)
 		break;
 
 	case APROP_Speed:
+		// [BB] Save the original value.
+		oldValue = actor->Speed;
+
 		actor->Speed = value;
+
+		// [BC] If we're the server, tell clients to update this actor property.
+		// [BB] Only bother the clients if the speed has actually changed.
+		if ( ( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( oldValue != actor->Speed ) )
+			SERVERCOMMANDS_SetThingProperty( actor, APROP_Speed );
 		break;
 
 	case APROP_Damage:
@@ -3584,6 +4035,10 @@ void DLevelScript::DoSetActorProperty (AActor *actor, int property, int value)
 
 	case APROP_Alpha:
 		actor->alpha = value;
+
+		// [BC] If we're the server, tell clients to update this actor property.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingProperty( actor, APROP_Alpha );
 		break;
 
 	case APROP_RenderStyle:
@@ -3595,6 +4050,11 @@ void DLevelScript::DoSetActorProperty (AActor *actor, int property, int value)
 				break;
 			}
 		}
+
+		// [BC] If we're the server, tell clients to update this actor property.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingProperty( actor, APROP_RenderStyle );
+
 		break;
 
 	case APROP_Ambush:
@@ -3607,6 +4067,10 @@ void DLevelScript::DoSetActorProperty (AActor *actor, int property, int value)
 
 	case APROP_Invulnerable:
 		if (value) actor->flags2 |= MF2_INVULNERABLE; else actor->flags2 &= ~MF2_INVULNERABLE;
+
+		// [BC] If we're the server, tell clients to update this actor property.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingFlags( actor, FLAGSET_FLAGS2 );
 		break;
 
 	case APROP_Notarget:
@@ -3620,6 +4084,10 @@ void DLevelScript::DoSetActorProperty (AActor *actor, int property, int value)
 	case APROP_JumpZ:
 		if (actor->IsKindOf (RUNTIME_CLASS (APlayerPawn)))
 			static_cast<APlayerPawn *>(actor)->JumpZ = value;
+
+		// [BC] If we're the server, tell clients to update this actor property.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingProperty( actor, APROP_JumpZ );
 		break; 	// [GRB]
 
 	case APROP_ChaseGoal:
@@ -3654,31 +4122,65 @@ void DLevelScript::DoSetActorProperty (AActor *actor, int property, int value)
 		if (actor->IsKindOf (RUNTIME_CLASS (APlayerPawn)))
 		{
 			static_cast<APlayerPawn *>(actor)->MaxHealth = value;
+
+			// [BB] If we're the server, tell clients to update this actor property.
+			// Note: Don't do this if the actor is a voodoo doll, the client would
+			// alter the value of the real player body in this case.
+			if ( ( NETWORK_GetState( ) == NETSTATE_SERVER ) && actor->player && ( actor->player->mo == actor ) )
+				SERVERCOMMANDS_SetPlayerMaxHealth( static_cast<ULONG>( actor->player - players ) );
 		}
 		break;
 
 	case APROP_Gravity:
+		// [BB] Save the original value.
+		oldValue = actor->gravity;
+
 		actor->gravity = value;
+
+		// [BB] If we're the server, tell clients to update this actor's gravity.
+		// [BB] Only bother the clients if the gravity has actually changed.
+		if ( ( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( oldValue != actor->gravity ) )
+			SERVERCOMMANDS_SetThingGravity( actor );
 		break;
 
 	case APROP_SeeSound:
 		actor->SeeSound = FBehavior::StaticLookupString(value);
+
+		// [BC] If we're the server, tell clients to update this actor property.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingSound( actor, ACTORSOUND_SEESOUND, FBehavior::StaticLookupString( value ));
 		break;
 
 	case APROP_AttackSound:
 		actor->AttackSound = FBehavior::StaticLookupString(value);
+
+		// [BC] If we're the server, tell clients to update this actor property.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingSound( actor, ACTORSOUND_ATTACKSOUND, FBehavior::StaticLookupString( value ));
 		break;
 
 	case APROP_PainSound:
 		actor->PainSound = FBehavior::StaticLookupString(value);
+
+		// [BC] If we're the server, tell clients to update this actor property.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingSound( actor, ACTORSOUND_PAINSOUND, FBehavior::StaticLookupString( value ));
 		break;
 
 	case APROP_DeathSound:
 		actor->DeathSound = FBehavior::StaticLookupString(value);
+
+		// [BC] If we're the server, tell clients to update this actor property.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingSound( actor, ACTORSOUND_DEATHSOUND, FBehavior::StaticLookupString( value ));
 		break;
 
 	case APROP_ActiveSound:
 		actor->ActiveSound = FBehavior::StaticLookupString(value);
+
+		// [BC] If we're the server, tell clients to update this actor property.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingSound( actor, ACTORSOUND_ACTIVESOUND, FBehavior::StaticLookupString( value ));
 		break;
 
 	case APROP_Species:
@@ -3971,11 +4473,24 @@ int DLevelScript::GetPlayerInput(int playernum, int inputnum)
 
 	if (playernum < 0)
 	{
-		if (activator == NULL)
+		// [BB] In world activated CLIENTSIDE scripts, return the input of the console player.
+		if ( NETWORK_InClientMode() && ( activator == NULL ) )
 		{
-			return 0;
+			// [BB] For spectators the original input is not saved (since it should be the same
+			// as modinput), thus just return the corresponding modinput in this case.
+			if ( players[consoleplayer].bSpectating && ( inputnum < MODINPUT_OLDBUTTONS ) )
+				inputnum += MODINPUT_OLDBUTTONS;
+
+			p = &players[consoleplayer];
 		}
-		p = activator->player;
+		else
+		{
+			if (activator == NULL)
+			{
+				return 0;
+			}
+			p = activator->player;
+		}
 	}
 	else if (playernum >= MAXPLAYERS || !playeringame[playernum])
 	{
@@ -4067,7 +4582,8 @@ int DLevelScript::DoClassifyActor(int tid)
 		{
 			classify |= ACTOR_VOODOODOLL;
 		}
-		if (actor->player->isbot)
+		// [BB] ST's bots are different.
+		if (actor->player->bIsBot)
 		{
 			classify |= ACTOR_BOT;
 		}
@@ -4202,6 +4718,35 @@ enum EACSFunctions
 	ACSF_PlayActorSound,
 	ACSF_SpawnDecal,
 	ACSF_CheckFont,
+
+	// [BB] Skulltag functions
+	ACSF_ResetMap = 100,
+	ACSF_PlayerIsSpectator,
+	ACSF_ConsolePlayerNumber,
+	ACSF_GetTeamProperty, // [Dusk]
+	ACSF_GetPlayerLivesLeft,
+	ACSF_SetPlayerLivesLeft,
+	ACSF_KickFromGame,
+	ACSF_GetGamemodeState,
+	ACSF_SetDBEntry,
+	ACSF_GetDBEntry,
+	ACSF_SetDBEntryString,
+	ACSF_GetDBEntryString,
+	ACSF_IncrementDBEntry,
+	ACSF_PlayerIsLoggedIn,
+	ACSF_GetPlayerAccountName,
+	ACSF_SortDBEntries,
+	ACSF_CountDBResults,
+	ACSF_FreeDBResults,
+	ACSF_GetDBResultKeyString,
+	ACSF_GetDBResultValueString,
+	ACSF_GetDBResultValue,
+	ACSF_GetDBEntryRank,
+	ACSF_RequestScriptPuke,
+	ACSF_BeginDBTransaction,
+	ACSF_EndDBTransaction,
+	ACSF_GetDBEntries,
+	ACSF_NamedRequestScriptPuke,
 
 	// ZDaemon
 	ACSF_GetTeamScore = 19620,	// (int team)
@@ -4885,7 +5430,7 @@ int DLevelScript::CallFunction(int argCount, int funcIndex, SDWORD *args, const 
 			break;
 
 		case ACSF_UniqueTID:
-			return P_FindUniqueTID(argCount > 0 ? args[0] : 0, argCount > 1 ? args[1] : 0);
+			return P_FindUniqueTID(argCount > 0 ? args[0] : 0, (argCount > 1 && args[1] >= 0) ? args[1] : 0);
 
 		case ACSF_IsTIDUsed:
 			return P_IsTIDUsed(args[0]);
@@ -5204,6 +5749,265 @@ doplaysound:			if (funcIndex == ACSF_PlayActorSound)
 			// bool CheckFont(str fontname)
 			return V_GetFont(FBehavior::StaticLookupString(args[0])) != NULL;
 
+		// [BL] Skulltag function
+		case ACSF_AnnouncerSound:
+			if (args[1] == 0)
+			{
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_AnnouncerSound(FBehavior::StaticLookupString(args[0]));
+			}
+			else
+			{
+				// Local announcement, needs player to activate.
+				if (activator == NULL || activator->player == NULL)
+					break;
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_AnnouncerSound(FBehavior::StaticLookupString(args[0]), activator->player - players, SVCF_ONLYTHISCLIENT);
+			}
+			ANNOUNCER_PlayEntry(cl_announcer, FBehavior::StaticLookupString(args[0]));
+			return 0;
+
+		// [BB]
+		case ACSF_ResetMap:
+			if ( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode( )) & GMF_MAPRESETS )
+			{
+				GAME_RequestMapRest ( );
+				return 1;
+			}
+			else
+			{
+				Printf ( "ResetMap can only be used in game modes that support map resets.\n" );
+				return 0;
+			}
+
+		// [BB]
+		case ACSF_PlayerIsSpectator:
+			{
+				const ULONG ulPlayer = static_cast<ULONG> ( args[0] );
+				if ( PLAYER_IsValidPlayer ( ulPlayer ) )
+				{
+					if ( ( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode( )) & GMF_DEADSPECTATORS ) && players[ulPlayer].bDeadSpectator )
+						return 2;
+					else
+						return players[ulPlayer].bSpectating;
+				}
+				else
+					return 0;
+			}
+
+		// [BB]
+		case ACSF_ConsolePlayerNumber:
+			{
+				// [BB] The server doesn't have a reasonable associated player.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					return -1;
+				else
+					return consoleplayer;
+			}
+
+		case ACSF_GetTeamScore:
+			{
+				// [Dusk] Exported this to a new function
+				return GetTeamScore (args[0]);
+			}
+
+		// [Dusk]
+		case ACSF_GetTeamProperty:
+			{
+				return GetTeamProperty (args[0], args[1], stack, stackdepth);
+			}
+
+		case ACSF_GetPlayerLivesLeft:
+			{
+				const ULONG ulPlayer = static_cast<ULONG> ( args[0] );
+				if ( PLAYER_IsValidPlayer ( ulPlayer ) )
+					return PLAYER_GetLivesLeft ( ulPlayer );
+				else
+					return -1;
+			}
+
+		case ACSF_SetPlayerLivesLeft:
+			{
+				const ULONG ulPlayer = static_cast<ULONG> ( args[0] );
+				if ( PLAYER_IsValidPlayer ( ulPlayer ) )
+				{
+					PLAYER_SetLivesLeft ( &players[ulPlayer], static_cast<ULONG> ( args[1] ) );
+					return 1;
+				}
+				else
+					return 0;
+			}
+
+		case ACSF_KickFromGame:
+			{
+				const ULONG ulPlayer = static_cast<ULONG> ( args[0] );
+				if ( ( NETWORK_InClientMode() == false ) && PLAYER_IsValidPlayer ( ulPlayer ) && ( PLAYER_IsTrueSpectator ( &players[ulPlayer] ) == false ) )
+				{
+					SERVER_KickPlayerFromGame ( ulPlayer, FBehavior::StaticLookupString ( args[1] ) );
+					return 1;
+				}
+				else
+					return 0;
+			}
+
+		// [BB]
+		case ACSF_GetGamemodeState:
+			{
+				return GAMEMODE_GetState();
+			}
+
+		// [BB]
+		case ACSF_SetDBEntry:
+			{
+				DATABASE_SaveSetEntryInt ( FBehavior::StaticLookupString(args[0]), FBehavior::StaticLookupString(args[1]), args[2] );
+				return 1;
+			}
+
+		// [BB]
+		case ACSF_GetDBEntry:
+			{
+				return DATABASE_SaveGetEntry ( FBehavior::StaticLookupString(args[0]), FBehavior::StaticLookupString(args[1]) ).ToLong();
+			}
+
+		// [BB]
+		case ACSF_SetDBEntryString:
+			{
+				DATABASE_SaveSetEntry ( FBehavior::StaticLookupString(args[0]), FBehavior::StaticLookupString(args[1]), FBehavior::StaticLookupString(args[2]) );
+				return 1;
+			}
+
+		// [BB]
+		case ACSF_GetDBEntryString:
+			{
+				return ACS_PushAndReturnDynamicString ( DATABASE_SaveGetEntry ( FBehavior::StaticLookupString(args[0]), FBehavior::StaticLookupString(args[1]) ), stack, stackdepth );
+			}
+
+		// [BB]
+		case ACSF_IncrementDBEntry:
+			{
+				DATABASE_SaveIncrementEntryInt ( FBehavior::StaticLookupString(args[0]), FBehavior::StaticLookupString(args[1]), args[2] );
+				return 1;
+			}
+
+		// [BB]
+		case ACSF_PlayerIsLoggedIn:
+			{
+				const ULONG ulPlayer = static_cast<ULONG> ( args[0] );
+				if ( ( NETWORK_GetState( ) == NETSTATE_SERVER ) && SERVER_IsValidClient ( ulPlayer ) )
+					return SERVER_GetClient ( ulPlayer )->loggedIn;
+				else
+					return false;
+			}
+
+		// [BB]
+		case ACSF_GetPlayerAccountName:
+			{
+				FString work;
+				const ULONG ulPlayer = static_cast<ULONG> ( args[0] );
+				// [BB] If the sanity checks fail, we'll return an empty string.
+				if ( ( NETWORK_GetState( ) == NETSTATE_SERVER ) && SERVER_IsValidClient ( ulPlayer ) )
+				{
+					if ( SERVER_GetClient ( ulPlayer )->loggedIn )
+						work = SERVER_GetClient ( ulPlayer )->username;
+					// Anonymous players get an account name based on their player slot.
+					else
+						work.AppendFormat ( "%d@localhost", static_cast<int>(ulPlayer) );
+				}
+				return ACS_PushAndReturnDynamicString ( work, stack, stackdepth );
+			}
+
+		case ACSF_SortDBEntries:
+			{
+				g_dbQueries.resize ( g_dbQueries.size() + 1 );
+				DATABASE_GetSortedEntries ( FBehavior::StaticLookupString(args[0]), args[1], args[2], !!(args[3]), g_dbQueries.back() );
+				return ( g_dbQueries.size() - 1 );
+			}
+
+		case ACSF_CountDBResults:
+			{
+				const unsigned int handle = static_cast<unsigned int> ( args[0] );
+				if ( handle < g_dbQueries.size() )
+					return g_dbQueries[handle].Size();
+				else
+					return -1;
+			}
+
+		case ACSF_FreeDBResults:
+			{
+				const unsigned int handle = static_cast<unsigned int> ( args[0] );
+				if ( handle < g_dbQueries.size() )
+				{
+					g_dbQueries[handle].Clear();
+					if ( handle == ( g_dbQueries.size() - 1 ) )
+						g_dbQueries.resize ( g_dbQueries.size() - 1 );
+				}
+			}
+
+		case ACSF_GetDBResultKeyString:
+		case ACSF_GetDBResultValueString:
+			{
+				FString work;
+
+				const unsigned int handle = static_cast<unsigned int> ( args[0] );
+				if ( handle < g_dbQueries.size() )
+				{
+					const unsigned int index = static_cast<unsigned int> ( args[1] );
+					if ( index < g_dbQueries[handle].Size() )
+					{
+						if ( funcIndex == ACSF_GetDBResultKeyString )
+							work = g_dbQueries[handle][index].first;
+						else
+							work = g_dbQueries[handle][index].second;
+					}
+					else
+						work = "Invalid index";
+				}
+				else
+					work = "Invalid handle";
+				return ACS_PushAndReturnDynamicString ( work, stack, stackdepth );
+			}
+
+		case ACSF_GetDBResultValue:
+			{
+				const unsigned int handle = static_cast<unsigned int> ( args[0] );
+				if ( handle < g_dbQueries.size() )
+				{
+					const unsigned int index = static_cast<unsigned int> ( args[1] );
+					if ( index < g_dbQueries[handle].Size() )
+						return ( g_dbQueries[handle][index].second.ToLong() );
+				}
+				return 0;
+			}
+
+		case ACSF_GetDBEntryRank:
+			return DATABASE_GetEntryRank ( FBehavior::StaticLookupString(args[0]), FBehavior::StaticLookupString(args[1]), !!(args[2]) );
+
+		// [TP]
+		case ACSF_RequestScriptPuke:
+			return RequestScriptPuke( activeBehavior, args[0], &args[1], argCount - 1 );
+
+		// [TP]
+		case ACSF_NamedRequestScriptPuke:
+			{
+				FName scriptName = FBehavior::StaticLookupString( args[0] );
+				return RequestScriptPuke( activeBehavior, -scriptName, &args[1], argCount - 1 );
+			}
+
+		case ACSF_BeginDBTransaction:
+			DATABASE_BeginTransaction();
+			break;
+
+		case ACSF_EndDBTransaction:
+			DATABASE_EndTransaction();
+			break;
+
+		case ACSF_GetDBEntries:
+			{
+				g_dbQueries.resize ( g_dbQueries.size() + 1 );
+				DATABASE_GetEntries ( FBehavior::StaticLookupString(args[0]), g_dbQueries.back() );
+				return ( g_dbQueries.size() - 1 );
+			}
+
 		default:
 			break;
 	}
@@ -5251,6 +6055,9 @@ int DLevelScript::RunScript ()
 
 	// Hexen truncates all special arguments to bytes (only when using an old MAPINFO and old ACS format
 	const int specialargmask = ((level.flags2 & LEVEL2_HEXENHACK) && activeBehavior->GetFormat() == ACS_Old) ? 255 : ~0;
+
+	// [BB] Start to measure how much outbound net traffic this call of DLevelScript::RunScript() needs.
+	NETWORK_StartTrafficMeasurement ( );
 
 	switch (state)
 	{
@@ -5313,6 +6120,11 @@ int DLevelScript::RunScript ()
 	const char *lookup;
 	int optstart = -1;
 	int temp;
+
+	// [BC] Since the server doesn't have a screen, we have to save the active font some
+	// other way.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVER_SetCurrentFont( activefontname );
 
 	while (state == SCRIPT_Running)
 	{
@@ -6942,6 +7754,18 @@ scriptwait:
 				{
 					C_MidPrint (activefont, work);
 				}
+
+				// [BC] Potentially tell clients to print this message.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				{
+					// Printbold displays to everyone.
+					if (( pcd == PCD_ENDPRINTBOLD ) || ( screen == NULL ))
+						SERVERCOMMANDS_PrintMid( work.GetChars( ), false );
+					// Otherwise, if a player is the activator, send him the message.
+					else if ( screen->player )
+						SERVERCOMMANDS_PrintMid( work.GetChars( ), false, screen->player - players, SVCF_ONLYTHISCLIENT );
+				}
+
 				STRINGBUILDER_FINISH(work);
 			}
 			else
@@ -6970,7 +7794,7 @@ scriptwait:
 					screen = screen->target;
 				}
 				if (pcd == PCD_ENDHUDMESSAGEBOLD || screen == NULL ||
-					players[consoleplayer].mo == screen)
+					players[consoleplayer].mo == screen || NETWORK_GetState( ) == NETSTATE_SERVER )
 				{
 					int type = Stack[optstart-6];
 					int id = Stack[optstart-5];
@@ -6979,7 +7803,7 @@ scriptwait:
 					float y = FIXED2FLOAT(Stack[optstart-2]);
 					float holdTime = FIXED2FLOAT(Stack[optstart-1]);
 					fixed_t alpha;
-					DHUDMessage *msg;
+					DHUDMessage *msg = NULL;
 
 					if (type & HUDMSG_COLORSTRING)
 					{
@@ -6994,13 +7818,33 @@ scriptwait:
 					{
 					default:	// normal
 						alpha = (optstart < sp) ? Stack[optstart] : FRACUNIT;
-						msg = new DHUDMessage (activefont, work, x, y, hudwidth, hudheight, color, holdTime);
+
+						// [BC] Tell clients to print this message.
+						if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+						{
+							if (( pcd == PCD_ENDHUDMESSAGEBOLD ) || ( screen == NULL ))
+								SERVERCOMMANDS_PrintHUDMessage( work.GetChars( ), x, y, hudwidth, hudheight, color, holdTime, SERVER_GetCurrentFont( ), !!( type & HUDMSG_LOG ), id );
+							else if ( screen->player )
+								SERVERCOMMANDS_PrintHUDMessage( work.GetChars( ), x, y, hudwidth, hudheight, color, holdTime, SERVER_GetCurrentFont( ), !!( type & HUDMSG_LOG ), id, screen->player - players, SVCF_ONLYTHISCLIENT );
+						}
+						else
+							msg = new DHUDMessage (activefont, work, x, y, hudwidth, hudheight, color, holdTime);
 						break;
 					case 1:		// fade out
 						{
 							float fadeTime = (optstart < sp) ? FIXED2FLOAT(Stack[optstart]) : 0.5f;
 							alpha = (optstart < sp-1) ? Stack[optstart+1] : FRACUNIT;
-							msg = new DHUDMessageFadeOut (activefont, work, x, y, hudwidth, hudheight, color, holdTime, fadeTime);
+
+							// [BC] Tell clients to print this message.
+							if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+							{
+								if (( pcd == PCD_ENDHUDMESSAGEBOLD ) || ( screen == NULL ))
+									SERVERCOMMANDS_PrintHUDMessageFadeOut( work.GetChars( ), x, y, hudwidth, hudheight, color, holdTime, fadeTime, SERVER_GetCurrentFont( ), !!( type & HUDMSG_LOG ), id );
+								else if ( screen->player )
+									SERVERCOMMANDS_PrintHUDMessageFadeOut( work.GetChars( ), x, y, hudwidth, hudheight, color, holdTime, fadeTime, SERVER_GetCurrentFont( ), !!( type & HUDMSG_LOG ), id, screen->player - players, SVCF_ONLYTHISCLIENT );
+							}
+							else
+								msg = new DHUDMessageFadeOut (activefont, work, x, y, hudwidth, hudheight, color, holdTime, fadeTime);
 						}
 						break;
 					case 2:		// type on, then fade out
@@ -7008,7 +7852,17 @@ scriptwait:
 							float typeTime = (optstart < sp) ? FIXED2FLOAT(Stack[optstart]) : 0.05f;
 							float fadeTime = (optstart < sp-1) ? FIXED2FLOAT(Stack[optstart+1]) : 0.5f;
 							alpha = (optstart < sp-2) ? Stack[optstart+2] : FRACUNIT;
-							msg = new DHUDMessageTypeOnFadeOut (activefont, work, x, y, hudwidth, hudheight, color, typeTime, holdTime, fadeTime);
+
+							// [BC] Tell clients to print this message.
+							if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+							{
+								if (( pcd == PCD_ENDHUDMESSAGEBOLD ) || ( screen == NULL ))
+									SERVERCOMMANDS_PrintHUDMessageTypeOnFadeOut( work.GetChars( ), x, y, hudwidth, hudheight, color, typeTime, holdTime, fadeTime, SERVER_GetCurrentFont( ), !!( type & HUDMSG_LOG ), id );
+								else if ( screen->player )
+									SERVERCOMMANDS_PrintHUDMessageTypeOnFadeOut( work.GetChars( ), x, y, hudwidth, hudheight, color, typeTime, holdTime, fadeTime, SERVER_GetCurrentFont( ), !!( type & HUDMSG_LOG ), id, screen->player - players, SVCF_ONLYTHISCLIENT );
+							}
+							else
+								msg = new DHUDMessageTypeOnFadeOut (activefont, work, x, y, hudwidth, hudheight, color, typeTime, holdTime, fadeTime);
 						}
 						break;
 					case 3:		// fade in, then fade out
@@ -7016,30 +7870,45 @@ scriptwait:
 							float inTime = (optstart < sp) ? FIXED2FLOAT(Stack[optstart]) : 0.5f;
 							float outTime = (optstart < sp-1) ? FIXED2FLOAT(Stack[optstart+1]) : 0.5f;
 							alpha = (optstart < sp-2) ? Stack[optstart+2] : FRACUNIT;
-							msg = new DHUDMessageFadeInOut (activefont, work, x, y, hudwidth, hudheight, color, holdTime, inTime, outTime);
+
+							// [BC] Tell clients to print this message.
+							if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+							{
+								if (( pcd == PCD_ENDHUDMESSAGEBOLD ) || ( screen == NULL ))
+									SERVERCOMMANDS_PrintHUDMessageFadeInOut( work.GetChars( ), x, y, hudwidth, hudheight, color, holdTime, inTime, outTime, SERVER_GetCurrentFont( ), !!( type & HUDMSG_LOG ), id );
+								else if ( screen->player )
+									SERVERCOMMANDS_PrintHUDMessageFadeInOut( work.GetChars( ), x, y, hudwidth, hudheight, color, holdTime, inTime, outTime, SERVER_GetCurrentFont( ), !!( type & HUDMSG_LOG ), id, screen->player - players, SVCF_ONLYTHISCLIENT );
+							}
+							else
+								msg = new DHUDMessageFadeInOut (activefont, work, x, y, hudwidth, hudheight, color, holdTime, inTime, outTime);
 						}
 						break;
 					}
-					msg->SetClipRect(ClipRectLeft, ClipRectTop, ClipRectWidth, ClipRectHeight);
-					if (WrapWidth != 0)
+					// [BB] The server didn't create msg, so we can't manipulate it like this.
+					// Most of the things below will need extra network handling.
+					if ( NETWORK_GetState( ) != NETSTATE_SERVER )
 					{
-						msg->SetWrapWidth(WrapWidth);
+						msg->SetClipRect(ClipRectLeft, ClipRectTop, ClipRectWidth, ClipRectHeight);
+						if (WrapWidth != 0)
+						{
+							msg->SetWrapWidth(WrapWidth);
+						}
+						msg->SetVisibility((type & HUDMSG_VISIBILITY_MASK) >> HUDMSG_VISIBILITY_SHIFT);
+						if (type & HUDMSG_NOWRAP)
+						{
+							msg->SetNoWrap(true);
+						}
+						if (type & HUDMSG_ALPHA)
+						{
+							msg->SetAlpha(alpha);
+						}
+						if (type & HUDMSG_ADDBLEND)
+						{
+							msg->SetRenderStyle(STYLE_Add);
+						}
+						StatusBar->AttachMessage (msg, id ? 0xff000000|id : 0,
+							(type & HUDMSG_LAYER_MASK) >> HUDMSG_LAYER_SHIFT);
 					}
-					msg->SetVisibility((type & HUDMSG_VISIBILITY_MASK) >> HUDMSG_VISIBILITY_SHIFT);
-					if (type & HUDMSG_NOWRAP)
-					{
-						msg->SetNoWrap(true);
-					}
-					if (type & HUDMSG_ALPHA)
-					{
-						msg->SetAlpha(alpha);
-					}
-					if (type & HUDMSG_ADDBLEND)
-					{
-						msg->SetRenderStyle(STYLE_Add);
-					}
-					StatusBar->AttachMessage (msg, id ? 0xff000000|id : 0,
-						(type & HUDMSG_LAYER_MASK) >> HUDMSG_LAYER_SHIFT);
 					if (type & HUDMSG_LOG)
 					{
 						static const char bar[] = TEXTCOLOR_ORANGE "\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36"
@@ -7087,7 +7956,9 @@ scriptwait:
 				PushToStack (GAME_TITLE_MAP);
 			else if (deathmatch)
 				PushToStack (GAME_NET_DEATHMATCH);
-			else if (multiplayer)
+			else if ( teamgame )
+				PushToStack( GAME_NET_TEAMGAME );
+			else if ( NETWORK_GetState( ) != NETSTATE_SINGLE )
 				PushToStack (GAME_NET_COOPERATIVE);
 			else
 				PushToStack (GAME_SINGLE_PLAYER);
@@ -7097,7 +7968,43 @@ scriptwait:
 			PushToStack (G_SkillProperty(SKILLP_ACSReturn));
 			break;
 
-// [BC] Start ST PCD's
+// There aren't used anymore.
+		case PCD_PLAYERBLUESKULL:
+
+			PushToStack( -1 );
+			break;
+		case PCD_PLAYERREDSKULL:
+
+			PushToStack( -1 );
+			break;
+		case PCD_PLAYERYELLOWSKULL:
+
+			PushToStack( -1 );
+			break;
+		case PCD_PLAYERBLUECARD:
+
+			PushToStack( -1 );
+			break;
+		case PCD_PLAYERREDCARD:
+
+			PushToStack( -1 );
+			break;
+		case PCD_PLAYERYELLOWCARD:
+
+			PushToStack( -1 );
+			break;
+		case PCD_ISMULTIPLAYER:
+			
+			PushToStack(( NETWORK_GetState( ) == NETSTATE_SERVER ) ||
+				NETWORK_InClientMode() );
+			break;
+		case PCD_PLAYERTEAM:
+
+			if ( activator && activator->player )
+				PushToStack( activator->player->ulTeam );
+			else
+				PushToStack( 0 );
+			break;
 		case PCD_PLAYERHEALTH:
 			if (activator)
 				PushToStack (activator->health);
@@ -7124,17 +8031,86 @@ scriptwait:
 				PushToStack (0);
 			break;
 
+		case PCD_BLUETEAMCOUNT:
+			
+			PushToStack( TEAM_CountPlayers( 0 ));
+			break;
+		case PCD_REDTEAMCOUNT:
+			
+			PushToStack( TEAM_CountPlayers( 1 ));
+			break;
+		case PCD_BLUETEAMSCORE:
+			
+			if ( GAMEMODE_GetFlags(GAMEMODE_GetCurrentMode()) & GMF_PLAYERSEARNFRAGS )
+				PushToStack( TEAM_GetFragCount( 0 ));
+			else if ( GAMEMODE_GetFlags(GAMEMODE_GetCurrentMode()) & GMF_PLAYERSEARNWINS )
+				PushToStack( TEAM_GetWinCount( 0 ));
+			else
+				PushToStack( TEAM_GetScore( 0 ));
+			break;
+		case PCD_REDTEAMSCORE:
+			
+			if ( GAMEMODE_GetFlags(GAMEMODE_GetCurrentMode()) & GMF_PLAYERSEARNFRAGS )
+				PushToStack( TEAM_GetFragCount( 1 ));
+			else if ( GAMEMODE_GetFlags(GAMEMODE_GetCurrentMode()) & GMF_PLAYERSEARNWINS )
+				PushToStack( TEAM_GetWinCount( 1 ));
+			else
+				PushToStack( TEAM_GetScore( 1 ));
+			break;
+		case PCD_ISONEFLAGCTF:
+
+			PushToStack( oneflagctf );
+			break;
+		case PCD_GETINVASIONWAVE:
+
+			if ( invasion == false )
+				PushToStack( -1 );
+			else
+				PushToStack( (LONG)INVASION_GetCurrentWave( ));
+			break;
+		case PCD_GETINVASIONSTATE:
+
+			if ( invasion == false )
+				PushToStack( -1 );
+			else
+				PushToStack( (LONG)INVASION_GetState( ));
+			break;
+		case PCD_CONSOLECOMMAND:
+
+			g_bCalledFromConsoleCommand = true;
+			if ( FBehavior::StaticLookupString( STACK( 3 )))
+				C_DoCommand( FBehavior::StaticLookupString( STACK( 3 )));
+			g_bCalledFromConsoleCommand = false;
+			sp -= 3;
+			break;
+		case PCD_CONSOLECOMMANDDIRECT:
+
+			g_bCalledFromConsoleCommand = true;
+			if ( FBehavior::StaticLookupString( pc[0] ))
+				C_DoCommand( FBehavior::StaticLookupString (pc[0]));
+			g_bCalledFromConsoleCommand = false;
+			pc += 3;
+			break;
+
 		case PCD_MUSICCHANGE:
 			lookup = FBehavior::StaticLookupString (STACK(2));
 			if (lookup != NULL)
 			{
 				S_ChangeMusic (lookup, STACK(1));
+
+				// [BC] If we're the server, tell clients to change the music, and
+				// save the current music setting for when new clients connect.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				{
+					SERVERCOMMANDS_SetMapMusic( lookup, STACK( 1 ));
+					SERVER_SetMapMusic( lookup, STACK( 1 ));
+				}
 			}
 			sp -= 2;
 			break;
 
 		case PCD_SINGLEPLAYER:
-			PushToStack (!netgame);
+			PushToStack(( NETWORK_GetState( ) == NETSTATE_SINGLE ));
 			break;
 // [BC] End ST PCD's
 
@@ -7154,6 +8130,10 @@ scriptwait:
 						lookup,
 						(float)(STACK(1)) / 127.f,
 						ATTN_NORM);
+
+					// [BC] If we're the server, tell clients to play this sound.
+					if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+						SERVERCOMMANDS_SoundPoint( activationline->frontsector->soundorg[0], activationline->frontsector->soundorg[1], activationline->frontsector->soundorg[2], CHAN_AUTO, (char *)lookup, (float)(STACK(1)) / 127.f, ATTN_NORM );
 				}
 				else
 				{
@@ -7162,6 +8142,10 @@ scriptwait:
 						lookup,
 						(float)(STACK(1)) / 127.f,
 						ATTN_NORM);
+
+					// [BC] If we're the server, tell clients to play this sound.
+					if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+						SERVERCOMMANDS_Sound( CHAN_AUTO, (char *)lookup, (float)( STACK( 1 ) / 127.f ), ATTN_NORM );
 				}
 			}
 			sp -= 2;
@@ -7174,18 +8158,31 @@ scriptwait:
 				S_Sound (CHAN_AUTO,
 						 lookup,
 						 (float)(STACK(1)) / 127.f, ATTN_NONE);
+
+				// [BC] If we're the server, tell clients to play this sound.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_Sound( CHAN_AUTO, (char *)lookup, (float)( STACK( 1 ) / 127.f ), ATTN_NONE );
 			}
 			sp -= 2;
 			break;
 
 		case PCD_LOCALAMBIENTSOUND:
-			lookup = FBehavior::StaticLookupString (STACK(2));
-			if (lookup != NULL && activator->CheckLocalView (consoleplayer))
+			// [BB] With Skulltag's in game joining / leaving, it's possible that activator is NULL.
+			if ( activator != NULL )
 			{
-				S_Sound (CHAN_AUTO,
-						 lookup,
-						 (float)(STACK(1)) / 127.f, ATTN_NONE);
+				lookup = FBehavior::StaticLookupString (STACK(2));
+				if (lookup != NULL && activator->CheckLocalView (consoleplayer))
+				{
+					S_Sound (CHAN_AUTO,
+						lookup,
+						(float)(STACK(1)) / 127.f, ATTN_NONE);
+				}
+
+				// [BC] If we're the server, tell clients to play this sound.
+				if (( lookup != NULL ) && ( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( activator->player ))
+					SERVERCOMMANDS_Sound( CHAN_AUTO, (char *)lookup, (float)( STACK( 1 ) / 127.f ), ATTN_NONE, activator->player - players, SVCF_ONLYTHISCLIENT );
 			}
+
 			sp -= 2;
 			break;
 
@@ -7198,12 +8195,20 @@ scriptwait:
 					S_Sound (activator, CHAN_AUTO,
 							 lookup,
 							 (float)(STACK(1)) / 127.f, ATTN_NORM);
+
+					// [BC] If we're the server, tell clients to play this sound.
+					if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+						SERVERCOMMANDS_SoundActor( activator, CHAN_AUTO, lookup, (float)STACK( 1 ) / 127.f, ATTN_NORM );
 				}
 				else
 				{
 					S_Sound (CHAN_AUTO,
 							 lookup,
 							 (float)(STACK(1)) / 127.f, ATTN_NONE);
+
+					// [BB] If we're the server, tell clients to play this sound.
+					if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+						SERVERCOMMANDS_Sound( CHAN_AUTO, lookup, (float)STACK( 1 ) / 127.f, ATTN_NORM );
 				}
 			}
 			sp -= 2;
@@ -7216,6 +8221,10 @@ scriptwait:
 				if (activationline != NULL)
 				{
 					SN_StartSequence (activationline->frontsector, CHAN_FULLHEIGHT, lookup, 0);
+
+					// [BB] Tell the clients to play the sound.
+					if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+						SERVERCOMMANDS_StartSectorSequence( activationline->frontsector, CHAN_FULLHEIGHT, lookup, 0 );
 				}
 			}
 			sp--;
@@ -7260,6 +8269,10 @@ scriptwait:
 						lines[line].flags |= ML_BLOCK_PLAYERS;
 						break;
 					}
+
+					// If we're the server, tell clients to update this line.
+					if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+						SERVERCOMMANDS_SetSomeLineFlags( line );
 				}
 
 				sp -= 2;
@@ -7336,6 +8349,15 @@ scriptwait:
 						actor->args[2] = STACK(3);
 						actor->args[3] = STACK(2);
 						actor->args[4] = STACK(1);
+
+						// [BB] If we're the server, tell the clients to set the thing specials.
+						if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+						{
+							// [BC] The client doesn't need to know the thing's special (does it?).
+//							if( actor->special != 0 )
+//								Printf( "Actor special is %d, updating this to the clients is not implemented yet.\n", actor->special );
+							SERVERCOMMANDS_SetThingArguments( actor );
+						}
 					}
 				}
 				else if (activator != NULL)
@@ -7346,6 +8368,15 @@ scriptwait:
 					activator->args[2] = STACK(3);
 					activator->args[3] = STACK(2);
 					activator->args[4] = STACK(1);
+
+					// [BB] If we're the server, tell the clients to set the thing specials.
+					if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					{
+						// [BC] The client doesn't need to know the thing's special (does it?).
+//						if ( activator->special != 0 )
+//							Printf( "Activator special is %d, updating this to the clients is not implemented yet.\n", activator->special );
+						SERVERCOMMANDS_SetThingArguments( activator );
+					}
 				}
 				sp -= 7;
 			}
@@ -7363,6 +8394,10 @@ scriptwait:
 					S_Sound (spot, CHAN_AUTO,
 							 lookup,
 							 (float)(STACK(1))/127.f, ATTN_NORM);
+
+					// If we're the server, tell clients to play this sound.
+					if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+						SERVERCOMMANDS_SoundActor( spot, CHAN_AUTO, (char *)lookup, (float)STACK( 1 ) / 127.f, ATTN_NORM );
 				}
 			}
 			sp -= 3;
@@ -7380,22 +8415,42 @@ scriptwait:
 
 		case PCD_SETGRAVITY:
 			level.gravity = (float)STACK(1) / 65536.f;
+
+			// [BB] The level gravity is handled as part of the gamemode limits.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetGameModeLimits( );
+
 			sp--;
 			break;
 
 		case PCD_SETGRAVITYDIRECT:
 			level.gravity = (float)uallong(pc[0]) / 65536.f;
+
+			// [BB] The level gravity is handled as part of the gamemode limits.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetGameModeLimits( );
+
 			pc++;
 			break;
 
 		case PCD_SETAIRCONTROL:
 			level.aircontrol = STACK(1);
+
+			// [BB] The level aircontrol is handled as part of the gamemode limits.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetGameModeLimits( );
+
 			sp--;
 			G_AirControlChanged ();
 			break;
 
 		case PCD_SETAIRCONTROLDIRECT:
 			level.aircontrol = uallong(pc[0]);
+
+			// [BB] The level aircontrol is handled as part of the gamemode limits.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetGameModeLimits( );
+
 			pc++;
 			G_AirControlChanged ();
 			break;
@@ -7600,6 +8655,10 @@ scriptwait:
 				if (type != NULL && type->ParentClass == RUNTIME_CLASS(AAmmo))
 				{
 					item = activator->FindInventory (type);
+
+					// [BB] Save the original value.
+					const int oldMaxAmount = item ? item->MaxAmount : -1;
+
 					if (item != NULL)
 					{
 						item->MaxAmount = STACK(1);
@@ -7610,22 +8669,57 @@ scriptwait:
 						item->MaxAmount = STACK(1);
 						item->Amount = 0;
 					}
+					// [BB] If the activator is a player, tell the clients about the changed capacity.
+					// [BB] Only bother the clients if MaxAmount has actually changed.
+					if ( activator->player && NETWORK_GetState() == NETSTATE_SERVER && ( oldMaxAmount != item->MaxAmount ) )
+						SERVERCOMMANDS_SetPlayerAmmoCapacity( activator->player - players, item );
 				}
 			}
 			sp -= 2;
 			break;
 
 		case PCD_SETMUSIC:
+
+			// [BC] Tell clients about this music change, and save the music setting for when
+			// new clients connect.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			{
+				SERVERCOMMANDS_SetMapMusic( FBehavior::StaticLookupString( STACK( 3 )), STACK( 2 ) );
+				SERVER_SetMapMusic( FBehavior::StaticLookupString( STACK( 3 )), STACK( 2 ) );
+			}
+
 			S_ChangeMusic (FBehavior::StaticLookupString (STACK(3)), STACK(2));
 			sp -= 3;
 			break;
 
 		case PCD_SETMUSICDIRECT:
+
+			// [BC] Tell clients about this music change.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			{
+				const char* music =  FBehavior::StaticLookupString( TAGSTR(uallong(pc[0])) );
+				int order = uallong( pc[1] );
+
+				SERVERCOMMANDS_SetMapMusic( music, order );
+				SERVER_SetMapMusic( music, order );
+			}
+
 			S_ChangeMusic (FBehavior::StaticLookupString (TAGSTR(uallong(pc[0]))), uallong(pc[1]));
 			pc += 3;
 			break;
 
 		case PCD_LOCALSETMUSIC:
+
+			// [BC] Tell clients about this music change.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			{
+				if ( activator && activator->player )
+				{
+					SERVERCOMMANDS_SetMapMusic( FBehavior::StaticLookupString( STACK( 3 )), STACK( 2 ),
+						activator->player - players, SVCF_ONLYTHISCLIENT );
+				}
+			}
+
 			if (activator == players[consoleplayer].mo)
 			{
 				S_ChangeMusic (FBehavior::StaticLookupString (STACK(3)), STACK(2));
@@ -7634,6 +8728,17 @@ scriptwait:
 			break;
 
 		case PCD_LOCALSETMUSICDIRECT:
+
+			// Tell clients about this music change.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			{
+				if ( activator && activator->player )
+				{
+					SERVERCOMMANDS_SetMapMusic( FBehavior::StaticLookupString(TAGSTR(uallong(pc[0]))),
+						uallong( pc[1] ), activator->player - players, SVCF_ONLYTHISCLIENT );
+				}
+			}
+
 			if (activator == players[consoleplayer].mo)
 			{
 				S_ChangeMusic (FBehavior::StaticLookupString (TAGSTR(uallong(pc[0]))), uallong(pc[1]));
@@ -7654,6 +8759,14 @@ scriptwait:
 
 		case PCD_CANCELFADE:
 			{
+				// [BB] Tell the clients to cancel the fade.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				{
+					// [BB] Encode "activator == NULL" as MAXPLAYERS.
+					const ULONG ulPlayer = ( activator && activator->player ) ? static_cast<ULONG> ( activator->player - players ) : MAXPLAYERS;
+					SERVERCOMMANDS_CancelFade ( ulPlayer );
+				}
+
 				TThinkerIterator<DFlashFader> iterator;
 				DFlashFader *fader;
 
@@ -7805,6 +8918,12 @@ scriptwait:
 						translationtables[TRANSLATION_LevelScripted].SetVal(i - 1, translation);
 					}
 					translation->MakeIdentity();
+
+					if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					{
+						const int translationindex = ACS_GetTranslationIndex( translation );
+						SERVER_RemoveEditedTranslation ( translationindex );
+					}
 				}
 			}
 			break;
@@ -7819,6 +8938,17 @@ scriptwait:
 
 				if (translation != NULL)
 					translation->AddIndexRange(start, end, pal1, pal2);
+
+				// [BC] If we're the server, send the new translation off to clients, and
+				// store it in our list so we can tell new clients who connect about the
+				// translation.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				{
+					// [BB] Obtain the index of the translation.
+					const int translationindex = ACS_GetTranslationIndex( translation );
+					SERVERCOMMANDS_CreateTranslation(translationindex, start, end, pal1, pal2 );
+					SERVER_AddEditedTranslation(translationindex, start, end, pal1, pal2 );
+				}
 			}
 			break;
 
@@ -7837,6 +8967,17 @@ scriptwait:
 
 				if (translation != NULL)
 					translation->AddColorRange(start, end, r1, g1, b1, r2, g2, b2);
+
+				// [BC] If we're the server, send the new translation off to clients, and
+				// store it in our list so we can tell new clients who connect about the
+				// translation.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				{
+					// [BB] Obtain the index of the translation.
+					const int translationindex = ACS_GetTranslationIndex( translation );
+					SERVERCOMMANDS_CreateTranslation( translationindex, start, end, r1, g1, b1, r2, g2, b2 );
+					SERVER_AddEditedTranslation( translationindex, start, end, r1, g1, b1, r2, g2, b2 );
+				}
 			}
 			break;
 
@@ -7880,7 +9021,13 @@ scriptwait:
 			break;
 
         case PCD_CHECKWEAPON:
-            if (activator == NULL || activator->player == NULL || // Non-players do not have weapons
+			// [BB] Workaround to let CheckWeapon return something reasonable even before the client selected the starting weapon.
+			if ( ( NETWORK_GetState( ) == NETSTATE_SERVER ) && activator && activator->player && ( activator->player->bClientSelectedWeapon == false )
+				&& ( activator->player->ReadyWeapon == NULL ) && ( activator->player->PendingWeapon == WP_NOCHANGE ) )
+			{
+				STACK(1) = activator->player->StartingWeaponName == FName(FBehavior::StaticLookupString (STACK(1)), true);
+			}
+			else if (activator == NULL || activator->player == NULL || // Non-players do not have weapons
                 activator->player->ReadyWeapon == NULL)
             {
                 STACK(1) = 0;
@@ -7921,6 +9068,10 @@ scriptwait:
 						// There's enough ammo, so switch to it.
 						STACK(1) = 1;
 						activator->player->PendingWeapon = weap;
+
+						// [BC] If we're the server, tell the client to change his weapon.
+						if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+							SERVERCOMMANDS_SetPlayerPendingWeapon( ULONG( activator->player - players ));
 					}
 					else
 					{
@@ -8017,7 +9168,8 @@ scriptwait:
 			}
 			else
 			{
-				STACK(1) = playeringame[STACK(1)];
+				// [BB] Skulltag doesn't count spectators as players.
+				STACK(1) = playeringame[STACK(1)] && ( players[STACK(1)].bSpectating == false );
 			}
 			break;
 
@@ -8028,7 +9180,7 @@ scriptwait:
 			}
 			else
 			{
-				STACK(1) = players[STACK(1)].isbot;
+				STACK(1) = players[STACK(1)].bIsBot;
 			}
 			break;
 
@@ -8044,11 +9196,19 @@ scriptwait:
 			break;
 
 		case PCD_GETSCREENWIDTH:
-			PushToStack (SCREENWIDTH);
+			// [BC] The server doesn't have a screen.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				PushToStack( 0 );
+			else
+				PushToStack (SCREENWIDTH);
 			break;
 
 		case PCD_GETSCREENHEIGHT:
-			PushToStack (SCREENHEIGHT);
+			// [BC] The server doesn't have a screen.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				PushToStack( 0 );
+			else
+				PushToStack (SCREENHEIGHT);
 			break;
 
 		case PCD_THING_PROJECTILE2:
@@ -8120,6 +9280,10 @@ scriptwait:
 				}
 				R_InitSkyMap ();
 				sp -= 2;
+
+				// [BC] If we're the server, tell clients to update their sky.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_SetMapSky( );
 			}
 			break;
 
@@ -8148,6 +9312,11 @@ scriptwait:
 					else
 					{
 						FCanvasTextureInfo::Add (camera, picnum, STACK(1));
+
+						// [BC] If we're the server, tell clients to set this camera to this
+						// texture.
+						if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+							SERVERCOMMANDS_SetCameraToTexture( camera, (char *)picname, STACK( 1 ));
 					}
 				}
 				sp -= 3;
@@ -8159,6 +9328,9 @@ scriptwait:
 			{
 				if (activator != NULL)
 					activator->angle = STACK(1) << 16;
+				// [BB] Tell the clients about the changed angle.
+				if( NETWORK_GetState() == NETSTATE_SERVER )
+					SERVERCOMMANDS_SetThingAngleExact( activator );
 			}
 			else
 			{
@@ -8168,6 +9340,10 @@ scriptwait:
 				while ( (actor = iterator.Next ()) )
 				{
 					actor->angle = STACK(1) << 16;
+					// [BB] Tell the clients about the changed angle.
+					// This fixes the "rave room" in SPACEDM5.wad.
+					if( NETWORK_GetState() == NETSTATE_SERVER )
+						SERVERCOMMANDS_SetThingAngleExact( actor );
 				}
 			}
 			sp -= 2;
@@ -8178,6 +9354,10 @@ scriptwait:
 			{
 				if (activator != NULL)
 					activator->pitch = STACK(1) << 16;
+
+				// [BB] Tell the clients about the changed pitch.
+				if( NETWORK_GetState() == NETSTATE_SERVER )
+					SERVERCOMMANDS_MoveThingExact( activator, CM_PITCH );
 			}
 			else
 			{
@@ -8187,6 +9367,10 @@ scriptwait:
 				while ( (actor = iterator.Next ()) )
 				{
 					actor->pitch = STACK(1) << 16;
+
+					// [BB] Tell the clients about the changed pitch.
+					if( NETWORK_GetState() == NETSTATE_SERVER )
+						SERVERCOMMANDS_MoveThingExact( actor, CM_PITCH );
 				}
 			}
 			sp -= 2;
@@ -8204,6 +9388,10 @@ scriptwait:
 						state = activator->GetClass()->ActorInfo->FindStateByString (statename, !!STACK(1));
 						if (state != NULL)
 						{
+						// [BC] Tell clients to change this thing's state.
+						if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+							SERVERCOMMANDS_SetThingFrame( activator, state );
+
 							activator->SetState (state);
 							STACK(3) = 1;
 						}
@@ -8224,6 +9412,10 @@ scriptwait:
 						state = actor->GetClass()->ActorInfo->FindStateByString (statename, !!STACK(1));
 						if (state != NULL)
 						{
+							// [BC] Tell clients to change this thing's state.
+							if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+								SERVERCOMMANDS_SetThingFrame( actor, state );
+
 							actor->SetState (state);
 							count++;
 						}
@@ -8256,11 +9448,12 @@ scriptwait:
 				userinfo_t *userinfo = &pl->userinfo;
 				switch (STACK(1))
 				{
-				case PLAYERINFO_TEAM:			STACK(2) = userinfo->GetTeam(); break;
+				// [CW] PLAYERINFO_TEAM needs to use ulTeam rather than the one in userinfo_t.
+				case PLAYERINFO_TEAM:			STACK(2) = players[STACK( 2 )].ulTeam; break;
 				case PLAYERINFO_AIMDIST:		STACK(2) = userinfo->GetAimDist(); break;
 				case PLAYERINFO_COLOR:			STACK(2) = userinfo->GetColor(); break;
 				case PLAYERINFO_GENDER:			STACK(2) = userinfo->GetGender(); break;
-				case PLAYERINFO_NEVERSWITCH:	STACK(2) = userinfo->GetNeverSwitch(); break;
+				case PLAYERINFO_NEVERSWITCH:	STACK(2) = userinfo->GetSwitchOnPickup(); break;
 				case PLAYERINFO_MOVEBOB:		STACK(2) = userinfo->GetMoveBob(); break;
 				case PLAYERINFO_STILLBOB:		STACK(2) = userinfo->GetStillBob(); break;
 				case PLAYERINFO_PLAYERCLASS:	STACK(2) = userinfo->GetPlayerClassNum(); break;
@@ -8399,7 +9592,8 @@ scriptwait:
 				bool force = !!STACK(1);
 				int changes = 0;
 
-				if (tag == 0)
+				// [BB] Added activator check.
+				if ( (tag == 0) && (activator != NULL) )
 				{
 					if (activator->player)
 					{
@@ -8545,6 +9739,13 @@ scriptwait:
 			}
 			break;
 
+
+		// [CW] Begin team additions.
+		case PCD_GETTEAMPLAYERCOUNT:
+			STACK( 1 ) = TEAM_CountPlayers( STACK( 1 ));
+			sp--;
+			break;
+		// [CW] End team additions.
  		}
  	}
 
@@ -8578,6 +9779,15 @@ scriptwait:
 		this->pc = pc;
 		assert (sp == 0);
 	}
+
+	// [BC] Since the server doesn't have a screen, we have to save the active font some
+	// other way.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVER_SetCurrentFont( "SmallFont" );
+
+	// [BB] Stop the net traffic measurement and add the result to this script's traffic.
+	NETTRAFFIC_AddACSScriptTraffic ( script, NETWORK_StopTrafficMeasurement ( ) );
+
 	return resultValue;
 }
 
@@ -8624,6 +9834,12 @@ DLevelScript::DLevelScript (AActor *who, line_t *where, int num, const ScriptPtr
 	activationline = where;
 	backSide = flags & ACS_BACKSIDE;
 	activefont = SmallFont;
+
+	// [BC] Since the server doesn't have a screen, we have to save the active font some
+	// other way.
+	// [TP] We need to store this as activefontname instead.
+	activefontname = "SmallFont";
+
 	hudwidth = hudheight = 0;
 	ClipRectLeft = ClipRectTop = ClipRectWidth = ClipRectHeight = WrapWidth = 0;
 	state = SCRIPT_Running;
@@ -8747,7 +9963,7 @@ int P_StartScript (AActor *who, line_t *where, int script, const char *map, cons
 
 		if ((scriptdata = FBehavior::StaticFindScript (script, module)) != NULL)
 		{
-			if ((flags & ACS_NET) && netgame && !sv_cheats)
+			if ((flags & ACS_NET) && NETWORK_InClientMode() && !sv_cheats)
 			{
 				// If playing multiplayer and cheats are disallowed, check to
 				// make sure only net scripts are run.
@@ -8763,6 +9979,7 @@ int P_StartScript (AActor *who, line_t *where, int script, const char *map, cons
 					return false;
 				}
 			}
+
 			DLevelScript *runningScript = P_GetScriptGoing (who, where, script,
 				scriptdata, module, args, argcount, flags);
 			if (runningScript != NULL)
@@ -9140,4 +10357,71 @@ CCMD(acsprofile)
 
 	ShowProfileData(ScriptProfiles, limit, sorter, false);
 	ShowProfileData(FuncProfiles, limit, sorter, true);
+}
+
+
+//*****************************************************************************
+//
+bool ACS_IsCalledFromConsoleCommand( void )
+{
+	return ( g_bCalledFromConsoleCommand );
+}
+
+//*****************************************************************************
+//
+bool ACS_IsScriptClientSide( ULONG ulScript )
+{
+	FBehavior		*pModule = NULL;
+
+	return ACS_IsScriptClientSide ( FBehavior::StaticFindScript( ulScript, pModule ) );
+}
+
+//*****************************************************************************
+//
+bool ACS_IsScriptClientSide( const ScriptPtr *pScriptData )
+{
+	if ( pScriptData == NULL )
+		return ( false );
+
+	// [BB] Some existing maps rely on Skulltag's old net script handling.
+	if ( ( pScriptData->Flags & SCRIPTF_Net ) && ( zacompatflags & ZACOMPATF_NETSCRIPTS_ARE_CLIENTSIDE ) )
+		return ( true );
+
+	if ( pScriptData->Flags & SCRIPTF_ClientSide )
+		return ( true );
+
+	return ( false );
+}
+
+//*****************************************************************************
+//
+bool ACS_IsScriptPukeable( ULONG ulScript )
+{
+	FBehavior *pModule = NULL;
+
+	const ScriptPtr *pScriptData = FBehavior::StaticFindScript( ulScript, pModule );
+
+	if ( pScriptData == NULL )
+		return ( false );
+
+	if ( pScriptData->Flags & SCRIPTF_Net )
+		return ( true );
+
+	if ( sv_cheats )
+		return ( true );
+
+	return ( false );
+}
+
+//*****************************************************************************
+//
+int ACS_GetTranslationIndex( FRemapTable *pTranslation )
+{
+	int translationindex;
+	for ( translationindex = 1; translationindex <= MAX_ACS_TRANSLATIONS; translationindex++ )
+	{
+		if ( pTranslation == translationtables[TRANSLATION_LevelScripted].GetVal(translationindex - 1) )
+			break;
+	}
+	return translationindex;
 }

@@ -187,6 +187,8 @@ OptionMenu "GLPrefOptions"
 	Slider "Ambient light level",		gl_light_ambient,				1.0, 255.0, 5.0
 	Option "Rendering quality",			gl_render_precise,				"Precision"
 	Option "Use vertex buffer",			gl_usevbo,						"VBOModes"
+	// [BB]
+	Option "Use models",				gl_use_models,					"OnOff"
 }
 
 OptionMenu "GLShaderOptions"
@@ -213,7 +215,8 @@ OptionMenu "VideoOptions"
 	Title "DISPLAY OPTIONS"
 	
 	Submenu "OpenGL Options", 			"OpenGLOptions"
-	Submenu "Scoreboard Options", 		"ScoreboardOptions"
+	// [TP] Zandronum's scoreboard does not use these options
+	// Submenu "Scoreboard Options", 		"ScoreboardOptions"
 	StaticText " "
 	Slider "Screen size",				"screenblocks", 3.0, 12.0, 1.0, 0
 

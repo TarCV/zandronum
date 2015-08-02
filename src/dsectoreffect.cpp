@@ -163,6 +163,15 @@ DMover::EResult DMover::MovePlane (fixed_t speed, fixed_t dest, int crush,
 	fixed_t		move;
 	//fixed_t		destheight;	//jff 02/04/98 used to keep floors/ceilings
 							// from moving thru each other
+
+	// [BC] Flag this sector's height as changed, so we can tell new clients that connect the
+	// new height.
+	m_Sector->floorOrCeiling = floorOrCeiling;
+	if ( floorOrCeiling == 0 )
+		m_Sector->bFloorHeightChange = true;
+	else
+		m_Sector->bCeilingHeightChange = true;
+
 	switch (floorOrCeiling)
 	{
 	case 0:

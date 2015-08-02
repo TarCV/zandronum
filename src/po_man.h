@@ -68,6 +68,17 @@ struct FPolyObj
 	DPolyAction	*specialdata;	// pointer to a thinker, if the poly is moving
 	TObjPtr<DInterpolation> interpolation;
 
+	// [BC/BB] Has this polyobject moved at all? If so, we need to tell connecting clients of its new position.
+	bool		bMoved;
+	// [BB] Original start stop, necessary for GAME_ResetMap.
+	fixed_t		SavedStartSpot[3];
+
+	// [BC/BB] Has this polyobject rotated at all? If so, we need to tell connecting clients of its new position.
+	bool		bRotated;
+
+	// [BC/BB] Was the polyobject blocked the last time it tried to move?
+	bool		bBlocked;
+
 	FPolyObj();
 	DInterpolation *SetInterpolation();
 	void StopInterpolation();
