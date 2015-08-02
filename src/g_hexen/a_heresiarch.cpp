@@ -198,7 +198,19 @@ IMPLEMENT_CLASS (ASorcFX1)
 void ASorcBall::DoFireSpell ()
 {
 	CastSorcererSpell ();
+
+	// [BB] This is server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	target->args[3] = SORC_STOPPED;
+
+	// [BB] If we're the server, tell the clients to set the arguments of target.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SetThingArguments( target );
+
 }
 
 //============================================================================
@@ -209,12 +221,27 @@ void ASorcBall::DoFireSpell ()
 
 void ASorcBall1::DoFireSpell ()
 {
+	// [BB] This is server-side (involves random numbers).
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (pr_heresiarch() < 200)
 	{
 		S_Sound (target, CHAN_VOICE, "SorcererSpellCast", 1, ATTN_NONE);
 		special2 = SORCFX4_RAPIDFIRE_TIME;
 		args[4] = 128;
 		target->args[3] = SORC_FIRING_SPELL;
+
+		// [BB] If we're the server, tell the clients to play the sound and set special2 and arguments.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			SERVERCOMMANDS_SoundActor( target, CHAN_VOICE,  "SorcererSpellCast", 1, ATTN_NONE );
+			SERVERCOMMANDS_SetThingSpecial2( this );
+			SERVERCOMMANDS_SetThingArguments( this );
+			SERVERCOMMANDS_SetThingArguments( target );
+		}
 	}
 	else
 	{
@@ -242,16 +269,45 @@ DEFINE_ACTION_FUNCTION(AActor, A_SorcSpinBalls)
 	self->special1 = ANGLE_1;
 	z = self->z - self->floorclip + self->height;
 	
+	// [BB] This is server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	mo = Spawn("SorcBall1", self->x, self->y, z, NO_REPLACE);
 	if (mo)
 	{
 		mo->target = self;
 		mo->special2 = SORCFX4_RAPIDFIRE_TIME;
+
+		// [BB] If we're the server, tell the clients to spawn the thing and set its target and special2.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			SERVERCOMMANDS_SpawnThing( mo );
+			SERVERCOMMANDS_SetThingTarget( mo );
+			SERVERCOMMANDS_SetThingSpecial2( mo );
+		}
 	}
 	mo = Spawn("SorcBall2", self->x, self->y, z, NO_REPLACE);
 	if (mo) mo->target = self;
+
+	// [BB] If we're the server, tell the clients to spawn the thing and set its target.
+	if ( mo && (NETWORK_GetState( ) == NETSTATE_SERVER) )
+	{
+		SERVERCOMMANDS_SpawnThing( mo );
+		SERVERCOMMANDS_SetThingTarget( mo );
+	}
+
 	mo = Spawn("SorcBall3", self->x, self->y, z, NO_REPLACE);
 	if (mo) mo->target = self;
+
+	// [BB] If we're the server, tell the clients to spawn the thing and set its target.
+	if ( mo && (NETWORK_GetState( ) == NETSTATE_SERVER) )
+	{
+		SERVERCOMMANDS_SpawnThing( mo );
+		SERVERCOMMANDS_SetThingTarget( mo );
+	}
 }
 
 
@@ -263,9 +319,16 @@ DEFINE_ACTION_FUNCTION(AActor, A_SorcSpinBalls)
 
 DEFINE_ACTION_FUNCTION(AActor, A_SorcBallOrbit)
 {
+	// [BB] The client should do most of this stuff here. This way the balls
+	// can smoothly orbit the Heresiarch without causing too much net traffic.
+
 	// [RH] If no parent, then die instead of crashing
 	if (self->target == NULL)
 	{
+		// [BB] Tell clients to set the thing's state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingState( self, STATE_PAIN );
+
 		self->SetState (self->FindState(NAME_Pain));
 		return;
 	}
@@ -286,6 +349,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_SorcBallOrbit)
 
 	if (actor->target->health <= 0)
 	{
+		// [BB] Tell clients to set the thing's state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingState( actor, STATE_PAIN );
+
 		actor->SetState (actor->FindState(NAME_Pain));
 		return;
 	}
@@ -316,11 +383,24 @@ DEFINE_ACTION_FUNCTION(AActor, A_SorcBallOrbit)
 			 (parent->args[1] > SORCBALL_SPEED_ROTATIONS) &&
 			 (abs(angle - (parent->angle>>ANGLETOFINESHIFT)) < (30<<5)))
 		{
+			// [BB] This is server-side (since StopBall involved random numbers).
+			if ( NETWORK_InClientMode() )
+			{
+				break;
+			}
+
 			// Can stop now
 			actor->target->args[3] = SORC_FIRESPELL;
 			actor->target->args[4] = 0;
 			// Set angle so self angle == sorcerer angle
 			parent->special1 = (int)(parent->angle - actor->AngleOffset);
+
+			// [BB] If we're the server, tell the clients to set the arguments of actor->target and special1 of parent.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			{
+				SERVERCOMMANDS_SetThingArguments( actor->target );
+				SERVERCOMMANDS_SetThingSpecial1( parent );
+			}
 		}
 		else
 		{
@@ -331,9 +411,21 @@ DEFINE_ACTION_FUNCTION(AActor, A_SorcBallOrbit)
 	case SORC_FIRESPELL:			// Casting spell
 		if (parent->StopBall == RUNTIME_TYPE(actor))
 		{
+			// [BB] This is server-side (since StopBall involved random numbers).
+			if ( NETWORK_InClientMode() )
+			{
+				break;
+			}
+
 			// Put sorcerer into special throw spell anim
 			if (parent->health > 0)
+			{
+				// [BB] Tell clients to change this thing's state.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_SetThingFrame( parent, parent->FindState("Attack1") );
+
 				parent->SetState (parent->FindState("Attack1"));
+			}
 
 			actor->DoFireSpell ();
 		}
@@ -342,13 +434,30 @@ DEFINE_ACTION_FUNCTION(AActor, A_SorcBallOrbit)
 	case SORC_FIRING_SPELL:
 		if (parent->StopBall == RUNTIME_TYPE(actor))
 		{
+			// [BB] This is server-side (since StopBall involved random numbers).
+			if ( NETWORK_InClientMode() )
+			{
+				break;
+			}
+
 			if (actor->special2-- <= 0)
 			{
 				// Done rapid firing 
 				parent->args[3] = SORC_STOPPED;
+
+				// [BB] If we're the server, tell the clients to set the arguments of parent.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_SetThingArguments( parent );
+
 				// Back to orbit balls
 				if (parent->health > 0)
+				{
+					// [BB] Tell clients to change this thing's state.
+					if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+						SERVERCOMMANDS_SetThingFrame( parent, parent->FindState("Attack2") );
+
 					parent->SetState (parent->FindState("Attack2"));
+				}
 			}
 			else
 			{
@@ -520,9 +629,19 @@ void ASorcBall::CastSorcererSpell ()
 {
 	S_Sound (target, CHAN_VOICE, "SorcererSpellCast", 1, ATTN_NONE);
 
+	// [BB] If we're the server, tell the clients to play the sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SoundActor( target, CHAN_VOICE,  "SorcererSpellCast", 1, ATTN_NONE );
+
 	// Put sorcerer into throw spell animation
 	if (target->health > 0)
+	{
+		// [BB] Tell clients to change this thing's state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingFrame( target, target->FindState("Attack2") );
+
 		target->SetState (target->FindState("Attack2"));
+	}
 }
 
 //============================================================================
@@ -537,6 +656,12 @@ void ASorcBall2::CastSorcererSpell ()
 {
 	Super::CastSorcererSpell ();
 
+	// [BB] This is server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	AActor *parent = target;
 	AActor *mo;
 
@@ -545,6 +670,18 @@ void ASorcBall2::CastSorcererSpell ()
 	parent->flags2 |= MF2_REFLECTIVE|MF2_INVULNERABLE;
 	parent->args[0] = SORC_DEFENSE_TIME;
 	if (mo) mo->target = parent;
+
+	// [BB] If we're the server, tell the clients to set some things and spawn mo.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		SERVERCOMMANDS_SetThingFlags( parent, FLAGSET_FLAGS2 );
+		SERVERCOMMANDS_SetThingArguments( parent );
+		if ( mo )
+		{
+			SERVERCOMMANDS_SpawnThing( mo );
+			SERVERCOMMANDS_SetThingTarget( mo );
+		}
+	}
 }
 
 //============================================================================
@@ -559,6 +696,12 @@ void ASorcBall3::CastSorcererSpell ()
 {
 	Super::CastSorcererSpell ();
 
+	// [BB] This is server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	AActor *mo;
 	angle_t ang1, ang2;
 	AActor *parent = target;
@@ -570,8 +713,17 @@ void ASorcBall3::CastSorcererSpell ()
 	{	// Spawn 2 at a time
 		mo = P_SpawnMissileAngle(parent, cls, ang1, 4*FRACUNIT);
 		if (mo) mo->target = parent;
+
+		// [BB] If we're the server, tell the clients to spawn the missile.
+		if ( mo && (NETWORK_GetState( ) == NETSTATE_SERVER) )
+			SERVERCOMMANDS_SpawnMissile( mo );
+
 		mo = P_SpawnMissileAngle(parent, cls, ang2, 4*FRACUNIT);
 		if (mo) mo->target = parent;
+
+		// [BB] If we're the server, tell the clients to spawn the missile.
+		if ( mo && (NETWORK_GetState( ) == NETSTATE_SERVER) )
+			SERVERCOMMANDS_SpawnMissile( mo );
 	}			
 	else
 	{
@@ -579,6 +731,10 @@ void ASorcBall3::CastSorcererSpell ()
 			ang1 = ang2;
 		mo = P_SpawnMissileAngle(parent, cls, ang1, 4*FRACUNIT);
 		if (mo) mo->target = parent;
+
+		// [BB] If we're the server, tell the clients to spawn the missile.
+		if ( mo && (NETWORK_GetState( ) == NETSTATE_SERVER) )
+			SERVERCOMMANDS_SpawnMissile( mo );
 	}
 }
 
@@ -608,6 +764,12 @@ void ASorcBall1::CastSorcererSpell ()
 {
 	Super::CastSorcererSpell ();
 
+	// [BB] This is server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	AActor *mo;
 	angle_t ang1, ang2;
 	AActor *parent = target;
@@ -622,6 +784,13 @@ void ASorcBall1::CastSorcererSpell ()
 		mo->tracer = parent->target;
 		mo->args[4] = BOUNCE_TIME_UNIT;
 		mo->args[3] = 15;				// Bounce time in seconds
+
+		// [BB] If we're the server, tell the clients to spawn the missile and set the arguments.
+		if ( mo && (NETWORK_GetState( ) == NETSTATE_SERVER) )
+		{
+			SERVERCOMMANDS_SpawnMissile( mo );
+			SERVERCOMMANDS_SetThingArguments( mo );
+		}
 	}
 	mo = P_SpawnMissileAngle (parent, cls, ang2, 0);
 	if (mo)
@@ -630,6 +799,13 @@ void ASorcBall1::CastSorcererSpell ()
 		mo->tracer = parent->target;
 		mo->args[4] = BOUNCE_TIME_UNIT;
 		mo->args[3] = 15;				// Bounce time in seconds
+
+		// [BB] If we're the server, tell the clients to spawn the missile and set the arguments.
+		if ( mo && (NETWORK_GetState( ) == NETSTATE_SERVER) )
+		{
+			SERVERCOMMANDS_SpawnMissile( mo );
+			SERVERCOMMANDS_SetThingArguments( mo );
+		}
 	}
 }
 
@@ -656,8 +832,19 @@ void A_SorcOffense2(AActor *actor)
 		return;
 	}
 
+	// [BB] This is server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	index = actor->args[4] << 5;
 	actor->args[4] = (actor->args[4] + 15) & 255;
+
+	// [BB] If we're the server, tell the clients to set the arguments of actor.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SetThingArguments( actor );
+
 	delta = (finesine[index])*SORCFX4_SPREAD_ANGLE;
 	delta = (delta>>FRACBITS)*ANGLE_1;
 	ang1 = actor->angle + delta;
@@ -669,6 +856,13 @@ void A_SorcOffense2(AActor *actor)
 		dist = dist/mo->Speed;
 		if(dist < 1) dist = 1;
 		mo->velz = (dest->z - mo->z) / dist;
+
+		// [BB] If we're the server, tell the clients to spawn the missile and set its special2.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			SERVERCOMMANDS_SpawnMissile( mo );
+			SERVERCOMMANDS_SetThingSpecial2( mo );
+		}
 	}
 }
 
@@ -756,12 +950,30 @@ DEFINE_ACTION_FUNCTION(AActor, A_SorcFX2Split)
 {
 	AActor *mo;
 
+	// [BB] This is server-side. The client only destroy the actor.
+	if ( NETWORK_InClientMode() )
+	{
+		self->Destroy ();
+		return;
+	}
+
 	mo = Spawn(self->GetClass(), self->x, self->y, self->z, NO_REPLACE);
 	if (mo)
 	{
 		mo->target = self->target;
 		mo->args[0] = 0;									// CW
 		mo->special1 = self->angle;					// Set angle
+
+		// [BB] If we're the server, tell the clients to spawn the thing.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			SERVERCOMMANDS_SpawnThing( mo );
+			SERVERCOMMANDS_SetThingTarget( mo );
+			SERVERCOMMANDS_SetThingArguments( mo );
+			SERVERCOMMANDS_SetThingSpecial1( mo );
+			SERVERCOMMANDS_SetThingFrame( mo, mo->FindState("Orbit") );
+		}
+
 		mo->SetState (mo->FindState("Orbit"));
 	}
 	mo = Spawn(self->GetClass(), self->x, self->y, self->z, NO_REPLACE);
@@ -770,6 +982,17 @@ DEFINE_ACTION_FUNCTION(AActor, A_SorcFX2Split)
 		mo->target = self->target;
 		mo->args[0] = 1;									// CCW
 		mo->special1 = self->angle;					// Set angle
+
+		// [BB] If we're the server, tell the clients to spawn the thing.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			SERVERCOMMANDS_SpawnThing( mo );
+			SERVERCOMMANDS_SetThingTarget( mo );
+			SERVERCOMMANDS_SetThingArguments( mo );
+			SERVERCOMMANDS_SetThingSpecial1( mo );
+			SERVERCOMMANDS_SetThingFrame( mo, mo->FindState("Orbit") );
+		}
+
 		mo->SetState (mo->FindState("Orbit"));
 	}
 	self->Destroy ();
@@ -798,20 +1021,46 @@ DEFINE_ACTION_FUNCTION(AActor, A_SorcFX2Orbit)
 
 	fixed_t dist = parent->radius;
 
-	if ((parent->health <= 0) ||		// Sorcerer is dead
-		(!parent->args[0]))				// Time expired
+	// [BB] This is server-side.
+	if ( NETWORK_InClientMode() == false )
 	{
-		self->SetState (self->FindState(NAME_Death));
-		parent->args[0] = 0;
-		parent->flags2 &= ~MF2_REFLECTIVE;
-		parent->flags2 &= ~MF2_INVULNERABLE;
-	}
+		if ((parent->health <= 0) ||		// Sorcerer is dead
+			(!parent->args[0]))				// Time expired
+		{
+			// [BB] Tell clients to set the thing's state.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetThingState( self, STATE_DEATH );
 
-	if (self->args[0] && (parent->args[0]-- <= 0))		// Time expired
-	{
-		self->SetState (self->FindState(NAME_Death));
-		parent->args[0] = 0;
-		parent->flags2 &= ~MF2_REFLECTIVE;
+			self->SetState (self->FindState(NAME_Death));
+			parent->args[0] = 0;
+			parent->flags2 &= ~MF2_REFLECTIVE;
+			parent->flags2 &= ~MF2_INVULNERABLE;
+
+			// [BB] If we're the server, tell the clients to update flags and arguments.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			{
+				SERVERCOMMANDS_SetThingFlags( parent, FLAGSET_FLAGS2 );
+				SERVERCOMMANDS_SetThingArguments( parent );
+			}
+		}
+
+		if (self->args[0] && (parent->args[0]-- <= 0))		// Time expired
+		{
+			// [BB] Tell clients to set the thing's state.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetThingState( self, STATE_DEATH );
+
+			self->SetState (self->FindState(NAME_Death));
+			parent->args[0] = 0;
+			parent->flags2 &= ~MF2_REFLECTIVE;
+
+			// [BB] If we're the server, tell the clients to update flags and arguments.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			{
+				SERVERCOMMANDS_SetThingFlags( parent, FLAGSET_FLAGS2 );
+				SERVERCOMMANDS_SetThingArguments( parent );
+			}
+		}
 	}
 
 	// Move to new position based on angle
@@ -853,6 +1102,13 @@ DEFINE_ACTION_FUNCTION(AActor, A_SorcFX2Orbit)
 
 DEFINE_ACTION_FUNCTION(AActor, A_SpawnBishop)
 {
+	// [BB] This is server-side. The client only destroy the actor.
+	if ( NETWORK_InClientMode() )
+	{
+		self->Destroy ();
+		return;
+	}
+
 	AActor *mo;
 	mo = Spawn("Bishop", self->x, self->y, self->z, ALLOW_REPLACE);
 	if (mo)
@@ -866,6 +1122,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_SpawnBishop)
 		{ // [RH] Make the new bishops inherit the Heriarch's target
 			mo->CopyFriendliness (self->target, true);
 			mo->master = self->target;
+
+			// [BB] If we're the server, tell the clients to spawn the thing.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SpawnThing( mo );
 		}
 	}
 	self->Destroy ();
@@ -893,8 +1153,18 @@ DEFINE_ACTION_FUNCTION(AActor, A_SorcererBishopEntry)
 
 DEFINE_ACTION_FUNCTION(AActor, A_SorcFX4Check)
 {
+	// [BB] This is server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (self->special2-- <= 0)
 	{
+		// [BB] Tell clients to set the thing's state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingState( self, STATE_DEATH );
+
 		self->SetState (self->FindState(NAME_Death));
 	}
 }

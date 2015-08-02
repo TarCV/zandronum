@@ -684,6 +684,8 @@ protected:
 	SoundStream *m_Stream;
 };
 
+#if defined(_WIN32) || !defined(NO_SOUND)
+#endif
 // MUS file played by a software OPL2 synth and streamed through FMOD -------
 
 class OPLMUSSong : public StreamSong

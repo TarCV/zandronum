@@ -52,6 +52,41 @@
 #include "p_conversation.h"
 #include "r_data/r_translate.h"
 #include "g_level.h"
+// [BB] New #includes.
+#include "deathmatch.h"
+#include "team.h"
+#include "network.h"
+#include "g_game.h"
+#include "cooperative.h"
+#include "sv_commands.h"
+#include "cl_demo.h"
+#include "cl_main.h"
+#include "gamemode.h"
+#include "unlagged.h"
+#include "d_netinf.h"
+#include "v_video.h"
+
+// [BB] Helper function to handle ZADF_UNBLOCK_PLAYERS.
+bool P_CheckUnblock ( AActor *pActor1, AActor *pActor2 )
+{
+	if ( ( pActor1 == NULL ) || ( pActor2 == NULL ) )
+		return false;
+
+	if (( pActor1->IsKindOf( RUNTIME_CLASS( APlayerPawn )) == false )
+		 || ( pActor2->IsKindOf( RUNTIME_CLASS( APlayerPawn )) == false ))
+	{
+		return false;
+	}
+
+	// [TP] Unblock if sv_unblockallies is true and these are teammates.
+	if (( zadmflags & ZADF_UNBLOCK_ALLIES ) && ( pActor1->IsTeammate( pActor2 )))
+		return true;
+
+	if ( zadmflags & ZADF_UNBLOCK_PLAYERS )
+		return true;
+
+	return false;
+}
 
 #define WATER_SINK_FACTOR		3
 #define WATER_SINK_SMALL_FACTOR	4
@@ -71,6 +106,8 @@ static FRandom pr_tracebleed ("TraceBleed");
 static FRandom pr_checkthing ("CheckThing");
 static FRandom pr_lineattack ("LineAttack");
 static FRandom pr_crunch ("DoCrunch");
+
+static int		tmunstuck;     /* killough 8/1/98: whether to allow unsticking */
 
 // keep track of special lines as they are hit,
 // but don't process them until the move is proven valid
@@ -356,6 +393,10 @@ bool P_TeleportMove (AActor *thing, fixed_t x, fixed_t y, fixed_t z, bool telefr
 
 	while ((th = it2.Next()))
 	{
+		// [BC] Don't allow spectators to telefrag/be telefragged.
+		if ((( th->player ) && ( th->player->bSpectating )) || (( thing->player ) && ( thing->player->bSpectating )))
+			continue;
+
 		if (!(th->flags & MF_SHOOTABLE))
 			continue;
 
@@ -384,7 +425,9 @@ bool P_TeleportMove (AActor *thing, fixed_t x, fixed_t y, fixed_t z, bool telefr
 		// [RH] Some Heretic/Hexen monsters can telestomp
 		if (StompAlwaysFrags && !(th->flags6 & MF6_NOTELEFRAG))
 		{
-			P_DamageMobj (th, thing, thing, TELEFRAG_DAMAGE, NAME_Telefrag, DMG_THRUSTLESS);
+			// [BC] Damage is never done client-side.
+			if ( NETWORK_InClientMode() == false )
+				P_DamageMobj (th, thing, thing, TELEFRAG_DAMAGE, NAME_Telefrag, DMG_THRUSTLESS);
 			continue;
 		}
 		return false;
@@ -436,6 +479,10 @@ bool P_TeleportMove (AActor *thing, fixed_t x, fixed_t y, fixed_t z, bool telefr
 
 void P_PlayerStartStomp (AActor *actor)
 {
+	// [BB] Spectators don't telefrag anything.
+	if ( actor->player && actor->player->bSpectating )
+		return;
+
 	AActor *th;
 	FBlockThingsIterator it(FBoundingBox(actor->x, actor->y, actor->radius));
 
@@ -460,7 +507,8 @@ void P_PlayerStartStomp (AActor *actor)
 		if (actor->z + actor->height < th->z)
 			continue;        // underneath
 
-		P_DamageMobj (th, actor, actor, TELEFRAG_DAMAGE, NAME_Telefrag);
+		// [BB] ST distinguishes between NAME_SpawnTelefrag and NAME_Telefrag.
+		P_DamageMobj (th, actor, actor, TELEFRAG_DAMAGE, NAME_SpawnTelefrag);
 	}
 }
 
@@ -607,6 +655,23 @@ int P_GetMoveFactor (const AActor *mo, int *frictionp)
 //
 // MOVEMENT ITERATOR FUNCTIONS
 //
+
+// [BB] This old function still lives on in the bot code...
+int P_BoxOnLineSide (const fixed_t *tmbox, const line_t *ld);
+// [BC] ugh old code for people who just have to have doom2.exe style movement.
+/* killough 8/1/98: used to test intersection between thing and line
+ * assuming NO movement occurs -- used to avoid sticky situations.
+ */
+static int untouched(line_t *ld, FCheckPosition &tm)
+{
+  fixed_t x, y, tmbbox[4];
+  return 
+    (tmbbox[BOXRIGHT] = (x=tm.thing->x)+tm.thing->radius) <= ld->bbox[BOXLEFT] ||
+    (tmbbox[BOXLEFT] = x-tm.thing->radius) >= ld->bbox[BOXRIGHT] ||
+    (tmbbox[BOXTOP] = (y=tm.thing->y)+tm.thing->radius) <= ld->bbox[BOXBOTTOM] ||
+    (tmbbox[BOXBOTTOM] = y-tm.thing->radius) >= ld->bbox[BOXTOP] ||
+    P_BoxOnLineSide(tmbbox, ld) != -1;
+}
 
 //==========================================================================
 //
@@ -849,7 +914,8 @@ bool PIT_CheckThing (AActor *thing, FCheckPosition &tm)
 	if ((thing->flags2 | tm.thing->flags2) & MF2_THRUACTORS) 
 		return true;
 
-	if ((tm.thing->flags6 & MF6_THRUSPECIES) && (tm.thing->GetSpecies() == thing->GetSpecies()))
+	// [BB] Adapted this for ZADF_UNBLOCK_PLAYERS.
+	if (P_CheckUnblock(tm.thing, thing) || ((tm.thing->flags6 & MF6_THRUSPECIES) && (tm.thing->GetSpecies() == thing->GetSpecies())))
 		return true;
 
 	tm.thing->BlockingMobj = thing;
@@ -938,6 +1004,7 @@ bool PIT_CheckThing (AActor *thing, FCheckPosition &tm)
 		return true;
 	}
 
+	/* [BB] Zandronum keeps Skulltag's BUMPSPECIAL implementation for now.
 	// Check for MF6_BUMPSPECIAL
 	// By default, only players can activate things by bumping into them
 	if ((thing->flags6 & MF6_BUMPSPECIAL) && ((tm.thing->player != NULL)
@@ -951,6 +1018,7 @@ bool PIT_CheckThing (AActor *thing, FCheckPosition &tm)
 				thing->lastbump = level.maptime + TICRATE;
 		}
 	}
+	*/
 
 	// Check for skulls slamming into things
 	if (tm.thing->flags & MF_SKULLFLY)
@@ -1068,7 +1136,8 @@ bool PIT_CheckThing (AActor *thing, FCheckPosition &tm)
 				else if (level.flags2 & LEVEL2_NOINFIGHTING) infight=-1;
 				else infight = infighting;
 				
-				if (infight < 0)
+				// [BC] No infighting during invasion mode.
+				if (infight < 0 || invasion)
 				{
 					// -1: Monsters cannot hurt each other, but make exceptions for
 					//     friendliness and hate status.
@@ -1152,7 +1221,10 @@ bool PIT_CheckThing (AActor *thing, FCheckPosition &tm)
 					}
 
 					damage = tm.thing->GetMissileDamage (3, 2);
-					int newdam = P_DamageMobj (thing, tm.thing, tm.thing->target, damage, tm.thing->DamageType);
+					// [BB] The server handles the damage of RIPPER weapons.
+					int newdam = 0;
+					if ( NETWORK_InClientMode() == false ) 
+						newdam = P_DamageMobj (thing, tm.thing, tm.thing->target, damage, tm.thing->DamageType);
 					if (!(tm.thing->flags3 & MF3_BLOODLESSIMPACT))
 					{
 						P_TraceBleed (newdam > 0 ? newdam : damage, thing, tm.thing);
@@ -1181,34 +1253,51 @@ bool PIT_CheckThing (AActor *thing, FCheckPosition &tm)
 
 		// Do damage
 		damage = tm.thing->GetMissileDamage ((tm.thing->flags4 & MF4_STRIFEDAMAGE) ? 3 : 7, 1);
-		if ((damage > 0) || (tm.thing->flags6 & MF6_FORCEPAIN)) 
+		if ( NETWORK_InClientMode() == false )
 		{
-			int newdam = P_DamageMobj (thing, tm.thing, tm.thing->target, damage, tm.thing->DamageType);
-			if (damage > 0)
+			if ((damage > 0) || (tm.thing->flags6 & MF6_FORCEPAIN)) 
 			{
-				if ((tm.thing->flags5 & MF5_BLOODSPLATTER) &&
-					!(thing->flags & MF_NOBLOOD) &&
-					!(thing->flags2 & MF2_REFLECTIVE) &&
-					!(thing->flags2 & (MF2_INVULNERABLE|MF2_DORMANT)) &&
-					!(tm.thing->flags3 & MF3_BLOODLESSIMPACT) &&
-					(pr_checkthing() < 192))
+				if (( tm.thing->target ) &&
+					( tm.thing->target->player ) &&
+					( thing->player ) &&
+					( thing->IsTeammate( tm.thing->target ) == false ))
 				{
-					P_BloodSplatter (tm.thing->x, tm.thing->y, tm.thing->z, thing);
+					tm.thing->target->player->bStruckPlayer = true;
 				}
-				if (!(tm.thing->flags3 & MF3_BLOODLESSIMPACT))
+
+				int newdam = P_DamageMobj (thing, tm.thing, tm.thing->target, damage, tm.thing->DamageType);
+				if (damage > 0)
 				{
-					P_TraceBleed (newdam > 0 ? newdam : damage, thing, tm.thing);
+					if ((tm.thing->flags5 & MF5_BLOODSPLATTER) &&
+						!(thing->flags & MF_NOBLOOD) &&
+						!(thing->flags2 & MF2_REFLECTIVE) &&
+						!(thing->flags2 & (MF2_INVULNERABLE|MF2_DORMANT)) &&
+						!(tm.thing->flags3 & MF3_BLOODLESSIMPACT) &&
+						(pr_checkthing() < 192))
+					{
+						P_BloodSplatter (tm.thing->x, tm.thing->y, tm.thing->z, thing);
+					}
+					if (!(tm.thing->flags3 & MF3_BLOODLESSIMPACT))
+					{
+						P_TraceBleed (newdam > 0 ? newdam : damage, thing, tm.thing);
+					}
 				}
 			}
-		}
-		else
-		{
-			P_GiveBody (thing, -damage);
+			else
+			{
+				P_GiveBody (thing, -damage);
+
+				// [BB] If this affected a player, let the clients know.
+				if ( thing->player && ( NETWORK_GetState( ) == NETSTATE_SERVER ) )
+					SERVERCOMMANDS_SetPlayerHealth ( static_cast<ULONG> ( thing->player - players ) );
+			}
 		}
 		return false;		// don't traverse any more
 	}
+	// [BC] Don't push things in client mode.
 	if (thing->flags2 & MF2_PUSHABLE && !(tm.thing->flags2 & MF2_CANNOTPUSH) &&
-		(tm.thing->player == NULL || !(tm.thing->player->cheats & CF_PREDICTING)))
+		( NETWORK_InClientMode() == false ))// &&
+		//(tm.thing->player == NULL || !(tm.thing->player->cheats & CF_PREDICTING)))
 	{ // Push thing
 		if (thing->lastpush != tm.PushTime)
 		{
@@ -1216,6 +1305,11 @@ bool PIT_CheckThing (AActor *thing, FCheckPosition &tm)
 			thing->vely += FixedMul(tm.thing->vely, thing->pushfactor);
 			thing->lastpush = tm.PushTime;
 		}
+
+		// [BC] If we're the server, tell clients to update the thing's position and
+		// momentum.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_MoveThingExact( thing, CM_X|CM_Y|CM_Z|CM_MOMX|CM_MOMY|CM_MOMZ );
 	}
 	solid = (thing->flags & MF_SOLID) &&
 			!(thing->flags & MF_NOCLIP) &&
@@ -1228,7 +1322,39 @@ bool PIT_CheckThing (AActor *thing, FCheckPosition &tm)
 		// up things that are above your true height.
 		&& thing->z < tm.thing->z + tm.thing->height - tm.thing->MaxStepHeight)
 	{ // Can be picked up by tmthing
-		P_TouchSpecialThing (thing, tm.thing);	// can remove thing
+		// Server decides what items are touched.
+		if ( NETWORK_InClientMode() == false )
+		{
+			P_TouchSpecialThing (thing, tm.thing);	// can remove thing
+		}
+	}
+
+	// If this object has the bumpspecial flag, try to activate the item's special.
+	if (( NETWORK_InClientMode() == false ) &&
+		( solid ) &&
+		( thing->flags6 & MF6_BUMPSPECIAL ))
+	{
+		if (( TEAM_GetSimpleCTFSTMode( )) && ( tm.thing->player ) && ( tm.thing->player->bOnTeam ))
+		{
+			// [BB] With the addition of sv_maxteams and the subsequent definition of four teams in
+			// zandronum.pk3, we can't check thing->args[0] against teams.Size( ) anymore. As workaround,
+			// we check against the number of teams that have starts on the map to guess how many teams
+			// the mapper thought were available. Note: This is not going to work properly, if the map
+			// has starts for teams 0 and 2, but not for team 1 for example.
+			if (( thing->ulSTFlags & STFL_SCOREPILLAR ) &&
+				( TEAM_FindOpposingTeamsItemInPlayersInventory ( tm.thing->player ) ) &&
+				( thing->args[0] == static_cast<int> (TEAM_GetNumTeamsWithStarts()) || static_cast<signed>( tm.thing->player->ulTeam ) == thing->args[0] ) &&
+				( thing->args[1] > 0 ))
+			{
+				if ( !TEAM_GetItemTaken( tm.thing->player->ulTeam ) )
+					TEAM_ScoreSkulltagPoint( tm.thing->player, thing->args[1], thing );
+				else
+					TEAM_DisplayNeedToReturnSkullMessage( tm.thing->player );
+			}
+		}
+
+		LineSpecials[thing->special]( NULL, tm.thing, false, thing->args[0],
+			thing->args[1], thing->args[2], thing->args[3], thing->args[4] );
 	}
 
 	// killough 3/16/98: Allow non-solid moving objects to move through solid
@@ -1528,6 +1654,13 @@ bool P_TestMobjZ (AActor *actor, bool quick, AActor **pOnmobj)
 		return true;
 	}
 
+	// [BB] For people want to have the buggy behavior of non-SOLID things dropping through bridges.
+	if ( ( zacompatflags & ZACOMPATF_OLD_BRIDGE_DROPS ) && !(actor->flags & MF_SOLID) )
+	{
+		if (pOnmobj) *pOnmobj = NULL;
+		return true;
+	}
+
 	FBlockThingsIterator it(FBoundingBox(actor->x, actor->y, actor->radius));
 	AActor *thing;
 
@@ -1541,7 +1674,8 @@ bool P_TestMobjZ (AActor *actor, bool quick, AActor **pOnmobj)
 		{
 			continue;
 		}
-		if ((actor->flags6 & MF6_THRUSPECIES) && (thing->GetSpecies() == actor->GetSpecies()))
+		// [BB] Adapted this for ZADF_UNBLOCK_PLAYERS.
+		if (P_CheckUnblock(actor, thing) || ((actor->flags6 & MF6_THRUSPECIES) && (thing->GetSpecies() == actor->GetSpecies())))
 		{
 			continue;
 		}
@@ -1675,7 +1809,8 @@ static void CheckForPushSpecial (line_t *line, int side, AActor *mobj, bool wind
 			}
 		}
 isblocking:
-		if (mobj->flags2 & MF2_PUSHWALL)
+		// [BC] In a netgame, since mobj->target is never valid, we must go this route to avoid a crash.
+		if ((mobj->flags2 & MF2_PUSHWALL) || NETWORK_InClientMode() )
 		{
 			P_ActivateLine (line, mobj, side, SPAC_Push);
 		}
@@ -1725,7 +1860,8 @@ bool P_TryMove (AActor *thing, fixed_t x, fixed_t y,
 		thing->z = onfloor->ZatPoint (x, y);
 	}
 	thing->flags6 |= MF6_INTRYMOVE;
-	if (!P_CheckPosition (thing, x, y, tm))
+	// [WS] For clients, check to see if we are allowed to clip our actor's movement.
+	if (!P_CheckPosition (thing, x, y, tm) && CLIENT_CanClipMovement(thing))
 	{
 		AActor *BlockingMobj = thing->BlockingMobj;
 		// Solid wall or thing
@@ -1770,7 +1906,8 @@ bool P_TryMove (AActor *thing, fixed_t x, fixed_t y,
 	{
 		thing->z = tm.floorz;
 	}
-	if (!(thing->flags & MF_NOCLIP))
+	// [WS] For clients, check to see if we are allowed to clip our actor's movement.
+	if (!(thing->flags & MF_NOCLIP) && CLIENT_CanClipMovement(thing))
 	{
 		if (tm.ceilingz - tm.floorz < thing->height)
 		{
@@ -1899,11 +2036,19 @@ bool P_TryMove (AActor *thing, fixed_t x, fixed_t y,
 			&& (tm.floorpic != thing->floorpic
 				|| tm.floorz - thing->z != 0))
 		{ // must stay within a sector of a certain floor type
-			thing->z = oldz;
-			thing->flags6 &= ~MF6_INTRYMOVE;
-			return false;
+			// [BB] For some reason the client slightly mispredicts the actor position,
+			// i.e. if an actor with MF2_CANTLEAVEFLOORPIC touches the boundary of the floorpic
+			// region, the client sometimes thinks the actor is outside the region.
+			// Therefore, doing the following on the client would completely mess up the
+			// client side monster movement prediction.
+			if ( NETWORK_InClientMode() == false )
+			{
+				thing->z = oldz;
+				thing->flags6 &= ~MF6_INTRYMOVE;
+				return false;
+			}
 		}
-		
+		/* [BB] Zandronum doesn't use ZDoom's bot code.
 		//Added by MC: To prevent bot from getting into dangerous sectors.
 		if (thing->player && thing->player->isbot && thing->flags & MF_SHOOTABLE)
 		{
@@ -1919,6 +2064,7 @@ bool P_TryMove (AActor *thing, fixed_t x, fixed_t y,
 				return false;
 			}
 		} 
+		*/
 	}
 
 	// [RH] Check status of eyes against fake floor/ceiling in case
@@ -1962,20 +2108,23 @@ bool P_TryMove (AActor *thing, fixed_t x, fixed_t y,
 	thing->x = x;
 	thing->y = y;
 
+	// [BC] Flag this thing as having moved.
+	thing->ulSTFlags |= STFL_POSITIONCHANGED;
+
 	thing->LinkToWorld ();
 
 	if (thing->flags2 & MF2_FLOORCLIP)
 	{
 		thing->AdjustFloorClip ();
 	}
-
+/*
 	// [RH] Don't activate anything if just predicting
 	if (thing->player && (thing->player->cheats & CF_PREDICTING))
 	{
 		thing->flags6 &= ~MF6_INTRYMOVE;
 		return true;
 	}
-
+*/
 	// if any special lines were hit, do the effect
 	if (!(thing->flags & (MF_TELEPORT|MF_NOCLIP)))
 	{
@@ -2050,13 +2199,13 @@ bool P_TryMove (AActor *thing, fixed_t x, fixed_t y,
 
 pushline:
 	thing->flags6 &= ~MF6_INTRYMOVE;
-
+/*
 	// [RH] Don't activate anything if just predicting
 	if (thing->player && (thing->player->cheats & CF_PREDICTING))
 	{
 		return false;
 	}
-
+*/
 	thing->z = oldz;
 	if (!(thing->flags&(MF_TELEPORT|MF_NOCLIP)))
 	{
@@ -2086,7 +2235,155 @@ bool P_TryMove (AActor *thing, fixed_t x, fixed_t y,
 	return P_TryMove(thing, x, y, dropoff, onfloor, tm);
 }
 
+//*****************************************************************************
+//
+// [BC] ugh old code for people who just have to have doom2.exe style movement.
+bool P_OldTryMove (AActor *thing, fixed_t x, fixed_t y,
+				bool dropoff, // killough 3/15/98: allow dropoff as option
+				bool /*onfloor*/, // [RH] Let P_TryMove keep the thing on the floor
+				FCheckPosition &tm)
+{
+	fixed_t		oldx, oldy;
+	line_t* 	ld;
+	int 		side;
+	int 		oldside;
 
+//  felldown = 
+	tm.floatok = false;               // killough 11/98
+
+//	if (!P_OldCheckPosition (thing, x, y))
+	if (!P_CheckPosition (thing, x, y, tm))
+		return false;   // solid wall or thing
+
+	if ( !(thing->flags & MF_NOCLIP) )
+	{
+		// killough 7/26/98: reformatted slightly
+		// killough 8/1/98: Possibly allow escape if otherwise stuck
+
+		if (tm.ceilingz - tm.floorz < thing->height ||     // doesn't fit
+			// mobj must lower to fit
+			(tm.floatok = true, !(thing->flags & MF_TELEPORT) &&
+			tm.ceilingz - thing->z < thing->height) ||
+			// too big a step up
+			(!(thing->flags & MF_TELEPORT) && 
+			tm.floorz - thing->z > 24*FRACUNIT))
+		{	
+			return tmunstuck 
+				&& !(tm.ceilingline && untouched(tm.ceilingline, tm));
+				/*&& !(  floorline && untouched(  floorline));*/
+		}
+
+		/* killough 3/15/98: Allow certain objects to drop off
+		* killough 7/24/98, 8/1/98: 
+		* Prevent monsters from getting stuck hanging off ledges
+		* killough 10/98: Allow dropoffs in controlled circumstances
+		* killough 11/98: Improve symmetry of clipping on stairs
+		*/
+
+		if (!(thing->flags & (MF_DROPOFF|MF_FLOAT)))
+		{
+//			if (comp[comp_dropoff])
+			if ( 1 )
+			{
+				if ((0/*compatibility*/ || !dropoff) && (tm.floorz - tm.dropoffz > 24*FRACUNIT))
+					return false;                      // don't stand over a dropoff
+			}
+			else
+			{
+				// [BB] dropoff is a bool, it can't be equal to 2
+				if (!dropoff || (/*dropoff==2 &&*/ // large jump down (e.g. dogs)
+					(tm.floorz-tm.dropoffz > 128*FRACUNIT || 
+					!thing->target || thing->target->z >tm.dropoffz)))
+				{
+					if (/*!monkeys ||*/ /*!mbf_features*/ 1 ?
+						( tm.floorz - tm.dropoffz > 24*FRACUNIT ) :
+						thing->floorz  - tm.floorz > 24*FRACUNIT ||
+						thing->dropoffz - tm.dropoffz > 24*FRACUNIT)
+					{
+						return false;
+					}
+				}
+				else
+				{ /* dropoff allowed -- check for whether it fell more than 24 */
+//					felldown = !(thing->flags & MF_NOGRAVITY) &&
+//					thing->z - tm.floorz > 24*FRACUNIT;
+				}
+			}
+
+			if (thing->BounceFlags &&    // killough 8/13/98
+			!(thing->flags & (MF_MISSILE|MF_NOGRAVITY)) &&
+			/*!sentient(thing) &&*/ tm.floorz - thing->z > 16*FRACUNIT)
+				return false; // too big a step up for bouncers under gravity
+/*
+			// killough 11/98: prevent falling objects from going up too many steps
+			if (thing->intflags & MIF_FALLING && tm.floorz - thing->z >
+				FixedMul(thing->velx,thing->velx)+FixedMul(thing->vely,thing->vely))
+			{
+				return false;
+			}
+*/
+		}
+	}
+
+	// the move is ok,
+	// so unlink from the old position and link into the new position
+
+	thing->UnlinkFromWorld( );
+
+	oldx = thing->x;
+	oldy = thing->y;
+	thing->floorz = tm.floorz;
+	thing->ceilingz = tm.ceilingz;
+	thing->dropoffz = tm.dropoffz;      // killough 11/98: keep track of dropoffs
+	thing->x = x;
+	thing->y = y;
+
+	thing->LinkToWorld( );
+
+	// if any special lines were hit, do the effect
+	if (!(thing->flags & (MF_TELEPORT|MF_NOCLIP)))
+	{
+		while (spechit.Pop (ld))
+		{
+			// see if the line was crossed
+			side = P_PointOnLineSide (thing->x, thing->y, ld);
+			oldside = P_PointOnLineSide (oldx, oldy, ld);
+			if (side != oldside && ld->special)
+			{
+				if (thing->player)
+				{
+					P_ActivateLine (ld, thing, oldside, SPAC_Cross);
+				}
+				else if (thing->flags2 & MF2_MCROSS)
+				{
+					P_ActivateLine (ld, thing, oldside, SPAC_MCross);
+				}
+				else if (thing->flags2 & MF2_PCROSS)
+				{
+					P_ActivateLine (ld, thing, oldside, SPAC_PCross);
+				}
+				else if ((ld->special == Teleport ||
+						  ld->special == Teleport_NoFog ||
+						  ld->special == Teleport_Line))
+				{	// [RH] Just a little hack for BOOM compatibility
+					P_ActivateLine (ld, thing, oldside, SPAC_MCross);
+				}
+			}
+		}
+	}
+
+	return true;
+}
+
+//*****************************************************************************
+//
+bool P_OldTryMove (AActor *thing, fixed_t x, fixed_t y,
+				bool dropoff, // killough 3/15/98: allow dropoff as option
+				bool onfloor) // [RH] Let P_TryMove keep the thing on the floor
+{
+	FCheckPosition tm;
+	return P_OldTryMove(thing, x, y, dropoff, onfloor, tm);
+}
 
 //==========================================================================
 //
@@ -2193,6 +2490,11 @@ struct FSlide
 	void SlideTraverse (fixed_t startx, fixed_t starty, fixed_t endx, fixed_t endy);
 	void SlideMove (AActor *mo, fixed_t tryx, fixed_t tryy, int numsteps);
 
+	// [BB] Old code for people who just have to have doom2.exe style movement, converted to work with the latest ZDoom version.
+	void OldHitSlideLine(line_t *ld);
+	void OldSlideMove (AActor *mo);
+	void OldSlideTraverse (fixed_t startx, fixed_t starty, fixed_t endx, fixed_t endy);
+
 	// The bouncing code uses the same data structure
 	bool BounceTraverse (fixed_t startx, fixed_t starty, fixed_t endx, fixed_t endy);
 	bool BounceWall (AActor *mo);
@@ -2238,9 +2540,15 @@ void FSlide::HitSlideLine (line_t* ld)
 		{
 			tmxmove /= 2; // absorb half the velocity
 			tmymove = -tmymove/2;
-			if (slidemo->player && slidemo->health > 0 && !(slidemo->player->cheats & CF_PREDICTING))
+			// [BB] Adapted to Skulltag's prediction.
+			if (slidemo->player && ( slidemo->player->bSpectating == false ) && slidemo->health > 0 && ( CLIENT_PREDICT_IsPredicting( ) == false ) )// && !(slidemo->player->cheats & CF_PREDICTING))
 			{
 				S_Sound (slidemo, CHAN_VOICE, "*grunt", 1, ATTN_IDLE); // oooff!
+
+				// [BC] Tell clients of the "oof" sound.
+				// [BB] Skip the player who made the sound, he plays it himself while predicting.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_SoundActor( slidemo, CHAN_VOICE, "*grunt", 1, ATTN_IDLE, static_cast<ULONG> ( slidemo->player - players ), SVCF_SKIPTHISCLIENT );
 			}
 		}
 		else
@@ -2254,9 +2562,15 @@ void FSlide::HitSlideLine (line_t* ld)
 		{
 			tmxmove = -tmxmove/2; // absorb half the velocity
 			tmymove /= 2;
-			if (slidemo->player && slidemo->health > 0 && !(slidemo->player->cheats & CF_PREDICTING))
+			// [BB/WS] Adapted to Skulltag's prediction.
+			if (slidemo->player && ( slidemo->player->bSpectating == false ) && slidemo->health > 0 && ( CLIENT_PREDICT_IsPredicting( ) == false ) )// && !(slidemo->player->cheats & CF_PREDICTING))
 			{
 				S_Sound (slidemo, CHAN_VOICE, "*grunt", 1, ATTN_IDLE); // oooff!//   ^
+
+				// [BC] Tell clients of the "oof" sound.
+				// [BB/WS] Skip the player who made the sound, he plays it himself while predicting.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_SoundActor( slidemo, CHAN_VOICE, "*grunt", 1, ATTN_IDLE, static_cast<ULONG> ( slidemo->player - players ), SVCF_SKIPTHISCLIENT );
 			}
 		}																		//   |
 		else																	// phares
@@ -2284,9 +2598,15 @@ void FSlide::HitSlideLine (line_t* ld)
 	{
 		moveangle = lineangle - deltaangle;
 		movelen /= 2; // absorb
-		if (slidemo->player && slidemo->health > 0 && !(slidemo->player->cheats & CF_PREDICTING))
+		// [BB/WS] Adapted to Skulltag's prediction.
+		if (slidemo->player && ( slidemo->player->bSpectating == false ) && slidemo->health > 0 && ( CLIENT_PREDICT_IsPredicting( ) == false ) )// && !(slidemo->player->cheats & CF_PREDICTING))
 		{
 			S_Sound (slidemo, CHAN_VOICE, "*grunt", 1, ATTN_IDLE); // oooff!
+
+			// [WS] Tell clients of the "oof" sound.
+			// [BB/WS] Skip the player who made the sound, he plays it himself while predicting.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SoundActor( slidemo, CHAN_VOICE, "*grunt", 1, ATTN_IDLE, static_cast<ULONG> ( slidemo->player - players ), SVCF_SKIPTHISCLIENT );
 		}
 		moveangle >>= ANGLETOFINESHIFT;
 		tmxmove = FixedMul (movelen, finecosine[moveangle]);
@@ -2342,6 +2662,102 @@ void FSlide::HitSlideLine (line_t* ld)
 			}
 		}
 	}																// phares
+}
+
+// [BC] ugh old code for people who just have to have doom2.exe style movement.
+void FSlide::OldHitSlideLine(line_t *ld)
+{
+	int     side;
+	angle_t lineangle;
+	angle_t moveangle;
+	angle_t deltaangle;
+	fixed_t movelen;
+	fixed_t newlen;
+	bool icyfloor;  // is floor icy?                               // phares
+	//   |
+	// Under icy conditions, if the angle of approach to the wall     //   V
+	// is more than 45 degrees, then you'll bounce and lose half
+	// your momentum. If less than 45 degrees, you'll slide along
+	// the wall. 45 is arbitrary and is believable.
+
+	// Check for the special cases of horz or vert walls.
+
+	/* killough 10/98: only bounce if hit hard (prevents wobbling)
+	* cph - DEMOSYNC - should only affect players in Boom demos? */
+	icyfloor = 0;/*
+				 (mbf_features ? 
+				 P_AproxDistance(tmxmove, tmymove) > 4*FRACUNIT : !compatibility) &&
+				 variable_friction &&  // killough 8/28/98: calc friction on demand
+				 slidemo->z <= slidemo->floorz &&
+				 P_GetFriction(slidemo, NULL) > ORIG_FRICTION;
+				 */
+	if (ld->slopetype == ST_HORIZONTAL)
+	{
+		if (icyfloor && (abs(tmymove) > abs(tmxmove)))
+		{
+			tmxmove /= 2; // absorb half the momentum
+			tmymove = -tmymove/2;
+			//S_StartSound(slidemo,sfx_oof); // oooff!
+		}
+		else
+			tmymove = 0; // no more movement in the Y direction
+		return;
+	}
+
+	if (ld->slopetype == ST_VERTICAL)
+	{
+		if (icyfloor && (abs(tmxmove) > abs(tmymove)))
+		{
+			tmxmove = -tmxmove/2; // absorb half the momentum
+			tmymove /= 2;
+			//S_StartSound(slidemo,sfx_oof); // oooff!                      //   ^
+		}                                                             //   |
+		else                                                            // phares
+			tmxmove = 0; // no more movement in the X direction
+		return;
+	}
+
+	// The wall is angled. Bounce if the angle of approach is         // phares
+	// less than 45 degrees.                                          // phares
+
+	side = P_PointOnLineSide (slidemo->x, slidemo->y, ld);
+
+	lineangle = R_PointToAngle2 (0,0, ld->dx, ld->dy);
+	if (side == 1)
+		lineangle += ANG180;
+	moveangle = R_PointToAngle2 (0,0, tmxmove, tmymove);
+
+	// killough 3/2/98:
+	// The moveangle+=10 breaks v1.9 demo compatibility in
+	// some demos, so it needs demo_compatibility switch.
+
+	if (0)//!demo_compatibility)
+		moveangle += 10; // prevents sudden path reversal due to        // phares
+	// rounding error                              //   |
+	deltaangle = moveangle-lineangle;                                 //   V
+	movelen = P_AproxDistance (tmxmove, tmymove);
+	if (icyfloor && (deltaangle > ANG45) && (deltaangle < ANG90+ANG45))
+	{
+		moveangle = lineangle - deltaangle;
+		movelen /= 2; // absorb
+		//S_StartSound(slidemo,sfx_oof); // oooff!
+		moveangle >>= ANGLETOFINESHIFT;
+		tmxmove = FixedMul (movelen, finecosine[moveangle]);
+		tmymove = FixedMul (movelen, finesine[moveangle]);
+	}                                                               //   ^
+	else                                                              //   |
+	{                                                               // phares
+		if (deltaangle > ANG180)
+			deltaangle += ANG180;
+
+		//  I_Error ("SlideLine: ang>ANG180");
+
+		lineangle >>= ANGLETOFINESHIFT;
+		deltaangle >>= ANGLETOFINESHIFT;
+		newlen = FixedMul (movelen, finecosine[deltaangle]);
+		tmxmove = FixedMul (newlen, finecosine[lineangle]);
+		tmymove = FixedMul (newlen, finesine[lineangle]);
+	}                                                               // phares
 }
 
 
@@ -2437,6 +2853,66 @@ void FSlide::SlideTraverse (fixed_t startx, fixed_t starty, fixed_t endx, fixed_
 	}
 }
 
+// [BC] ugh old code for people who just have to have doom2.exe style movement.
+void FSlide::OldSlideTraverse (fixed_t startx, fixed_t starty, fixed_t endx, fixed_t endy)
+{
+	line_t* li;
+	FLineOpening open;
+
+	FPathTraverse it(startx, starty, endx, endy, PT_ADDLINES);
+	intercept_t *in;
+
+	while ((in = it.Next()))
+	{
+		if (!in->isaline)
+			I_Error ("PTR_SlideTraverse: not a line?");
+
+		li = in->d.line;
+
+		if ( ! (li->flags & ML_TWOSIDED) )
+		{
+			if (P_PointOnLineSide (slidemo->x, slidemo->y, li))
+				continue; // don't hit the back side
+			goto isblocking;
+		}
+
+		// set openrange, opentop, openbottom.
+		// These define a 'window' from one sector to another across a line
+
+		//  P_LineOpening (li);
+
+		P_LineOpening (open, slidemo, li, it.Trace().x + FixedMul (it.Trace().dx, in->frac),
+			it.Trace().y + FixedMul (it.Trace().dy, in->frac));	// set openrange, opentop, openbottom
+
+		if (open.range < slidemo->height)
+			goto isblocking;  // doesn't fit
+
+		if (open.top - slidemo->z < slidemo->height)
+			goto isblocking;  // mobj is too high
+
+		if (open.bottom - slidemo->z > 24*FRACUNIT )
+			goto isblocking;  // too big a step up
+
+		// this line doesn't block movement
+
+		continue;
+
+		// the line does block movement,
+		// see if it is closer than best so far
+
+isblocking:
+
+		if (in->frac < bestslidefrac)
+		{
+			secondslidefrac = bestslidefrac;
+			secondslideline = bestslideline;
+			bestslidefrac = in->frac;
+			bestslideline = li;
+		}
+
+		return; // stop
+	}
+}
 
 
 //==========================================================================
@@ -2572,6 +3048,120 @@ void P_SlideMove (AActor *mo, fixed_t tryx, fixed_t tryy, int numsteps)
 {
 	FSlide slide;
 	slide.SlideMove(mo, tryx, tryy, numsteps);
+}
+
+//*****************************************************************************
+//
+// [BC] ugh old code for people who just have to have doom2.exe style movement.
+void FSlide::OldSlideMove (AActor *mo)
+{
+	int hitcount = 3;
+
+	slidemo = mo; // the object that's sliding
+
+	do 
+	{
+		fixed_t leadx, leady, trailx, traily;
+
+		if (!--hitcount)
+			goto stairstep;   // don't loop forever
+
+		// trace along the three leading corners
+
+		if (mo->velx > 0)
+			leadx = mo->x + mo->radius, trailx = mo->x - mo->radius;
+		else
+			leadx = mo->x - mo->radius, trailx = mo->x + mo->radius;
+
+		if (mo->vely > 0)
+			leady = mo->y + mo->radius, traily = mo->y - mo->radius;
+		else
+			leady = mo->y - mo->radius, traily = mo->y + mo->radius;
+
+		bestslidefrac = FRACUNIT+1;
+
+		OldSlideTraverse(leadx, leady, leadx+mo->velx, leady+mo->vely);
+		OldSlideTraverse(trailx, leady, trailx+mo->velx, leady+mo->vely);
+		OldSlideTraverse(leadx, traily, leadx+mo->velx, traily+mo->vely);
+
+		// move up to the wall
+
+		if (bestslidefrac == FRACUNIT+1)
+		{
+			// the move must have hit the middle, so stairstep
+
+stairstep:
+
+			/* killough 3/15/98: Allow objects to drop off ledges
+			*
+			* phares 5/4/98: kill momentum if you can't move at all
+			* This eliminates player bobbing if pressed against a wall
+			* while on ice.
+			*
+			* killough 10/98: keep buggy code around for old Boom demos
+			*
+			* cph 2000/09//23: buggy code was only in Boom v2.01
+			*/
+
+			if (!P_OldTryMove(mo, mo->x, mo->y + mo->vely, true))
+				if (!P_OldTryMove(mo, mo->x + mo->velx, mo->y, true))
+					if (0)//compatibility_level == boom_201_compatibility)
+						mo->velx = mo->vely = 0;
+
+			break;
+		}
+
+		// fudge a bit to make sure it doesn't hit
+
+		if ((bestslidefrac -= 0x800) > 0)
+		{
+			fixed_t newx = FixedMul(mo->velx, bestslidefrac);
+			fixed_t newy = FixedMul(mo->vely, bestslidefrac);
+
+			// killough 3/15/98: Allow objects to drop off ledges
+
+			if (!P_OldTryMove(mo, mo->x+newx, mo->y+newy, true))
+				goto stairstep;
+		}
+
+		// Now continue along the wall.
+		// First calculate remainder.
+
+		bestslidefrac = FRACUNIT-(bestslidefrac+0x800);
+
+		if (bestslidefrac > FRACUNIT)
+			bestslidefrac = FRACUNIT;
+
+		if (bestslidefrac <= 0)
+			break;
+
+		tmxmove = FixedMul(mo->velx, bestslidefrac);
+		tmymove = FixedMul(mo->vely, bestslidefrac);
+
+		OldHitSlideLine(bestslideline); // clip the moves
+
+		mo->velx = tmxmove;
+		mo->vely = tmymove;
+
+		/* killough 10/98: affect the bobbing the same way (but not voodoo dolls)
+		* cph - DEMOSYNC? */
+		if (mo->player && mo->player->mo == mo)
+		{
+			if (abs(mo->player->velx) > abs(tmxmove))
+				mo->player->velx = tmxmove;
+			if (abs(mo->player->vely) > abs(tmymove))
+				mo->player->vely = tmymove;
+		}
+	}  // killough 3/15/98: Allow objects to drop off ledges:
+	while (!P_OldTryMove(mo, mo->x+tmxmove, mo->y+tmymove, true));
+}
+
+//*****************************************************************************
+//
+void P_OldSlideMove (AActor *mo)
+{
+	FSlide slide;
+	slide.OldSlideMove(mo);
 }
 
 //============================================================================
@@ -2975,6 +3565,16 @@ bool P_BounceActor (AActor *mo, AActor *BlockingMobj, bool ontop)
 					mo->BounceFlags &= ~BOUNCE_TypeMask;
 			}
 		}
+
+		// [BB] Inform the clients.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			SERVERCOMMANDS_PlayBounceSound( mo, true );
+			// [BB] We need to inform the clients about the new momentum and sync the position,
+			// but can only do this after calling P_ZMovement. Mark the actor accordingly.
+			mo->ulNetworkFlags |= NETFL_BOUNCED_OFF_ACTOR;
+		}
+
 		return true;
 	}
 	return false;
@@ -3306,7 +3906,11 @@ void aim_t::AimTraverse (fixed_t startx, fixed_t starty, fixed_t endx, fixed_t e
 		{
 			// try to be a little smarter about what to aim at!
 			// In particular avoid autoaiming at friends and barrels.
-			if (th->IsFriend(friender))
+			if (th->IsFriend(friender)
+				// [BB] If shooter and target are both players, they are only considered to be friends,
+				// if they are teammates. For the time being I don't want to put this in IsFriend
+				// to not risk any negative side effects in 97d3.
+				&& ( th->IsTeammate( friender ) || ( th->player == NULL ) || ( friender->player == NULL ) ) )
 			{
 				if (sv_smartaim < 2)
 				{
@@ -3353,6 +3957,9 @@ fixed_t P_AimLineAttack (AActor *t1, angle_t angle, fixed_t distance, AActor **p
 	fixed_t y2;
 	aim_t aim;
 
+	// [Spleen]
+	UNLAGGED_Reconcile( t1 );
+
 	angle >>= ANGLETOFINESHIFT;
 	aim.flags = flags;
 	aim.shootthing = t1;
@@ -3361,7 +3968,8 @@ fixed_t P_AimLineAttack (AActor *t1, angle_t angle, fixed_t distance, AActor **p
 	x2 = t1->x + (distance>>FRACBITS)*finecosine[angle];
 	y2 = t1->y + (distance>>FRACBITS)*finesine[angle];
 	aim.shootz = t1->z + (t1->height>>1) - t1->floorclip;
-	if (t1->player != NULL)
+	// [BB] In ST, right after a map change, mo apparently can be zero.
+	if ( ( t1->player != NULL ) && ( t1->player->mo != NULL ) )
 	{
 		aim.shootz += FixedMul (t1->player->mo->AttackZOffset, t1->player->crouchfactor);
 	}
@@ -3444,6 +4052,10 @@ fixed_t P_AimLineAttack (AActor *t1, angle_t angle, fixed_t distance, AActor **p
 	{
 		*pLineTarget = aim.linetarget;
 	}
+
+	// [Spleen]
+	UNLAGGED_Restore( t1 );
+
 	return aim.linetarget ? aim.aimpitch : t1->pitch;
 }
 
@@ -3497,6 +4109,14 @@ static ETraceStatus CheckForSpectral (FTraceResults &res, void *userdata)
 AActor *P_LineAttack (AActor *t1, angle_t angle, fixed_t distance,
 				   int pitch, int damage, FName damageType, const PClass *pufftype, int flags, AActor **victim, int *actualdamage)
 {
+	// [BB] The only reason the client should try to execute P_LineAttack, is the online hitscan decal fix. 
+	// [CK] And also predicted puffs and blood decals.
+	if ( NETWORK_InClientMode()
+		&& cl_hitscandecalhack == false
+		&& CLIENT_ShouldPredictPuffs( ) == false )
+	{
+		return NULL;
+	}
 	fixed_t vx, vy, vz, shootz;
 	FTraceResults trace;
 	angle_t srcangle = angle;
@@ -3524,6 +4144,9 @@ AActor *P_LineAttack (AActor *t1, angle_t angle, fixed_t distance,
 	vx = FixedMul (finecosine[pitch], finecosine[angle]);
 	vy = FixedMul (finecosine[pitch], finesine[angle]);
 	vz = -finesine[pitch];
+
+	// [Spleen]
+	UNLAGGED_Reconcile( t1 );
 
 	shootz = t1->z - t1->floorclip + (t1->height>>1);
 	if (t1->player != NULL)
@@ -3561,20 +4184,40 @@ AActor *P_LineAttack (AActor *t1, angle_t angle, fixed_t distance,
 	if (puffDefaults != NULL && puffDefaults->flags6 & MF6_NOTRIGGER) tflags = TRACE_NoSky;
 	else tflags = TRACE_NoSky|TRACE_Impact;
 
-	if (!Trace (t1->x, t1->y, shootz, t1->Sector, vx, vy, vz, distance,
+	// [Spleen]
+	const bool hitSomething = Trace (t1->x, t1->y, shootz, t1->Sector, vx, vy, vz, distance,
 		MF_SHOOTABLE, ML_BLOCKEVERYTHING|ML_BLOCKHITSCAN, t1, trace,
-		tflags, hitGhosts ? CheckForGhost : CheckForSpectral))
+		tflags, hitGhosts ? CheckForGhost : CheckForSpectral);
+
+	// [Spleen]
+	UNLAGGED_Restore( t1 );
+
+	if (!hitSomething)
 	{ // hit nothing
+		// [BB] No decal will be spawned, so the client stops here.
+		// [CK] But continue on if we want clientside puffs since it may occur.
+		if ( NETWORK_InClientMode() && CLIENT_ShouldPredictPuffs( ) == false )
+			return NULL;
+
 		if (puffDefaults == NULL)
 		{
 		}
 		else if (puffDefaults->ActiveSound)
 		{ // Play miss sound
 			S_Sound (t1, CHAN_WEAPON, puffDefaults->ActiveSound, 1, ATTN_NORM);
+
+			// [BC] Play the hit sound to clients.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SoundActor( t1, CHAN_WEAPON, S_GetName( puffDefaults->ActiveSound ), 1, ATTN_NORM );
 		}
 		if (puffDefaults != NULL && puffDefaults->flags3 & MF3_ALWAYSPUFF)
 		{ // Spawn the puff anyway
 			puff = P_SpawnPuff (t1, pufftype, trace.X, trace.Y, trace.Z, angle - ANG180, 2, puffFlags);
+
+			// [CK] We don't want this function returning an actor if it's a
+			// client predicting. The client would be done regardless.
+			if ( NETWORK_InClientMode() )
+				return NULL;
 		}
 		else
 		{
@@ -3587,14 +4230,23 @@ AActor *P_LineAttack (AActor *t1, angle_t angle, fixed_t distance,
 
 		if (trace.HitType != TRACE_HitActor)
 		{
-			// position a bit closer for puffs
-			if (trace.HitType != TRACE_HitWall || trace.Line->special != Line_Horizon)
+			// [BB] The client only spawns decals, no puffs.
+			// [CK] Now there is an option for clientside puffs.
+			if ( ( NETWORK_InClientMode() == false ) || CLIENT_ShouldPredictPuffs( ) )
 			{
-				fixed_t closer = trace.Distance - 4*FRACUNIT;
-				puff = P_SpawnPuff (t1, pufftype, t1->x + FixedMul (vx, closer),
-					t1->y + FixedMul (vy, closer),
-					shootz + FixedMul (vz, closer), angle - ANG90, 0, puffFlags);
+				// position a bit closer for puffs
+				if (trace.HitType != TRACE_HitWall || trace.Line->special != Line_Horizon)
+				{
+					fixed_t closer = trace.Distance - 4*FRACUNIT;
+					puff = P_SpawnPuff (t1, pufftype, t1->x + FixedMul (vx, closer),
+						t1->y + FixedMul (vy, closer),
+						shootz + FixedMul (vz, closer), angle - ANG90, 0, puffFlags);
+				}
 			}
+
+			// [CK] If we don't want decals, stop before entering.
+			if ( NETWORK_InClientMode() && cl_hitscandecalhack == false ) 
+				return NULL;
 
 			// [RH] Spawn a decal
 			if (trace.HitType == TRACE_HitWall && trace.Line->special != Line_Horizon)
@@ -3612,6 +4264,13 @@ AActor *P_LineAttack (AActor *t1, angle_t angle, fixed_t distance,
 					SpawnShootDecal (puff, trace);
 				}				
 				
+				// [BB] Clients dont' spawn the puff, so we have to look if the default puff has a decal defined.
+				else if( NETWORK_InClientMode()
+							&& pufftype && (GetDefaultByType (pufftype) != NULL) && GetDefaultByType (pufftype)->DecalGenerator)
+				{
+					SpawnShootDecal (GetDefaultByType (pufftype), trace);
+				}
+
 				else
 				{
 					SpawnShootDecal (t1, trace);
@@ -3622,6 +4281,10 @@ AActor *P_LineAttack (AActor *t1, angle_t angle, fixed_t distance,
 				trace.Sector->heightsec == NULL &&
 				trace.HitType == TRACE_HitFloor)
 			{
+				// [CK] We are not predicting water splashes.
+				if ( NETWORK_InClientMode() )
+					return NULL;
+
 				// Using the puff's position is not accurate enough.
 				// Instead make it splash at the actual hit position
 				hitx = t1->x + FixedMul (vx, trace.Distance);
@@ -3629,9 +4292,21 @@ AActor *P_LineAttack (AActor *t1, angle_t angle, fixed_t distance,
 				hitz = shootz + FixedMul (vz, trace.Distance);
 				P_HitWater (puff, P_PointInSector(hitx, hity), hitx, hity, hitz);
 			}
+			// [BB] Decal has been spawned, so the client stops here. 
+			if ( NETWORK_InClientMode() )
+			{
+				return NULL;
+			}
 		}
 		else
 		{
+			// [BB] No decal will be spawned, so the client stops here.
+			// [CK] Also exit if we don't want puffs, or blood decals.
+			if ( NETWORK_InClientMode()
+					&& CLIENT_ShouldPredictPuffs( ) == false
+					&& cl_hitscandecalhack == false )
+				return NULL;
+
 			bool bloodsplatter = (t1->flags5 & MF5_BLOODSPLATTER) ||
 									(t1->player != NULL &&	t1->player->ReadyWeapon != NULL &&
 										(t1->player->ReadyWeapon->WeaponFlags & WIF_AXEBLOOD));
@@ -3648,10 +4323,17 @@ AActor *P_LineAttack (AActor *t1, angle_t angle, fixed_t distance,
 			hity = t1->y + FixedMul (vy, dist);
 			hitz = shootz + FixedMul (vz, dist);
 
+			// [BB] If reconciliation moved the actor we hit, move the hit accordingly.
+			hitx += trace.unlaggedHitOffset[0];
+			hity += trace.unlaggedHitOffset[1];
+			hitz += trace.unlaggedHitOffset[2];
+
 			// Spawn bullet puffs or blood spots, depending on target type.
-			if ((puffDefaults != NULL && puffDefaults->flags3 & MF3_PUFFONACTORS) ||
+			// [CK] We don't want to enter here unless we're predicting puffs.
+			if (((puffDefaults != NULL && puffDefaults->flags3 & MF3_PUFFONACTORS) ||
 				(trace.Actor->flags & MF_NOBLOOD) ||
 				(trace.Actor->flags2 & (MF2_INVULNERABLE|MF2_DORMANT)))
+				&& ( NETWORK_InClientMode() == false || CLIENT_ShouldPredictPuffs( ) ) )
 			{
 				if (!(trace.Actor->flags & MF_NOBLOOD))
 					puffFlags |= PF_HITTHINGBLEED;
@@ -3660,8 +4342,15 @@ AActor *P_LineAttack (AActor *t1, angle_t angle, fixed_t distance,
 				puff = P_SpawnPuff (t1, pufftype, hitx, hity, hitz, angle - ANG180, 2, puffFlags|PF_HITTHING);
 			}
 
+			// [CK] The client by this point has predicted their desired
+			// puff and should only be here if they want puff prediction,
+			// so we can exit. We will only continue on if we want blood decals.
+			if ( NETWORK_InClientMode() && cl_hitscandecalhack == false )
+				return NULL;
+
 			// Allow puffs to inflict poison damage, so that hitscans can poison, too.
-			if (puffDefaults != NULL && puffDefaults->PoisonDamage > 0 && puffDefaults->PoisonDuration != INT_MIN)
+			// [EP] Skip this for clients.
+			if ( ( NETWORK_InClientMode( ) == false ) && puffDefaults != NULL && puffDefaults->PoisonDamage > 0 && puffDefaults->PoisonDuration != INT_MIN)
 			{
 				P_PoisonMobj(trace.Actor, puff ? puff : t1, t1, puffDefaults->PoisonDamage, puffDefaults->PoisonDuration, puffDefaults->PoisonPeriod, puffDefaults->PoisonDamageType);
 			}
@@ -3669,7 +4358,8 @@ AActor *P_LineAttack (AActor *t1, angle_t angle, fixed_t distance,
 			// [GZ] If MF6_FORCEPAIN is set, we need to call P_DamageMobj even if damage is 0!
 			// Note: The puff may not yet be spawned here so we must check the class defaults, not the actor.
 			int newdam = damage;
-			if (damage || (puffDefaults != NULL && puffDefaults->flags6 & MF6_FORCEPAIN))
+			// [EP] Skip this for clients.
+			if ( ( NETWORK_InClientMode( ) == false ) && (damage || (puffDefaults != NULL && puffDefaults->flags6 & MF6_FORCEPAIN)))
 			{
 				int dmgflags = DMG_INFLICTOR_IS_PUFF | pflag;
 				// Allow MF5_PIERCEARMOR on a weapon as well.
@@ -3683,7 +4373,9 @@ AActor *P_LineAttack (AActor *t1, angle_t angle, fixed_t distance,
 				{ 
 					// Since the puff is the damage inflictor we need it here 
 					// regardless of whether it is displayed or not.
-					puff = P_SpawnPuff (t1, pufftype, hitx, hity, hitz, angle - ANG180, 2, puffFlags|PF_HITTHING|PF_TEMPORARY);
+					// [BB] In case the puff has a custom obituary, the clients need to spawn it too.
+					const bool bTellClientToSpawn = pufftype && ( pufftype->Meta.GetMetaString (AMETA_Obituary) != NULL );
+					puff = P_SpawnPuff (t1, pufftype, hitx, hity, hitz, angle - ANG180, 2, puffFlags|PF_HITTHING|PF_TEMPORARY, bTellClientToSpawn );
 					killPuff = true;
 				}
 				newdam = P_DamageMobj (trace.Actor, puff ? puff : t1, t1, damage, damageType, dmgflags);
@@ -3694,16 +4386,20 @@ AActor *P_LineAttack (AActor *t1, angle_t angle, fixed_t distance,
 			}
 			if (!(puffDefaults != NULL && puffDefaults->flags3&MF3_BLOODLESSIMPACT))
 			{
+				// [CK] Do not perform if we are a client.
 				if (!bloodsplatter && !axeBlood &&
 					!(trace.Actor->flags & MF_NOBLOOD) &&
-					!(trace.Actor->flags2 & (MF2_INVULNERABLE|MF2_DORMANT)))
+					!(trace.Actor->flags2 & (MF2_INVULNERABLE|MF2_DORMANT)) &&
+					NETWORK_InClientMode() == false )
 				{
 					P_SpawnBlood (hitx, hity, hitz, angle - ANG180, newdam > 0 ? newdam : damage, trace.Actor);
 				}
 	
 				if (damage)
 				{
-					if (bloodsplatter || axeBlood)
+					// [CK] Do not do any blood splatters, that is not the function
+					// we intend to predict with blood decals.
+					if ((bloodsplatter || axeBlood) && NETWORK_InClientMode() == false )
 					{
 						if (!(trace.Actor->flags&MF_NOBLOOD) &&
 							!(trace.Actor->flags2&(MF2_INVULNERABLE|MF2_DORMANT)))
@@ -3718,6 +4414,11 @@ AActor *P_LineAttack (AActor *t1, angle_t angle, fixed_t distance,
 							}
 						}
 					}
+
+					// [BC] If the attacker is a player and struck another player, flag it.
+					if (( trace.Actor->player ) && ( t1->player ) && ( t1->IsTeammate( trace.Actor ) == false ))
+						t1->player->bStruckPlayer = true;
+
 					// [RH] Stick blood to walls
 					P_TraceBleed (newdam > 0 ? newdam : damage, trace.X, trace.Y, trace.Z,
 						trace.Actor, srcangle, srcpitch);
@@ -3730,17 +4431,31 @@ AActor *P_LineAttack (AActor *t1, angle_t angle, fixed_t distance,
 		}
 		if (trace.Crossed3DWater || trace.CrossedWater)
 		{
+			// [CK] We do not want to predict splashes right now. This puff is
+			// destroyed further down, so we can assume it would be bad to do
+			// any prediction here.
+			if ( NETWORK_InClientMode() )
+				return NULL;
 
 			if (puff == NULL)
 			{ // Spawn puff just to get a mass for the splash
-				puff = P_SpawnPuff (t1, pufftype, hitx, hity, hitz, angle - ANG180, 2, puffFlags|PF_HITTHING|PF_TEMPORARY);
+				puff = P_SpawnPuff (t1, pufftype, hitx, hity, hitz, angle - ANG180, 2, puffFlags|PF_HITTHING|PF_TEMPORARY, false);
 				killPuff = true;
 			}
 			SpawnDeepSplash (t1, trace, puff, vx, vy, vz, shootz, trace.Crossed3DWater != NULL);
 		}
 	}
+
+	// [CK] In case the client ever gets this far, it should end now.
+	if ( NETWORK_InClientMode() )
+		return NULL;
+
 	if (killPuff && puff != NULL)
 	{
+		// [BB] Remove the temporary puff from the clients.
+		if ( ( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( puff->lNetID != -1 ) )
+			SERVERCOMMANDS_DestroyThing( puff );
+
 		puff->Destroy();
 		puff = NULL;
 	}
@@ -3846,11 +4561,15 @@ void P_TraceBleed (int damage, fixed_t x, fixed_t y, fixed_t z, AActor *actor, a
 					bloodcolor.a=1;
 				}
 
-				DImpactDecal::StaticCreate (bloodType,
-					bleedtrace.X, bleedtrace.Y, bleedtrace.Z,
-					bleedtrace.Line->sidedef[bleedtrace.Side],
-					bleedtrace.ffloor,
-					bloodcolor);
+				// [BC] Servers don't need to spawn decals.
+				if ( NETWORK_GetState( ) != NETSTATE_SERVER )
+				{
+					DImpactDecal::StaticCreate (bloodType,
+						bleedtrace.X, bleedtrace.Y, bleedtrace.Z,
+						bleedtrace.Line->sidedef[bleedtrace.Side],
+						bleedtrace.ffloor,
+						bloodcolor);
+				}
 			}
 		}
 	}
@@ -3966,6 +4685,9 @@ void P_RailAttack (AActor *source, int damage, int offset_xy, fixed_t offset_z, 
 	FTraceResults trace;
 	fixed_t shootz;
 
+	// [Spleen]
+	UNLAGGED_Reconcile( source );
+
 	if (puffclass == NULL) puffclass = PClass::FindClass(NAME_BulletPuff);
 
 	pitch = ((angle_t)(-source->pitch) + pitchoffset) >> ANGLETOFINESHIFT;
@@ -4015,6 +4737,9 @@ void P_RailAttack (AActor *source, int damage, int offset_xy, fixed_t offset_z, 
 		distance, MF_SHOOTABLE, ML_BLOCKEVERYTHING, source, trace,
 		flags, ProcessRailHit, &rail_data);
 
+	// [Spleen]
+	UNLAGGED_Restore( source );
+	
 	// Hurt anything the trace hit
 	unsigned int i;
 	FName damagetype = (puffDefaults == NULL || puffDefaults->DamageType == NAME_None) ? FName(NAME_Railgun) : puffDefaults->DamageType;
@@ -4024,47 +4749,94 @@ void P_RailAttack (AActor *source, int damage, int offset_xy, fixed_t offset_z, 
 	
 	if (puffclass != NULL) thepuff = Spawn (puffclass, source->x, source->y, source->z, ALLOW_REPLACE);
 
-	for (i = 0; i < rail_data.RailHits.Size (); i++)
+	// [Spleen] Don't do damage, don't award medals, don't spawn puffs,
+	// and don't spawn blood in clients on a network.
+	// [BB] Actually client spawn the puffs to draw decals / splashes.
+	if ( NETWORK_InClientMode() == false )
 	{
-		fixed_t x, y, z;
-		bool spawnpuff;
-		bool bleed = false;
-
-		int puffflags = PF_HITTHING;
-		AActor *hitactor = rail_data.RailHits[i].HitActor;
-		fixed_t hitdist = rail_data.RailHits[i].Distance;
-
-		x = x1 + FixedMul(hitdist, vx);
-		y = y1 + FixedMul(hitdist, vy);
-		z = shootz + FixedMul(hitdist, vz);
-
-		if ((hitactor->flags & MF_NOBLOOD) ||
-			(hitactor->flags2 & (MF2_DORMANT|MF2_INVULNERABLE)))
+		for (i = 0; i < rail_data.RailHits.Size (); i++)
 		{
-			spawnpuff = (puffclass != NULL);
-		}
-		else
-		{
-			spawnpuff = (puffclass != NULL && puffDefaults->flags3 & MF3_ALWAYSPUFF);
-			puffflags |= PF_HITTHINGBLEED; // [XA] Allow for puffs to jump to XDeath state.
-			if (!(puffDefaults->flags3 & MF3_BLOODLESSIMPACT)) 
+			fixed_t x, y, z;
+			bool spawnpuff;
+			bool bleed = false;
+
+			int puffflags = PF_HITTHING;
+			AActor *hitactor = rail_data.RailHits[i].HitActor;
+			fixed_t hitdist = rail_data.RailHits[i].Distance;
+
+			x = x1 + FixedMul(hitdist, vx);
+			y = y1 + FixedMul(hitdist, vy);
+			z = shootz + FixedMul(hitdist, vz);
+
+			if ((hitactor->flags & MF_NOBLOOD) ||
+				(hitactor->flags2 & (MF2_DORMANT|MF2_INVULNERABLE)))
 			{
-				bleed = true;
+				spawnpuff = (puffclass != NULL);
 			}
-		}
-		if (spawnpuff)
-		{
-			P_SpawnPuff(source, puffclass, x, y, z, (source->angle + angleoffset) - ANG90, 1, puffflags);
-		}
-		if (puffDefaults && puffDefaults->PoisonDamage > 0 && puffDefaults->PoisonDuration != INT_MIN)
-		{
-			P_PoisonMobj(hitactor, thepuff ? thepuff : source, source, puffDefaults->PoisonDamage, puffDefaults->PoisonDuration, puffDefaults->PoisonPeriod, puffDefaults->PoisonDamageType);
-		}
-		int newdam = P_DamageMobj(hitactor, thepuff? thepuff:source, source, damage, damagetype, DMG_INFLICTOR_IS_PUFF);
-		if (bleed)
-		{
-			P_SpawnBlood(x, y, z, (source->angle + angleoffset) - ANG180, newdam > 0 ? newdam : damage, hitactor);
-			P_TraceBleed(newdam > 0 ? newdam : damage, x, y, z, hitactor, source->angle, pitch);
+			else
+			{
+				spawnpuff = (puffclass != NULL && puffDefaults->flags3 & MF3_ALWAYSPUFF);
+				puffflags |= PF_HITTHINGBLEED; // [XA] Allow for puffs to jump to XDeath state.
+				if (!(puffDefaults->flags3 & MF3_BLOODLESSIMPACT)) 
+				{
+					bleed = true;
+				}
+			}
+			if (spawnpuff)
+			{
+				P_SpawnPuff(source, puffclass, x, y, z, (source->angle + angleoffset) - ANG90, 1, puffflags);
+			}
+			// [BC] Damage is server side.
+			if ( NETWORK_InClientMode() == false )
+			{
+				if (puffDefaults && puffDefaults->PoisonDamage > 0 && puffDefaults->PoisonDuration != INT_MIN)
+				{
+					P_PoisonMobj(hitactor, thepuff ? thepuff : source, source, puffDefaults->PoisonDamage, puffDefaults->PoisonDuration, puffDefaults->PoisonPeriod, puffDefaults->PoisonDamageType);
+				}
+				// [BC/BB] Support for instagib.
+				if ( instagib )
+					damage = 999;
+
+				int newdam = P_DamageMobj(hitactor, thepuff? thepuff:source, source, damage, damagetype, DMG_INFLICTOR_IS_PUFF);
+				if (bleed)
+				{
+					P_SpawnBlood(x, y, z, (source->angle + angleoffset) - ANG180, newdam > 0 ? newdam : damage, hitactor);
+					P_TraceBleed(newdam > 0 ? newdam : damage, x, y, z, hitactor, source->angle, pitch);
+				}
+			}
+
+			if (( hitactor->player ) && ( source->IsTeammate( hitactor ) == false ))
+			{
+				if ( source->player )
+				{
+					source->player->ulConsecutiveRailgunHits++;
+
+					// If the player has made 2 straight consecutive hits with the railgun, award a medal.
+					if (( source->player->ulConsecutiveRailgunHits % 2 ) == 0 )
+					{
+						// If the player gets 4+ straight hits with the railgun, award a "Most Impressive" medal.
+						if ( source->player->ulConsecutiveRailgunHits >= 4 )
+						{
+							if ( NETWORK_InClientMode() == false )
+								MEDAL_GiveMedal( ULONG( source->player - players ), MEDAL_MOSTIMPRESSIVE );
+
+							// Tell clients about the medal that been given.
+							if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+								SERVERCOMMANDS_GivePlayerMedal( ULONG( source->player - players ), MEDAL_MOSTIMPRESSIVE );
+						}
+						// Otherwise, award an "Impressive" medal.
+						else
+						{
+							if ( NETWORK_InClientMode() == false )
+								MEDAL_GiveMedal( ULONG( source->player - players ), MEDAL_IMPRESSIVE );
+
+							// Tell clients about the medal that been given.
+							if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+								SERVERCOMMANDS_GivePlayerMedal( ULONG( source->player - players ), MEDAL_IMPRESSIVE );
+						}
+					}
+				}
+			}
 		}
 	}
 
@@ -4099,8 +4871,76 @@ void P_RailAttack (AActor *source, int damage, int offset_xy, fixed_t offset_z, 
 	end.Y = FIXED2FLOAT(trace.Y);
 	end.Z = FIXED2FLOAT(trace.Z);
 	P_DrawRailTrail (source, start, end, color1, color2, maxdiff, railflags, spawnclass, source->angle + angleoffset, duration, sparsity, drift);
+
+	// [BC] If we're the server, tell clients to create a railgun trail.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		const ULONG ulPlayer = source->player ? static_cast<ULONG> ( source->player - players ) : MAXPLAYERS;
+		SERVERCOMMANDS_WeaponRailgun( source, start, end, color1, color2, maxdiff, (railflags & RAF_SILENT), ulPlayer,
+			UNLAGGED_DrawRailClientside( source ) ? SVCF_SKIPTHISCLIENT : ServerCommandFlags::FromInt( 0 ) );
+	}
 }
 
+void P_RailAttackWithPossibleSpread (AActor *source, int damage, int offset_xy, fixed_t offset_z, int color1, int color2, float maxdiff, int railflags, const PClass *puffclass, angle_t angleoffset, angle_t pitchoffset, fixed_t distance, int duration, float sparsity, float drift, const PClass *spawnclass)
+{
+	// [BB] Sanity check.
+	if ( source == NULL )
+		return;
+
+	// [BC]
+	LONG	lOuterColor;
+	LONG	lInnerColor;
+
+	// [BC] If this is a player, use the player's custom colors.
+	// [BB] Only apply the color change if color1 and color2 are at the default value.
+	if ( source->player && (color1 == 0) && (color2 == 0) )
+	{
+		if (( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode( )) & GMF_PLAYERSONTEAMS ) &&
+			( source->player->bOnTeam ))
+		{
+			lOuterColor = TEAM_GetRailgunColor( source->player->ulTeam );
+			lInnerColor = PLAYER_GetRailgunColor( source->player );
+		}
+		else
+		{
+			lOuterColor = PLAYER_GetRailgunColor( source->player );
+			lInnerColor = V_GetColorFromString( NULL, "ff ff ff" );
+		}
+	}
+	else
+	{
+		lOuterColor = color1;
+		lInnerColor = color2;
+	}
+
+	// [BB] Recall ulConsecutiveRailgunHits from before the attack to handle medals.
+	const ULONG ulConsecutiveRailgunHitsBefore = ( source->player ) ? source->player->ulConsecutiveRailgunHits : 0;
+
+	P_RailAttack (source, damage, offset_xy, offset_z, lOuterColor, lInnerColor, maxdiff, railflags, puffclass, angleoffset, pitchoffset, distance, duration, sparsity, drift, spawnclass );
+
+	// [BB] Apply spread and handle the Railgun medals.
+	if (NULL != source->player )
+	{
+		if ( source->player->cheats2 & CF2_SPREAD )
+		{
+			fixed_t		SavedActorAngle;
+
+			SavedActorAngle = source->angle;
+
+			source->angle += ( ANGLE_45 / 3 );
+			P_RailAttack (source, damage, offset_xy, offset_z, lOuterColor, lInnerColor, maxdiff, railflags, puffclass, angleoffset, pitchoffset, distance, duration, sparsity, drift, spawnclass );
+			source->angle = SavedActorAngle;
+
+			source->angle -= ( ANGLE_45 / 3 );
+			P_RailAttack (source, damage, offset_xy, offset_z, lOuterColor, lInnerColor, maxdiff, railflags, puffclass, angleoffset, pitchoffset, distance, duration, sparsity, drift, spawnclass );
+			source->angle = SavedActorAngle;
+		}
+
+		// Player did not strike a player with his railgun. Reset consecutive hits to 0.
+		if ( ulConsecutiveRailgunHitsBefore == source->player->ulConsecutiveRailgunHits )
+			source->player->ulConsecutiveRailgunHits = 0;
+	}
+}
 //==========================================================================
 //
 // [RH] P_AimCamera
@@ -4108,7 +4948,13 @@ void P_RailAttack (AActor *source, int damage, int offset_xy, fixed_t offset_z, 
 //==========================================================================
 
 CVAR (Float, chase_height, -8.f, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
-CVAR (Float, chase_dist, 90.f, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+// [BB] Negative chase_dist values don't make sense, you wouldn't be chasing anymore.
+CUSTOM_CVAR (Float, chase_dist, 90.f, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+{
+	// [BB] Don't allow negative chase_dist values. 
+	if ( self < 0 )
+		self = 0;
+}
 
 void P_AimCamera (AActor *t1, fixed_t &CameraX, fixed_t &CameraY, fixed_t &CameraZ, sector_t *&CameraSector)
 {
@@ -4242,7 +5088,9 @@ bool P_UseTraverse(AActor *usething, fixed_t endx, fixed_t endy, bool &foundline
 
 				sec = usething->Sector;
 
-				if (sec->SecActTarget && sec->SecActTarget->TriggerAction (usething, SECSPAC_Use))
+				// [BC] Just skip right over this in client mode so we don't try to trigger any
+				// actions.
+				if (( NETWORK_InClientMode() == false ) && sec->SecActTarget && sec->SecActTarget->TriggerAction (usething, SECSPAC_Use))
 				{
 					return true;
 				}
@@ -4258,6 +5106,10 @@ bool P_UseTraverse(AActor *usething, fixed_t endx, fixed_t endy, bool &foundline
 
 				if (usething->player)
 				{
+					// [BC] Tell clients of the sound.
+					if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+						SERVERCOMMANDS_SoundActor( usething, CHAN_VOICE,"*usefail", 1, ATTN_IDLE, ULONG( usething->player - players ), SVCF_SKIPTHISCLIENT );
+
 					S_Sound (usething, CHAN_VOICE, "*usefail", 1, ATTN_IDLE);
 				}
 				return true;		// can't use through a wall
@@ -4381,11 +5233,132 @@ void P_UseLines (player_t *player)
 		sector_t *sec = player->mo->Sector;
 		int spac = SECSPAC_Use;
 		if (foundline) spac |= SECSPAC_UseWall;
-		if ((!sec->SecActTarget || !sec->SecActTarget->TriggerAction (player->mo, spac)) &&
+		// [BC] Don't try to trigger sector actions in client mode.
+		if (( NETWORK_InClientMode() ||
+			!sec->SecActTarget || !sec->SecActTarget->TriggerAction (player->mo, spac)) &&
 			P_NoWayTraverse (player->mo, x1, y1))
 		{
 			S_Sound (player->mo, CHAN_VOICE, "*usefail", 1, ATTN_IDLE);
+
+			// [BC] Tell clients of the "oof" sound.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SoundActor( player->mo, CHAN_VOICE, "*usefail", 1, ATTN_IDLE, ULONG( player - players ), SVCF_SKIPTHISCLIENT );
 		}
+	}
+}
+
+/*
+================
+=
+= [BC] P_UseItems
+=
+= Looks for special items in front of the player to activate
+================
+*/
+
+// [BB] Not compatible with the latest ZDoom changes, but do we really need this?
+/*
+void P_UseItems( player_t *pPlayer )
+{
+	fixed_t 	x1;
+	fixed_t 	y1;
+	fixed_t 	x2;
+	fixed_t 	y2;		
+	fixed_t		vrange;
+
+	usething = pPlayer->mo;
+	if ( usething == NULL )
+		return;
+
+	x1 = usething->x;
+	y1 = usething->y;
+	x2 = x1 + ((USERANGE+8)>>FRACBITS)*finecosine[usething->angle >> ANGLETOFINESHIFT];
+	y2 = y1 + ((USERANGE+8)>>FRACBITS)*finesine[usething->angle >> ANGLETOFINESHIFT];
+	vrange = clamp( pPlayer->userinfo.aimdist, ANGLE_1/2, ANGLE_1*35 );
+	aim.toppitch = usething->pitch - vrange;
+	aim.bottompitch = usething->pitch + vrange;
+
+	linetarget = NULL;
+
+	P_PathTraverse( x1, y1, x2, y2, PT_ADDTHINGS, PTR_UsethingTraverse );
+
+	if ( linetarget )
+	{
+		// Don't try to trigger sector actions in client mode.
+		if (( NETWORK_InClientMode() == false ) &&
+			( linetarget->special ) &&
+			( linetarget->ulSTFlags & STFL_USESPECIAL ))
+		{
+			LineSpecials[linetarget->special]( NULL, usething, false, linetarget->args[0],
+									   linetarget->args[1], linetarget->args[2],
+									   linetarget->args[3], linetarget->args[4] );
+		}
+		else
+		{
+			S_Sound( usething, CHAN_VOICE, "*usefail", 1, ATTN_IDLE );
+
+			// Tell clients of the "oof" sound.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SoundActor( usething, CHAN_VOICE, "*usefail", 1, ATTN_IDLE, ULONG( pPlayer - players ), SVCF_SKIPTHISCLIENT );
+		}
+	}
+}
+*/
+/*
+================
+=
+= P_PlayerScan
+=
+= Looks for other players directly in front of the player.
+================
+*/
+
+player_t *P_PlayerScan( AActor *pSource )
+{
+	fixed_t vx, vy, vz, shootz;
+	FTraceResults	trace;
+	int				pitch;
+	angle_t			angle;
+
+	angle = pSource->angle >> ANGLETOFINESHIFT;
+	pitch = (angle_t)( pSource->pitch ) >> ANGLETOFINESHIFT;
+
+	vx = FixedMul (finecosine[pitch], finecosine[angle]);
+	vy = FixedMul (finecosine[pitch], finesine[angle]);
+	vz = -finesine[pitch];
+
+	shootz = pSource->z - pSource->floorclip + (pSource->height>>1) + 8*FRACUNIT;
+
+	if ( Trace( pSource->x,	// Actor x
+		pSource->y, // Actor y
+		shootz,	// Actor z
+		pSource->Sector,
+		vx,
+		vy,
+		vz,
+		( 32 * 64 * FRACUNIT ) /* MISSILERANGE */,	// Maximum distance
+		MF_SHOOTABLE,	// Actor mask
+		ML_BLOCKEVERYTHING,	// Wall mask
+		pSource,		// Actor to ignore
+		trace,	// Result
+		TRACE_NoSky,	// Trace flags
+		NULL ) == false )	// Callback
+	// Did not spot anything anything.
+	{
+		return ( NULL );
+	}
+	else
+	{
+		// Return NULL if we did not hit an actor.
+		if ( trace.HitType != TRACE_HitActor )
+			return ( NULL );
+
+		// Return NULL if the actor we hit is not a player.
+		if ( trace.Actor->player == NULL )
+			return ( NULL );
+
+		// Return the player we found.
+		return ( trace.Actor->player );
 	}
 }
 
@@ -4544,7 +5517,8 @@ void P_RadiusAttack (AActor *bombspot, AActor *bombsource, int bombdamage, int b
 		// them far too "active." BossBrains also use the old code
 		// because some user levels require they have a height of 16,
 		// which can make them near impossible to hit with the new code.
-		if ((flags & RADF_NODAMAGE) || !((bombspot->flags5 | thing->flags5) & MF5_OLDRADIUSDMG))
+		if ((flags & RADF_NODAMAGE) || ( !((bombspot->flags5 | thing->flags5) & MF5_OLDRADIUSDMG)
+		                       && !( zacompatflags & ZACOMPATF_OLDRADIUSDMG ) ) )
 		{
 			// [RH] New code. The bounding box only covers the
 			// height of the thing and not the height of the map.
@@ -4602,13 +5576,38 @@ void P_RadiusAttack (AActor *bombspot, AActor *bombsource, int bombdamage, int b
 			{ // OK to damage; target is in direct path
 				double velz;
 				double thrust;
+				// [BB] We need to store these values for ZACOMPATF_OLD_EXPLOSION_THRUST.
+				const fixed_t origmomx = thing->velx;
+				const fixed_t origmomy = thing->vely;
 				int damage = abs((int)points);
 				int newdam = damage;
 
-				if (!(flags & RADF_NODAMAGE))
-					newdam = P_DamageMobj (thing, bombspot, bombsource, damage, bombmod);
-				else if (thing->player == NULL && !(flags & RADF_NOIMPACTDAMAGE))
-					thing->flags2 |= MF2_BLASTED;
+				// [BC] Damage is server side.
+				if ( NETWORK_InClientMode() == false )
+				{
+					if (!(flags & RADF_NODAMAGE))
+						newdam = P_DamageMobj (thing, bombspot, bombsource, damage, bombmod);
+					else if (thing->player == NULL && !(flags & RADF_NOIMPACTDAMAGE))
+					{
+						thing->flags2 |= MF2_BLASTED;
+
+						// [BB] If we're the server, tell clients to update the flags of the object.
+						if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+							SERVERCOMMANDS_SetThingFlags( thing, FLAGSET_FLAGS2 );
+					}
+				}
+
+				// [BC] If this explosion damaged a player, and the explosion originated from a
+				// player, mark the source player as striking a player, to potentially reward an
+				// accuracy medal.
+				if (( bombsource ) &&
+					( bombsource->player ) &&
+					( thing != bombsource ) &&
+					( thing->player ) &&
+					( thing->IsTeammate( bombsource ) == false ))
+				{
+					bombsource->player->bStruckPlayer = true;
+				}
 
 				if (!(thing->flags & MF_ICECORPSE))
 				{
@@ -4633,12 +5632,33 @@ void P_RadiusAttack (AActor *bombspot, AActor *bombsource, int bombdamage, int b
 							{
 								velz *= 0.8f;
 							}
-							angle_t ang = R_PointToAngle2 (bombspot->x, bombspot->y, thing->x, thing->y) >> ANGLETOFINESHIFT;
-							thing->velx += fixed_t (finecosine[ang] * thrust);
-							thing->vely += fixed_t (finesine[ang] * thrust);
-							if (!(flags & RADF_NODAMAGE))
-								thing->velz += (fixed_t)velz;	// this really doesn't work well
+
+							// [BB] Potentially use the horizontal thrust of old ZDoom versions.
+							if ( zacompatflags & ZACOMPATF_OLD_EXPLOSION_THRUST )
+							{
+								thing->velx = origmomx + static_cast<fixed_t>((thing->x - bombspot->x) * thrust);
+								thing->vely = origmomy + static_cast<fixed_t>((thing->y - bombspot->y) * thrust);
+							}
+							else
+							{
+								angle_t ang = R_PointToAngle2 (bombspot->x, bombspot->y, thing->x, thing->y) >> ANGLETOFINESHIFT;
+								thing->velx += fixed_t (finecosine[ang] * thrust);
+								thing->vely += fixed_t (finesine[ang] * thrust);
+							}
+
+							// [BB] If ZADF_NO_ROCKET_JUMPING is on, don't give players any z-momentum if the attack was made by a player.
+							if ( ( (zadmflags & ZADF_NO_ROCKET_JUMPING) == false ) ||
+								( bombsource == NULL ) || ( bombsource->player == NULL ) || ( thing->player == NULL ) )
+							{
+								if (!(flags & RADF_NODAMAGE))
+									thing->velz += (fixed_t)velz;	// this really doesn't work well
+							}
 						}
+
+						// [BC] If we're the server, update the thing's momentum.
+						// [BB] Use SERVER_UpdateThingMomentum to prevent sync problems.
+						if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+							SERVER_UpdateThingMomentum( thing, true );
 					}
 				}
 			}
@@ -4669,12 +5689,18 @@ void P_RadiusAttack (AActor *bombspot, AActor *bombsource, int bombdamage, int b
 				damage = Scale(damage, thing->GetClass()->Meta.GetMetaFixed(AMETA_RDFactor, FRACUNIT), FRACUNIT);
 				if (damage > 0)
 				{
-					int newdam = P_DamageMobj (thing, bombspot, bombsource, damage, bombmod);
+					// [BC/BB] Damage is server side.
+					int newdam = 0;
+					if (( NETWORK_GetState( ) != NETSTATE_CLIENT ) && ( CLIENTDEMO_IsPlaying( ) == false ))
+						newdam = P_DamageMobj (thing, bombspot, bombsource, damage, bombmod);
 					P_TraceBleed (newdam > 0 ? newdam : damage, thing, bombspot);
 				}
 			}
 		}
 	}
+
+	// [BB] If the bombsource is a player and hit another player with his attack, potentially give him a medal.
+	PLAYER_CheckStruckPlayer( bombsource );
 }
 
 //==========================================================================
@@ -4748,6 +5774,26 @@ bool P_AdjustFloorCeil (AActor *thing, FChangePosition *cpos)
 	// restore the PASSMOBJ flag but leave the other flags alone.
 	thing->flags2 = (thing->flags2 & ~MF2_PASSMOBJ) | flags2;
 
+	return isgood;
+}
+
+//=============================================================================
+//
+// P_OldAdjustFloorCeil
+//
+//=============================================================================
+
+bool P_OldAdjustFloorCeil (AActor *thing)
+{
+	FCheckPosition tm;
+	bool isgood = P_CheckPosition (thing, thing->x, thing->y, tm);
+	thing->floorz = tm.floorz;
+	thing->ceilingz = tm.ceilingz;
+	thing->dropoffz = tm.dropoffz;		// killough 11/98: remember dropoffs
+	thing->floorpic = tm.floorpic;
+	thing->floorsector = tm.floorsector;
+	thing->ceilingpic = tm.ceilingpic;
+	thing->ceilingsector = tm.ceilingsector;
 	return isgood;
 }
 
@@ -4867,12 +5913,56 @@ void P_FindBelowIntersectors (AActor *actor)
 
 void P_DoCrunch (AActor *thing, FChangePosition *cpos)
 {
+	ULONG	ulIdx;
+
+	// [BC] Don't handle the respawning of crunched items on the client end.
+	if ( NETWORK_InClientMode() == false )
+	{
+		// [BC] If this item is a flag belonging to a team, return it, and/or don't do shit!
+		for ( ulIdx = 0; ulIdx < teams.Size( ); ulIdx++ )
+		{
+			if ( thing->GetClass( ) == TEAM_GetItem( ulIdx ))
+			{
+				if ( thing->flags & MF_DROPPED )
+					TEAM_ExecuteReturnRoutine( ulIdx, NULL );
+
+				return;
+			}
+		}
+
+		// [BC] Do the same thing, except for the white flag.
+		if ( thing->GetClass( ) == PClass::FindClass( "WhiteFlag" ))
+		{
+			if ( thing->flags & MF_DROPPED )
+				TEAM_ExecuteReturnRoutine( teams.Size( ), NULL );
+
+			return;
+		}
+
+		// [BC] If this is the terminator or possession artifact, respawn them on the map.
+		if (( terminator ) || ( possession ) || ( teampossession ))
+		{
+			if ( thing->GetClass( )->IsDescendantOf( RUNTIME_CLASS( APowerupGiver )))
+			{
+				if ( static_cast<APowerupGiver *>( thing )->PowerupType == RUNTIME_CLASS( APowerTerminatorArtifact ))
+					GAME_SpawnTerminatorArtifact( );
+
+				if ( static_cast<APowerupGiver *>( thing )->PowerupType == RUNTIME_CLASS( APowerPossessionArtifact ))
+					GAME_SpawnPossessionArtifact( );
+			}
+		}
+	}
+
+
 	if (!(thing && thing->Grind(true) && cpos)) return;
 	cpos->nofit = true;
 
 	if ((cpos->crushchange > 0) && !(level.maptime & 3))
 	{
-		int newdam = P_DamageMobj (thing, NULL, NULL, cpos->crushchange, NAME_Crush);
+		// [BC] Damage is done server-side.
+		int newdam = 0;
+		if ( NETWORK_InClientMode() == false )
+			newdam = P_DamageMobj (thing, NULL, NULL, cpos->crushchange, NAME_Crush);
 
 		// spray blood in a random direction
 		if (!(thing->flags2&(MF2_INVULNERABLE|MF2_DORMANT)))
@@ -4883,7 +5973,7 @@ void P_DoCrunch (AActor *thing, FChangePosition *cpos)
 				const PClass *bloodcls = thing->GetBloodType();
 				
 				P_TraceBleed (newdam > 0 ? newdam : cpos->crushchange, thing);
-				if (cl_bloodtype <= 1 && bloodcls != NULL)
+				if ( (bloodcls != NULL) && (( cl_bloodtype <= 1) || ( NETWORK_GetState( ) == NETSTATE_SERVER )) )
 				{
 					AActor *mo;
 
@@ -4947,7 +6037,8 @@ int P_PushUp (AActor *thing, FChangePosition *cpos)
 		// Should there be MF2_THRUGHOST / MF3_GHOST checks there too for consistency?
 		// Or would that risk breaking established behavior? THRUGHOST, like MTHRUSPECIES,
 		// is normally for projectiles which would have exploded by now anyway...
-		if (thing->flags6 & MF6_THRUSPECIES && thing->GetSpecies() == intersect->GetSpecies())
+		// [BB] Adapted this for ZADF_UNBLOCK_PLAYERS.
+		if (P_CheckUnblock(thing, intersect) || (thing->flags6 & MF6_THRUSPECIES && thing->GetSpecies() == intersect->GetSpecies()))
 			continue;
 		if (!(intersect->flags2 & MF2_PASSMOBJ) ||
 			(!(intersect->flags3 & MF3_ISMONSTER) && intersect->Mass > mymass) ||
@@ -5045,6 +6136,9 @@ void PIT_FloorDrop (AActor *thing, FChangePosition *cpos)
 			thing->z = thing->floorz;
 			P_CheckFakeFloorTriggers (thing, oldz);
 		}
+
+		// [BC] Mark this thing as having moved.
+		thing->ulSTFlags |= STFL_POSITIONCHANGED;
 	}
 	else if ((thing->z != oldfloorz && !(thing->flags & MF_NOLIFTDROP)))
 	{
@@ -5070,6 +6164,12 @@ void PIT_FloorRaise (AActor *thing, FChangePosition *cpos)
 
 	P_AdjustFloorCeil (thing, cpos);
 
+	// [BB] Unfortunately, P_AdjustFloorCeil fails to calculate floorz properly under
+	// some circumstances on the client. An actor's floorz should never be bigger
+	// than the z-position of sector we assume the actor to be in.
+	if ( NETWORK_InClientMode() && ( NETWORK_IsConsolePlayer ( thing ) == false ) && ( thing->Sector->floorplane.ZatPoint (thing->x, thing->y) < thing->floorz ) )
+		thing->floorz = oldfloorz;
+
 	if (oldfloorz == thing->floorz) return;
 
 	// Move things intersecting the floor up
@@ -5082,6 +6182,9 @@ void PIT_FloorRaise (AActor *thing, FChangePosition *cpos)
 		}
 		intersectors.Clear ();
 		thing->z = thing->floorz;
+
+		// [BC] Mark this thing as having moved.
+		thing->ulSTFlags |= STFL_POSITIONCHANGED;
 	}
 	else
 	{
@@ -5089,6 +6192,9 @@ void PIT_FloorRaise (AActor *thing, FChangePosition *cpos)
 		{
 			intersectors.Clear ();
 			thing->z = thing->z - oldfloorz + thing->floorz;
+
+			// [BC/BB] Mark this thing as having moved.
+			thing->ulSTFlags |= STFL_POSITIONCHANGED;
 		}
 		else return;
 	}
@@ -5138,6 +6244,10 @@ void PIT_CeilingLower (AActor *thing, FChangePosition *cpos)
 		{
 			thing->z = thing->floorz;
 		}
+
+		// [BC] Mark this thing as having moved.
+		thing->ulSTFlags |= STFL_POSITIONCHANGED;
+
 		switch (P_PushDown (thing, cpos))
 		{
 		case 2:
@@ -5181,6 +6291,9 @@ void PIT_CeilingRaise (AActor *thing, FChangePosition *cpos)
 			thing->z = thing->ceilingz - thing->height;
 		}
 		P_CheckFakeFloorTriggers (thing, oldz);
+
+		// [BC] Mark this thing as having moved.
+		thing->ulSTFlags |= STFL_POSITIONCHANGED;
 	}
 	else if ((thing->flags2 & MF2_PASSMOBJ) && !isgood && thing->z + thing->height < thing->ceilingz)
 	{
@@ -5189,6 +6302,9 @@ void PIT_CeilingRaise (AActor *thing, FChangePosition *cpos)
 		{
 			thing->z = MIN (thing->ceilingz - thing->height,
 							onmobj->z + onmobj->height);
+
+			// [BC] Mark this thing as having moved.
+			thing->ulSTFlags |= STFL_POSITIONCHANGED;
 		}
 	}
 }
@@ -5638,6 +6754,10 @@ void SpawnShootDecal (AActor *t1, const FTraceResults &trace)
 {
 	FDecalBase *decalbase = NULL;
 
+	// [BC] Servers don't need to spawn decals.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
+
 	if (t1->player != NULL && t1->player->ReadyWeapon != NULL)
 	{
 		decalbase = t1->player->ReadyWeapon->GetDefault()->DecalGenerator;
@@ -5670,6 +6790,14 @@ static void SpawnDeepSplash (AActor *t1, const FTraceResults &trace, AActor *puf
 	else return;
 
 	fixed_t num, den, hitdist;
+
+	// [BB] Gross hack to prevent the crashes in thunpeak.zip most likely caused
+	// by the rewrite of the interpolation code in GZDoom revision 117.
+	if ( plane < reinterpret_cast<const secplane_t *>(static_cast<size_t>(0x0001000)) )
+	{
+		Printf ( "Warning, invalid pointer in SpawnDeepSplash!\n" );
+		return;
+	}
 	den = TMulScale16 (plane->a, vx, plane->b, vy, plane->c, vz);
 	if (den != 0)
 	{

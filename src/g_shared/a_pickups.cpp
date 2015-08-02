@@ -19,8 +19,25 @@
 #include "g_game.h"
 #include "doomstat.h"
 #include "farchive.h"
+// [BB] New #includes.
+#include "deathmatch.h"
+#include "network.h"
+#include "sv_commands.h"
+#include "team.h"
+#include "invasion.h"
+#include "cooperative.h"
+#include "cl_commands.h"
+#include "cl_demo.h"
+#include "announcer.h"
+#include "scoreboard.h"
+#include "gamemode.h"
+#include "cooperative.h"
+#include "p_acs.h"
+#include "a_keys.h"
 
 static FRandom pr_restore ("RestorePos");
+
+TArray<unsigned short> g_keysFound;
 
 IMPLEMENT_CLASS (AAmmo)
 
@@ -143,7 +160,16 @@ AInventory *AAmmo::CreateCopy (AActor *other)
 		assert (type->ActorInfo != NULL);
 		if (!GoAway ())
 		{
-			Destroy ();
+			// [BC] In certain modes, hide this item indefinitely so we can respawn it if
+			// necessary.
+			if ((( flags & MF_DROPPED ) == false ) && ( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode( )) & GMF_MAPRESETS ))
+				SetState ( FindState("HideIndefinitely") );
+			// [BC] Changed this so it stays around for one frame.
+			else
+			{
+				SetState ( FindState("HoldAndDestroy") );
+//				Destroy ();
+			}
 		}
 
 		copy = static_cast<AInventory *>(Spawn (type, 0, 0, 0, NO_REPLACE));
@@ -203,7 +229,12 @@ bool P_GiveBody (AActor *actor, int num, int max)
 		// calls while supporting AHealth.
 		if (max <= 0)
 		{
-			max = static_cast<APlayerPawn*>(actor)->GetMaxHealth() + player->mo->stamina;
+			// [BC] Apply the prosperity power.
+			if ( player->cheats & CF_PROSPERITY )
+				max = deh.MaxSoulsphere + 50;
+			// [BC] Add the player's max. health bonus to his max.
+			else
+				max = static_cast<APlayerPawn*>(actor)->GetMaxHealth() + player->mo->stamina + player->lMaxHealthBonus;
 			// [MH] First step in predictable generic morph effects
  			if (player->morphTics)
  			{
@@ -287,9 +318,21 @@ bool P_GiveBody (AActor *actor, int num, int max)
 
 DEFINE_ACTION_FUNCTION(AActor, A_RestoreSpecialThing1)
 {
+	// [BC] Clients have their own version of this function.
+	if ( NETWORK_InClientMode() )
+	{
+		// Just go back into hiding until the server tells this item to respawn.
+		static_cast<AInventory *>( self )->Hide( );
+		return;
+	}
+
 	self->renderflags &= ~RF_INVISIBLE;
 	if (static_cast<AInventory *>(self)->DoRespawn ())
 	{
+		// [BC] Tell clients that this item has respawned.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_RespawnRavenThing( self );
+
 		S_Sound (self, CHAN_VOICE, "misc/spawn", 1, ATTN_IDLE);
 	}
 }
@@ -319,6 +362,14 @@ DEFINE_ACTION_FUNCTION(AActor, A_RestoreSpecialThing2)
 
 DEFINE_ACTION_FUNCTION(AActor, A_RestoreSpecialDoomThing)
 {
+	// [BC] Clients have their own version of this function.
+	if ( NETWORK_InClientMode() )
+	{
+		// Just go back into hiding until the server tells this item to respawn.
+		static_cast<AInventory *>( self )->Hide( );
+		return;
+	}
+
 	self->renderflags &= ~RF_INVISIBLE;
 	self->flags |= MF_SPECIAL;
 	if (!(self->GetDefault()->flags & MF_NOGRAVITY))
@@ -327,6 +378,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_RestoreSpecialDoomThing)
 	}
 	if (static_cast<AInventory *>(self)->DoRespawn ())
 	{
+		// [BC] Tell clients that this item has respawned.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_RespawnDoomThing( self, true );
+
 		self->SetState (self->SpawnState);
 		S_Sound (self, CHAN_VOICE, "misc/spawn", 1, ATTN_IDLE);
 		Spawn ("ItemFog", self->x, self->y, self->z, ALLOW_REPLACE);
@@ -397,6 +452,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_RestoreSpecialPosition)
 	self->PrevY = self->y;
 	self->PrevZ = self->z;
 }
+
 
 int AInventory::StaticLastMessageTic;
 const char *AInventory::StaticLastMessage;
@@ -497,6 +553,9 @@ bool AInventory::SpecialDropAction (AActor *dropper)
 
 bool AInventory::ShouldRespawn ()
 {
+	// [BB] Force respawning if items with the IF_FORCERESPAWNINSURVIVAL flag in survival.
+	if ( survival && (ItemFlags & IF_FORCERESPAWNINSURVIVAL) ) return true;
+
 	if ((ItemFlags & IF_BIGPOWERUP) && !(dmflags & DF_RESPAWN_SUPER)) return false;
 	if (ItemFlags & IF_NEVERRESPAWN) return false;
 	return !!(dmflags & DF_ITEMS_RESPAWN);
@@ -534,7 +593,16 @@ bool AInventory::Grind(bool items)
 	{
 		if (!(flags3 & MF3_DONTGIB))
 		{
-			Destroy();
+			// [BC] If we're the server, tell clients to destroy this item.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_DestroyThing( this );
+
+			// [BC] Don't destroy items in client mode; the server will tell us to.
+			if ( NETWORK_InClientMode() == false )
+			{
+				// [BB] Only destroy the actor if it's not needed for a map reset. Otherwise just hide it.
+				this->HideOrDestroyIfSafe ();
+			}
 		}
 		return false;
 	}
@@ -643,6 +711,14 @@ bool AInventory::GoAway ()
 		{
 			return true;
 		}
+		// [BB] If the map resets and this item is level spawned but not supposed to
+		// be respawned regularly, we need to make sure that the item doesn't respawn,
+		// but still allow it to return when the map resets.
+		else if ( ( ulSTFlags & STFL_LEVELSPAWNED ) && ( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode( )) & GMF_MAPRESETS ) )
+		{
+			HideIndefinitely( );
+			return true;
+		}
 		return false;
 	}
 	return true;
@@ -662,7 +738,13 @@ void AInventory::GoAwayAndDie ()
 	if (!GoAway ())
 	{
 		flags &= ~MF_SPECIAL;
-		SetState (FindState("HoldAndDestroy"));
+
+		// [BC] In certain modes, hide this item indefinitely so we can respawn it if
+		// necessary.
+		if ((( flags & MF_DROPPED ) == false ) && ( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode( )) & GMF_MAPRESETS ))
+			SetState(FindState("HideIndefinitely"));
+		else
+			SetState (FindState("HoldAndDestroy"));
 	}
 }
 
@@ -720,11 +802,28 @@ AInventory *AInventory::CreateTossable ()
 	}
 	if (Amount == 1 && !(ItemFlags & IF_KEEPDEPLETED))
 	{
+		// [BB] Don't convert the item to a pickup in client mode, the server tells us to spawn the item.
+		// Just remove it from the owner's inventory.
+		if ( NETWORK_InClientMode() )
+		{
+			if (Owner != NULL) Owner->RemoveInventory (this);
+			return ( NULL );
+		}
+
 		BecomePickup ();
 		DropTime = 30;
 		flags &= ~(MF_SPECIAL|MF_SOLID);
 		return this;
 	}
+
+	// [BB] Don't spawn the item in client mode, the server tells us to spawn the item.
+	// Just reduce the remaining amount of this item type here.
+	if ( NETWORK_InClientMode() )
+	{
+		Amount--;
+		return ( NULL );
+	}
+
 	copy = static_cast<AInventory *>(Spawn (GetClass(), Owner->x,
 		Owner->y, Owner->z, NO_REPLACE));
 	if (copy != NULL)
@@ -891,6 +990,9 @@ void AInventory::Hide ()
 {
 	FState *HideSpecialState = NULL, *HideDoomishState = NULL;
 
+	// [BC] If this is a bot's goal object, tell the bot it's been removed.
+	BOTS_RemoveGoal ( this );
+
  	flags = (flags & ~MF_SPECIAL) | MF_NOGRAVITY;
 	renderflags |= RF_INVISIBLE;
 
@@ -930,6 +1032,24 @@ void AInventory::Hide ()
 	}
 }
 
+//===========================================================================
+//
+// [BC] AInventory :: HideIndefinitely
+//
+// Hides this actor until an event comes along that brings it back.
+//
+//===========================================================================
+
+void AInventory::HideIndefinitely ()
+{
+	// [BB] If this is a bot's goal object, tell the bot it's been removed.
+	BOTS_RemoveGoal ( this );
+
+	flags = (flags & ~MF_SPECIAL) | MF_NOGRAVITY;
+	renderflags |= RF_INVISIBLE;
+
+	SetState(FindState("HideIndefinitely"));
+}
 
 //===========================================================================
 //
@@ -959,6 +1079,56 @@ static void PrintPickupMessage (const char *str)
 
 void AInventory::Touch (AActor *toucher)
 {
+	AInventory	*pInventory;
+
+	// [BC] If this item was a bot's goal item, and it's reaching it, let the bot know that.
+	if ( toucher->player && toucher->player->pSkullBot )
+	{
+		if ( toucher->player->pSkullBot->m_pGoalActor == this )
+		{
+			toucher->player->pSkullBot->m_pGoalActor = NULL;
+			toucher->player->pSkullBot->PostEvent( BOTEVENT_REACHED_GOAL );
+			toucher->player->pSkullBot->m_ulPathType = BOTPATHTYPE_NONE;
+//			ASTAR_ClearPath( toucher->player - players );
+		}
+	}
+
+	// [BB] When an unassigned voodoo doll touches something, pretend all players are touching it.
+	if ( ( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( toucher->player == COOP_GetVoodooDollDummyPlayer() ) )
+	{
+		bool bPlayerTouchedItem = false;
+		for ( ULONG ulIdx = 0; ulIdx < MAXPLAYERS; ulIdx++ )
+		{
+			if ( ( playeringame[ulIdx] ) && ( players[ulIdx].bSpectating == false ) )
+			{
+				// [BB] Instead of letting everybody touch the item, we explicitly try to give this item to
+				// everybody. This solves some trouble that would happen with weapons and
+				// "alwaysapplydmflags 1" and "sv_weaponstay 0".
+				const bool bSuccess = DoGiveInv ( players[ulIdx].mo, this->GetClass(), Amount );
+				// [BB] Since we don't call Touch, we have to initiate the pickup message manually.
+				if ( bSuccess && !(ItemFlags & IF_QUIET) && ( this->GetClass( )->IsDescendantOf( PClass::FindClass( "DehackedPickup" )) == false ) )
+					SERVERCOMMANDS_DoInventoryPickup( ulIdx, this->GetClass( )->TypeName.GetChars( ), this->PickupMessage( ));
+
+				bPlayerTouchedItem = true;
+			}
+		}
+		// [BB] To prevent a VD that is sitting on top of an item from spamming the players with pickups
+		// in case item respawning is enabled (getting bersek every 30 seconds in DVII is pretty annoying ;))
+		// we just destroy (or hide) the item, after the VD gave at least one player the chance to get the item.
+		if ( bPlayerTouchedItem )
+		{
+			// [BB] Some kind of items need to be stored to give them to players who join afterwards.
+			COOP_PotentiallyStoreUVDPickup ( this->GetClass() );
+
+			// [BB] Notify the clients that the item is gone.
+			SERVERCOMMANDS_DestroyThing( this );
+
+			HideOrDestroyIfSafe();
+		}
+
+		return;
+	}
+
 	// If a voodoo doll touches something, pretend the real player touched it instead.
 	if (toucher->player != NULL)
 	{
@@ -975,37 +1145,71 @@ void AInventory::Touch (AActor *toucher)
 		Spawn(PickupFlash, x, y, z, ALLOW_REPLACE);
 	}
 
+	// [BC] Tell the client that he successfully picked up the item.
+	if (( NETWORK_GetState( ) == NETSTATE_SERVER ) &&
+		( toucher->player ) &&
+		// [BB] Special handling for RandomPowerup, formerly done with NETFL_SPECIALPICKUP.
+		(( this->GetClass( )->IsDescendantOf( PClass::FindClass( "RandomPowerup" ) ) ) == false ) &&
+		( this->GetClass( )->IsDescendantOf( PClass::FindClass( "DehackedPickup" )) == false ))
+	{
+		pInventory = toucher->FindInventory( this->GetClass( ));
+		if ( pInventory )
+			SERVERCOMMANDS_GiveInventory( ULONG( toucher->player - players ), pInventory );
+		else
+			SERVERCOMMANDS_GiveInventory( ULONG( toucher->player - players ), this );
+	}
+
 	if (!(ItemFlags & IF_QUIET))
 	{
-		const char * message = PickupMessage ();
-
-		if (message != NULL && *message != 0 && localview
-			&& (StaticLastMessageTic != gametic || StaticLastMessage != message))
+		// [BC] If we're the server, just tell clients to do this. There's no need
+		// to do it ourselves.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
 		{
-			StaticLastMessageTic = gametic;
-			StaticLastMessage = message;
-			PrintPickupMessage (message);
-			StatusBar->FlashCrosshair ();
-		}
-
-		// Special check so voodoo dolls picking up items cause the
-		// real player to make noise.
-		if (toucher->player != NULL)
-		{
-			PlayPickupSound (toucher->player->mo);
-			if (!(ItemFlags & IF_NOSCREENFLASH))
+			if (( toucher->player ) &&
+				// [BB] Special handling for RandomPowerup, formerly done with NETFL_SPECIALPICKUP.
+				(( this->GetClass( )->IsDescendantOf( PClass::FindClass( "RandomPowerup" ) ) ) == false ) &&
+				( this->GetClass( )->IsDescendantOf( PClass::FindClass( "DehackedPickup" )) == false ))
 			{
-				toucher->player->bonuscount = BONUSADD;
+				SERVERCOMMANDS_DoInventoryPickup( ULONG( toucher->player - players ), this->GetClass( )->TypeName.GetChars( ), this->PickupMessage( ));
 			}
 		}
 		else
 		{
-			PlayPickupSound (toucher);
+			const char * message = PickupMessage ();
+
+			if (message != NULL && *message != 0 && localview
+				&& (StaticLastMessageTic != gametic || StaticLastMessage != message))
+			{
+				StaticLastMessageTic = gametic;
+				StaticLastMessage = message;
+				PrintPickupMessage (message);
+				StatusBar->FlashCrosshair ();
+			}
+
+			// Special check so voodoo dolls picking up items cause the
+			// real player to make noise.
+			if (toucher->player != NULL)
+			{
+				PlayPickupSound (toucher->player->mo);
+			if (!(ItemFlags & IF_NOSCREENFLASH))
+			{
+				toucher->player->bonuscount = BONUSADD;
+			}
+			}
+			else
+			{
+				PlayPickupSound (toucher);
+			}
 		}
-	}							
+	}
 
 	// [RH] Execute an attached special (if any)
 	DoPickupSpecial (toucher);
+
+	// [BC] If this item was spawned from an invasion spot, tell the spot that the item
+	// it spawned has been picked up.
+	if ( pPickupSpot )
+		pPickupSpot->PickedUp( );
 
 	if (flags & MF_COUNTITEM)
 	{
@@ -1014,6 +1218,10 @@ void AInventory::Touch (AActor *toucher)
 			toucher->player->itemcount++;
 		}
 		level.found_items++;
+
+		// [BC] Tell clients the new found item count.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetMapNumFoundItems( );
 	}
 
 	if (flags5 & MF5_COUNTSECRET)
@@ -1021,11 +1229,79 @@ void AInventory::Touch (AActor *toucher)
 		P_GiveSecret(toucher, true, true);
 	}
 
-	//Added by MC: Check if item taken was the roam destination of any bot
-	for (int i = 0; i < MAXPLAYERS; i++)
+	// [BC] If the item has an announcer sound, play it.
+	if ( toucher->CheckLocalView( consoleplayer ) && cl_announcepickups )
+		ANNOUNCER_PlayEntry( cl_announcer, this->PickupAnnouncerEntry( ));
+
+	// [BC] Potentially give clients update about this item.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
 	{
-		if (playeringame[i] && this == players[i].dest)
-    		players[i].dest = NULL;
+		// If this item was destroyed, and we're the server, tell clients to
+		// destroy the object.
+		if (( this->state == FindState("HoldAndDestroy") ) ||
+			( this->state == FindState("Held") ))
+		{
+			SERVERCOMMANDS_DestroyThing( this );
+		}
+		// If this item was hidden, tell clients to hide the object.
+		else if (( this->state == FindState("HideIndefinitely") ) ||
+			( this->state == FindState("HideDoomish") ) ||
+			( this->state == FindState("HideSpecial") ))
+		{
+			SERVERCOMMANDS_HideThing( this );
+		}
+	}
+
+	// [BC] Finally, refresh the HUD.
+	if ( NETWORK_GetState( ) != NETSTATE_SERVER )
+		SCOREBOARD_RefreshHUD( );
+
+	// [Dusk] If it's a key, share it to others if sv_sharekeys is on. Note:
+	// we store the key as having been found even if shared keys is off. This
+	// way the server still remembers what keys were found and begins sharing
+	// them when sv_sharekeys is toggled on.
+	if (( NETWORK_GetState( ) == NETSTATE_SERVER ) &&
+		( IsKindOf( RUNTIME_CLASS( AKey ))) &&
+		( toucher->player != NULL ))
+	{
+		// [Dusk] Check if the key has not been picked up yet.
+		bool pickedup = false;
+
+		for ( unsigned int i = 0; i < g_keysFound.Size(); ++i )
+		{
+			if ( g_keysFound[i] == GetClass()->getActorNetworkIndex() )
+			{
+				pickedup = true;
+				break;
+			}
+		}
+
+		if ( pickedup == false )
+		{
+			// [Dusk] Store this key as having been found. For some reason
+			// storing the raw PClass pointer crashes Zandronum when sharing
+			// the keys later on so we store the actor network index instead.
+			g_keysFound.Push( GetClass()->getActorNetworkIndex() );
+
+			if ( zadmflags & ZADF_SHARE_KEYS )
+			{
+				// [Dusk] Announcement message
+				SERVER_Printf( PRINT_HIGH, TEXTCOLOR_GREEN "%s" TEXTCOLOR_NORMAL " has found the " TEXTCOLOR_GOLD "%s!\n",
+					toucher->player->userinfo.GetName(), GetClass()->GetPrettyName().GetChars() );
+
+				// [Dusk] Audio cue - skip the player picking the key because he
+				// hears the pickup sound from the original key. The little *bloop*
+				// might not matter much in Doom but the *clink* in Heretic is quite
+				// indicative. :)
+				if ( S_FindSound( "misc/k_pkup" ))
+				{
+					SERVERCOMMANDS_Sound( CHAN_AUTO, "misc/k_pkup", 1.0, ATTN_NONE,
+						toucher->player - players, SVCF_SKIPTHISCLIENT );
+				}
+
+				SERVER_SyncSharedKeys( MAXPLAYERS, false );
+			}
+		}
 	}
 }
 
@@ -1058,6 +1334,19 @@ void AInventory::DoPickupSpecial (AActor *toucher)
 const char *AInventory::PickupMessage ()
 {
 	return GetClass()->Meta.GetMetaString (AIMETA_PickupMessage);
+}
+
+//===========================================================================
+//
+// [BC] AInventory :: PickupAnnouncerEntry
+//
+// Returns the announcer entry to play when this actor is picked up.
+//
+//===========================================================================
+
+const char *AInventory::PickupAnnouncerEntry( )
+{
+	return ( szPickupAnnouncerEntry );
 }
 
 //===========================================================================
@@ -1226,6 +1515,8 @@ bool AInventory::DrawPowerup (int x, int y)
 
 IMPLEMENT_CLASS (APowerupGiver)
 
+IMPLEMENT_CLASS (ARuneGiver)
+
 //===========================================================================
 //
 // AInventory :: DoRespawn
@@ -1246,6 +1537,10 @@ bool AInventory::DoRespawn ()
 			z = floorz;
 		}
 	}
+
+	// [BB] Potentially adjust the default flags of this actor.
+	GAMEMODE_AdjustActorSpawnFlags ( this );
+
 	return true;
 }
 
@@ -1569,7 +1864,6 @@ const char *AHealth::PickupMessage ()
 bool AHealth::TryPickup (AActor *&other)
 {
 	PrevHealth = other->player != NULL ? other->player->health : other->health;
-
 	// P_GiveBody adds one new feature, applied only if it is possible to pick up negative health:
 	// Negative values are treated as positive percentages, ie Amount -100 means 100% health, ignoring max amount.
 	if (P_GiveBody(other, Amount, MaxAmount))
@@ -1653,6 +1947,102 @@ void AHealthPickup::Serialize (FArchive &arc)
 {
 	Super::Serialize(arc);
 	arc << autousemode;
+}
+
+// [BC] New definition here for pickups that increase your max. health.
+IMPLEMENT_CLASS( AMaxHealth )
+
+//===========================================================================
+//
+// AMaxHealth :: TryPickup
+//
+//===========================================================================
+
+bool AMaxHealth::TryPickup( AActor *&pOther )
+{
+	LONG		lMax;
+	player_t	*pPlayer;
+
+	pPlayer = pOther->player;
+	if ( pPlayer != NULL )
+	{
+		// Increase the player's max. health.
+		pPlayer->lMaxHealthBonus += Amount;
+
+		// If it exceeds the maximum amount allowable by this object, cap it. The default
+		// is 50.
+		if ( pPlayer->lMaxHealthBonus > MaxAmount )
+			pPlayer->lMaxHealthBonus = MaxAmount;
+	}
+
+	// [BC] The rest of this is based on AHealth::TryPickup. It just has to be different
+	// because max. health pickups use the "health" property to determine the maximum health
+	// the player's health can be after picking up this object, minus stamina and the player's
+	// max. health bonus.
+
+	lMax = health;
+	if ( pPlayer != NULL )
+	{
+		PrevHealth = pPlayer->health;
+
+		// Apply the prosperity power.
+		if ( pPlayer->cheats & CF_PROSPERITY )
+			lMax = deh.MaxSoulsphere + 50;
+		// If a maximum allowable health isn't specified, then use the player's base health,
+		// plus any bonuses to his max. health.
+		else if ( lMax == 0 )
+		{
+			// [BC] Add the player's max. health bonus to his max.
+			lMax = static_cast<APlayerPawn *>( pOther )->GetMaxHealth( ) + pPlayer->mo->stamina + pPlayer->lMaxHealthBonus;
+			if ( pPlayer->morphTics )
+				lMax = MAXMORPHHEALTH;
+		}
+		// Apply max. health bonus to the max. allowable health.
+		else
+			lMax = lMax + pPlayer->lMaxHealthBonus;
+
+		// The player's health already exceeds his maximum allowable health.
+		if ( pPlayer->health >= lMax )
+		{
+			// You should be able to pick up the Doom health bonus even if
+			// you are already full on health.
+			if ( ItemFlags & IF_ALWAYSPICKUP )
+			{
+				GoAwayAndDie( );
+				return ( true );
+			}
+
+			// We have no use for the object, so don't pick it up.
+			return ( false );
+		}
+		
+		// Give the player the health.
+		pPlayer->health += Amount;
+		if ( pPlayer->health > lMax )
+			pPlayer->health = lMax;
+
+		// Make the player's body's health match the player's health.
+		pPlayer->mo->health = pPlayer->health;
+	}
+	else
+	{
+		PrevHealth = INT_MAX;
+
+		// If we actually received health from the object, or we should always pick it up
+		// even if it does no good, destroy the health object.
+		if (( P_GiveBody( pOther, Amount )) || ( ItemFlags & IF_ALWAYSPICKUP ))
+		{
+			GoAwayAndDie( );
+			return ( true );
+		}
+
+		// Return false because we did not pickup the object.
+		return ( false );
+	}
+
+	// We picked up the object, so destroy it.
+	GoAwayAndDie( );
+	return ( true );
 }
 
 // Backpack -----------------------------------------------------------------
@@ -1763,6 +2153,15 @@ bool ABackpackItem::HandlePickup (AInventory *item)
 					{
 						probe->Amount = probe->MaxAmount;
 					}
+
+					// [BB] The server tells the client to pickup the backpack in AInventory::Touch, this will
+					// handle the ammo change. If we also give the ammo here, the client will first get the correct
+					// ammo amount, but will get even more when the server tells him to pickup the backpack later
+					// leading to ammo amounts that are out of sync.
+					// [BC] If we're the server, give the client the ammo given here.
+					//if (( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( Owner->player ))
+					//	SERVERCOMMANDS_GiveInventory( ULONG( Owner->player - players ), probe, ULONG( Owner->player - players ), SVCF_ONLYTHISCLIENT );
+
 				}
 			}
 		}
@@ -1792,7 +2191,10 @@ bool ABackpackItem::HandlePickup (AInventory *item)
 AInventory *ABackpackItem::CreateTossable ()
 {
 	ABackpackItem *pack = static_cast<ABackpackItem *>(Super::CreateTossable());
-	pack->bDepleted = true;
+	// [BB] Clients don't convert the item to a pickup, they just remove it from their inventory.
+	// Hence we need the following check.
+	if ( pack != NULL )
+		pack->bDepleted = true;
 	return pack;
 }
 

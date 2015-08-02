@@ -68,6 +68,12 @@
 #include "a_keys.h"
 #include "r_data/colormaps.h"
 
+// [BC] New #includes.
+#include "team.h"
+#include "cl_demo.h"
+#include "deathmatch.h"
+#include "network.h"
+#include "scoreboard.h"
 
 //=============================================================================
 //
@@ -602,7 +608,8 @@ EXTERN_CVAR (Bool, sv_cheats)
 CUSTOM_CVAR (Int, am_cheat, 0, 0)
 {
 	// No automap cheat in net games when cheats are disabled!
-	if (netgame && !sv_cheats && self != 0)
+	// [BB] netgame -> NETWORK_InClientMode()
+	if (NETWORK_InClientMode() && !sv_cheats && self != 0)
 	{
 		self = 0;
 	}
@@ -1177,7 +1184,8 @@ void AM_changeWindowLoc ()
 
 	oincx = incx = Scale(m_paninc.x, SCREENWIDTH, 320);
 	oincy = incy = Scale(m_paninc.y, SCREENHEIGHT, 200);
-	if (am_rotate == 1 || (am_rotate == 2 && viewactive))
+	// [BB] According to some crash logs, it's possible that players[consoleplayer].camera is NULL during a map reset.
+	if ( ( am_rotate == 1 || (am_rotate == 2 && viewactive) ) && players[consoleplayer].camera )
 	{
 		AM_rotate(&incx, &incy, players[consoleplayer].camera->angle - ANG90);
 	}
@@ -1409,6 +1417,10 @@ void AM_NewResolution()
 
 CCMD (togglemap)
 {
+	// [BB] The server can't do this.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
+
 	if (gameaction == ga_nothing)
 	{
 		gameaction = ga_togglemap;
@@ -1428,6 +1440,10 @@ void AM_ToggleMap ()
 
 	// Don't activate the automap if we're not allowed to use it.
 	if (dmflags2 & DF2_NO_AUTOMAP)
+		return;
+
+	// [BB] Be careful when to activate.
+	if ( CLIENTDEMO_IsPlaying( ) && !automapactive && ( ( players[consoleplayer].camera == NULL ) || ( !viewactive ) ) )
 		return;
 
 	ST_SetNeedRefresh();
@@ -2473,7 +2489,7 @@ void AM_drawPlayers ()
 	angle_t angle;
 	int i;
 
-	if (!multiplayer)
+	if ( NETWORK_GetState( ) == NETSTATE_SINGLE )
 	{
 		mline_t *arrow;
 		int numarrowlines;
@@ -2518,7 +2534,9 @@ void AM_drawPlayers ()
 		if (dmflags2 & DF2_NO_AUTOMAP_ALLIES && i != consoleplayer)
 			continue;
 		
-		if (deathmatch && !demoplayback &&
+		// [BC] Do this in teamgame mode too.
+		if (( deathmatch || teamgame ) && !demoplayback &&
+			( CLIENTDEMO_IsPlaying( ) == false ) &&
 			!p->mo->IsTeammate (players[consoleplayer].mo) &&
 			p != players[consoleplayer].camera->player)
 		{
