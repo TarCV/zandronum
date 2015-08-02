@@ -15,6 +15,9 @@
 #include "gstrings.h"
 #include "a_action.h"
 #include "thingdef/thingdef.h"
+// [BB] New #includes.
+#include "cl_demo.h"
+#include "sv_commands.h"
 
 #define MAX_RANDOMSPAWNERS_RECURSION 32 // Should be largely more than enough, honestly.
 static FRandom pr_randomspawn("RandomSpawn");
@@ -34,6 +37,13 @@ class ARandomSpawner : public AActor
 		bool nomonsters = (dmflags & DF_NO_MONSTERS) || (level.flags2 & LEVEL2_NOMONSTERS);
 
 		Super::BeginPlay();
+		// [BB] This is server-side.
+		if ( NETWORK_InClientMode() )
+		{
+			if (( this->ulNetworkFlags & NETFL_CLIENTSIDEONLY ) == false )
+				return;
+		}
+
 		drop = di = GetDropItems();
 		if (di != NULL)
 		{
@@ -184,11 +194,26 @@ class ARandomSpawner : public AActor
 			AActor * rep = GetDefaultByType(GetClass()->ActorInfo->GetReplacee()->Class);
 			if (rep && ((rep->flags4 & MF4_BOSSDEATH) || (rep->flags2 & MF2_BOSS)))
 				boss = true;
+
+			// [BB] If we're the server, tell clients to spawn the actor.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			{
+				SERVERCOMMANDS_SpawnThing( newmobj );
+				// [BB] Also set the angle and momentum if necessary.
+				SERVER_SetThingNonZeroAngleAndMomentum( newmobj );
+			}
+			// [BB] The client did the spawning, so this has to be a client side only actor.
+			else if ( NETWORK_InClientMode() )
+				newmobj->ulNetworkFlags |= NETFL_CLIENTSIDEONLY;
 		}
 		if (boss)
 			this->tracer = newmobj;
+		// [BB] Only destroy the actor if it's not needed for a map reset. Otherwise just hide it.
 		else	// "else" because a boss-replacing spawner must wait until it can call A_BossDeath.
-			Destroy();
+			HideOrDestroyIfSafe();
+
+		// [BB] Workaround to ensure that the spawner is properly reset in GAME_ResetMap.
+		this->ulSTFlags |= STFL_POSITIONCHANGED;
 	}
 
 	void Tick()	// This function is needed for handling boss replacers
@@ -196,8 +221,12 @@ class ARandomSpawner : public AActor
 		Super::Tick();
 		if (tracer == NULL || tracer->health <= 0)
 		{
-			CALL_ACTION(A_BossDeath, this);
-			Destroy();
+			// [BB] Don't do this on actors that already have been hidden by HideOrDestroyIfSafe()
+			if ( ( this->ulSTFlags & STFL_HIDDEN_INSTEAD_OF_DESTROYED ) == false ) {
+				CALL_ACTION(A_BossDeath, this);
+				// [BB] Only destroy the actor if it's not needed for a map reset. Otherwise just hide it.
+				HideOrDestroyIfSafe();
+			}
 		}
 	}
 

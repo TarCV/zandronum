@@ -40,6 +40,11 @@
 #include "thingdef/thingdef.h"
 #include "doomstat.h"
 #include "farchive.h"
+// [BB] New #includes.
+#include "deathmatch.h"
+#include "gamemode.h"
+#include "cl_demo.h"
+#include "sv_commands.h"
 
 static FRandom pr_spot ("SpecialSpot");
 static FRandom pr_spawnmace ("SpawnMace");
@@ -391,6 +396,18 @@ void ASpecialSpot::Destroy()
 
 DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_SpawnSingleItem)
 {
+	// [BC] The mace spawner object isn't an object that can be picked up, therefore it is
+	// spawned on the map for modes that do not have special objects. Therefore, we need
+	// to do an additional check to not spawn the mace in these modes.
+	if ( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode( )) & GMF_DONTSPAWNMAPTHINGS )
+		return;
+
+	// [BC] Let the server respawn this in client mode.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	AActor *spot = NULL;
 	DSpotState *state = DSpotState::GetSpotState();
 
@@ -403,12 +420,12 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_SpawnSingleItem)
 	ACTION_PARAM_INT(fail_co, 2);
 	ACTION_PARAM_INT(fail_dm, 3);
 
-	if (!multiplayer && pr_spawnmace() < fail_sp)
+	if (( NETWORK_GetState( ) == NETSTATE_SINGLE ) && pr_spawnmace() < fail_sp)
 	{ // Sometimes doesn't show up if not in deathmatch
 		return;
 	}
 
-	if (multiplayer && !deathmatch && pr_spawnmace() < fail_co)
+	if (( NETWORK_GetState( ) != NETSTATE_SINGLE ) && !deathmatch && pr_spawnmace() < fail_co)
 	{
 		return;
 	}
@@ -438,6 +455,10 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_SpawnSingleItem)
 		{
 			static_cast<AInventory*>(spawned)->SpawnPointClass = RUNTIME_TYPE(self);
 		}
+
+		// [BC] If we're the server, spawn the mace for clients.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SpawnThing( spawned );
 	}
 }
 

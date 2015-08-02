@@ -13,6 +13,9 @@
 #include <string.h>
 #include <ctype.h>
 #include <errno.h>
+// [BB] New #includes.
+#include <sys/stat.h>
+#include <time.h>
 
 #ifdef _WIN32
 #define popen _popen
@@ -34,9 +37,16 @@ void stripnl(char *str)
 
 int main(int argc, char **argv)
 {
-	char vertag[64], lastlog[64], lasthash[64], *hash = NULL;
+	// [BB] Increased length of lastlog.
+	char vertag[64], lastlog[128], lasthash[64], *hash = NULL;
 	FILE *stream = NULL;
 	int gotrev = 0, needupdate = 1;
+
+	// [BB]
+	char hgidentify[64];
+	time_t hgdate = 0;
+	int localchanges = 0;
+	hgidentify[0] = '\0';
 
 	vertag[0] = '\0';
 	lastlog[0] = '\0';
@@ -51,16 +61,32 @@ int main(int argc, char **argv)
 	// on a tag, it returns that tag. Otherwise it returns <most recent tag>-<number of
 	// commits since the tag>-<short hash>.
 	// Use git log to get the time of the latest commit in ISO 8601 format and its full hash.
-	stream = popen("git describe --tags && git log -1 --format=%ai*%H", "r");
+	// [BB] Changed to use hg instead of git.
+	stream = popen("hg log --template \"{latesttag}-{latesttagdistance}-{node|short}\\n\" --rev -1 && hg log -r. --template \"{date|isodatesec}*{node}?{date|hgdate}\\n\" && hg identify -n", "r");
 
 	if (NULL != stream)
 	{
 		if (fgets(vertag, sizeof vertag, stream) == vertag &&
-			fgets(lastlog, sizeof lastlog, stream) == lastlog)
+			fgets(lastlog, sizeof lastlog, stream) == lastlog
+			// [BB] Added to figure out if there are local changes.
+			&& fgets(hgidentify, sizeof hgidentify, stream) == hgidentify)
 		{
 			stripnl(vertag);
 			stripnl(lastlog);
 			gotrev = 1;
+
+			// [BB]
+			if ( strrchr ( hgidentify, '+' ) )
+				localchanges = 1;
+
+			{
+				char *p = strrchr ( lastlog, '?' );
+				if ( p )
+				{
+					*p = 0;
+					hgdate = atoi ( p+1 );
+				}
+			}
 		}
 
 		pclose(stream);
@@ -73,6 +99,13 @@ int main(int argc, char **argv)
 		{
 			*hash = '\0';
 			hash++;
+
+			// [BB]
+			if ( localchanges )
+			{
+				hash[40] = '+';
+				hash[41] = '\0';
+			}
 		}
 	}
 	if (hash == NULL)
@@ -124,6 +157,20 @@ int main(int argc, char **argv)
 "#define GIT_HASH \"%s\"\n"
 "#define GIT_TIME \"%s\"\n",
 			hash, vertag, hash, lastlog);
+
+		// [BB] Also save out hg info.
+		fprintf (stream, "#define HG_REVISION_NUMBER %lu\n", hgdate);
+		// [BB] We use the short hash.
+		hash[12] = 0;
+		fprintf (stream, "#define HG_REVISION_HASH_STRING \"%s\"\n", hash);
+		{
+			struct tm	*lt = gmtime( &hgdate );
+			fprintf (stream, "#define HG_TIME \"%d%02d%02d-%02d%02d", lt->tm_year - 100, lt->tm_mon + 1, lt->tm_mday, lt->tm_hour, lt->tm_min);
+			if ( localchanges )
+				fprintf (stream, "M" );
+			fprintf (stream, "\"\n" );
+		}
+
 		fclose(stream);
 		fprintf(stderr, "%s updated to commit %s.\n", argv[1], vertag);
 	}
