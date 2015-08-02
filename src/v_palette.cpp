@@ -57,6 +57,8 @@
 #include "colormatcher.h"
 #include "v_palette.h"
 #include "r_data/colormaps.h"
+// [BB] New #includes.
+#include "deathmatch.h"
 
 FPalette GPalette;
 FColorMatcher ColorMatcher;
@@ -515,6 +517,13 @@ CCMD (testfade)
 	FString colorstring;
 	DWORD color;
 
+	// [BB] Without cheats, clients may not use this.
+	if ( ( NETWORK_GetState( ) == NETSTATE_CLIENT ) && ( sv_cheats == false ) )
+	{
+		Printf ( "If cheats are disabled, clients are not allowed to use testfade.\n" );
+		return;
+	}
+
 	if (argv.argc() < 2)
 	{
 		Printf ("testfade <color>\n");
@@ -614,6 +623,13 @@ CCMD (testcolor)
 	FString colorstring;
 	DWORD color;
 	int desaturate;
+
+	// [BB] Without cheats, clients may not use this.
+	if ( ( NETWORK_GetState( ) == NETSTATE_CLIENT ) && ( sv_cheats == false ) )
+	{
+		Printf ( "If cheats are disabled, clients are not allowed to use testcolor.\n" );
+		return;
+	}
 
 	if (argv.argc() < 2)
 	{
