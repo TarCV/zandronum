@@ -36,6 +36,10 @@
 #include "sc_man.h"
 #include "cmdlib.h"
 #include "farchive.h"
+// [BB] New #includes.
+#include "cl_demo.h"
+#include "network.h"
+#include "sv_commands.h"
 
 //============================================================================
 //
@@ -67,7 +71,9 @@ void DDoor::Serialize (FArchive &arc)
 		<< m_Direction
 		<< m_TopWait
 		<< m_TopCountdown
-		<< m_LightTag;
+		<< m_LightTag
+		// [BC]
+		<< m_lDoorID;
 }
 
 //============================================================================
@@ -94,6 +100,13 @@ void DDoor::Tick ()
 	switch (m_Direction)
 	{
 	case 0:
+		// [BC] If we're the client, don't change the door's direction. It could
+		// de-sync the game. Instead, wait for the server to tell us to change
+		// the door's direction.
+		// [EP] Don't let the clients read the undefined m_TopCountdown variable
+		if ( NETWORK_InClientMode() )
+			break;
+
 		// WAITING
 		if (!--m_TopCountdown)
 		{
@@ -102,11 +115,21 @@ void DDoor::Tick ()
 			case doorRaise:
 				m_Direction = -1; // time to go back down
 				DoorSound (false);
+
+				// [BC] If we're the server, tell clients to change the door's direction.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_ChangeDoorDirection( m_lDoorID, m_Direction );
+
 				break;
 				
 			case doorCloseWaitOpen:
 				m_Direction = 1;
 				DoorSound (true);
+
+				// [BC] If we're the server, tell clients to change the door's direction.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_ChangeDoorDirection( m_lDoorID, m_Direction );
+
 				break;
 				
 			default:
@@ -116,6 +139,13 @@ void DDoor::Tick ()
 		break;
 		
 	case 2:
+		// [BC] If we're the client, don't change the door's direction. It could
+		// de-sync the game. Instead, wait for the server to tell us to change
+		// the door's direction.
+		// [EP] Don't let the clients read the undefined m_TopCountdown variable
+		if ( NETWORK_InClientMode() )
+			break;
+
 		//	INITIAL WAIT
 		if (!--m_TopCountdown)
 		{
@@ -125,6 +155,11 @@ void DDoor::Tick ()
 				m_Direction = 1;
 				m_Type = doorRaise;
 				DoorSound (true);
+			
+				// [BC] If we're the server, tell clients to change the door's direction.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_ChangeDoorDirection( m_lDoorID, m_Direction );
+
 				break;
 				
 			default:
@@ -144,20 +179,48 @@ void DDoor::Tick ()
 				m_TopDist + m_Sector->floorplane.d));
 		}
 
+		// [BC] If we're the client, don't do any of the following. Wait for the server
+		// to tell us what to do.
+		if ( NETWORK_InClientMode() )
+			break;
+
 		if (res == pastdest)
 		{
+			// [BC] If the sector has reached its destination, this is probably a good time to verify all the clients
+			// have the correct floor/ceiling height for this sector.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			{
+				if ( m_Sector->floorOrCeiling == 0 )
+					SERVERCOMMANDS_SetSectorFloorPlane( m_Sector - sectors );
+				else
+					SERVERCOMMANDS_SetSectorCeilingPlane( m_Sector - sectors );
+
+				// Tell clients to stop the floor's sound sequence.
+				SERVERCOMMANDS_StopSectorSequence( m_Sector );
+			}
+
 			SN_StopSequence (m_Sector, CHAN_CEILING);
 			switch (m_Type)
 			{
 			case doorRaise:
 			case doorClose:
 				m_Sector->ceilingdata = NULL;	//jff 2/22/98
+
+				// [BC] If we're the server, tell clients to destroy the door.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_DestroyDoor( m_lDoorID );
+
 				Destroy ();						// unlink and free
 				break;
 				
 			case doorCloseWaitOpen:
 				m_Direction = 0;
 				m_TopCountdown = m_TopWait;
+
+				// [BC] If we're the server, tell clients to change the door's direction.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_ChangeDoorDirection( m_lDoorID, m_Direction );
+
 				break;
 				
 			default:
@@ -174,6 +237,11 @@ void DDoor::Tick ()
 			default:
 				m_Direction = 1;
 				DoorSound (true);
+
+				// [BC] If we're the server, tell clients to change the door's direction.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_ChangeDoorDirection( m_lDoorID, m_Direction );
+
 				break;
 			}
 		}
@@ -190,19 +258,47 @@ void DDoor::Tick ()
 				m_TopDist + m_Sector->floorplane.d));
 		}
 
+		// [BC] If we're the client, don't do any of the following. Wait for the server
+		// to tell us what to do.
+		if ( NETWORK_InClientMode() )
+			break;
+
 		if (res == pastdest)
 		{
+			// [BC] If the sector has reached its destination, this is probably a good time to verify all the clients
+			// have the correct floor/ceiling height for this sector.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			{
+				if ( m_Sector->floorOrCeiling == 0 )
+					SERVERCOMMANDS_SetSectorFloorPlane( m_Sector - sectors );
+				else
+					SERVERCOMMANDS_SetSectorCeilingPlane( m_Sector - sectors );
+
+				// Tell clients to stop the floor's sound sequence.
+				SERVERCOMMANDS_StopSectorSequence( m_Sector );
+			}
+
 			SN_StopSequence (m_Sector, CHAN_CEILING);
 			switch (m_Type)
 			{
 			case doorRaise:
 				m_Direction = 0; // wait at top
 				m_TopCountdown = m_TopWait;
+
+				// [BC] If we're the server, tell clients to change the door's direction.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_ChangeDoorDirection( m_lDoorID, m_Direction );
+
 				break;
 				
 			case doorCloseWaitOpen:
 			case doorOpen:
 				m_Sector->ceilingdata = NULL;	//jff 2/22/98
+				
+				// [BC] If we're the server, tell clients to destroy the door.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_DestroyDoor( m_lDoorID );
+
 				Destroy ();						// unlink and free
 				break;
 				
@@ -226,6 +322,21 @@ void DDoor::Tick ()
 		}
 		break;
 	}
+}
+
+void DDoor::UpdateToClient( ULONG ulClient )
+{
+	SERVERCOMMANDS_DoDoor( m_Sector, m_Type, m_Speed, m_Direction, m_LightTag, m_lDoorID, ulClient, SVCF_ONLYTHISCLIENT );
+}
+
+int DDoor::GetDirection ()
+{
+	return ( m_Direction );
+}
+
+void DDoor::SetDirection( LONG lDirection )
+{
+	m_Direction = lDirection;
 }
 
 //============================================================================
@@ -338,6 +449,8 @@ void DDoor::DoorSound(bool raise, DSeqNode *curseq) const
 DDoor::DDoor (sector_t *sector)
 	: DMovingCeiling (sector)
 {
+	// [EP]
+	m_lDoorID = -1;
 }
 
 //============================================================================
@@ -346,7 +459,8 @@ DDoor::DDoor (sector_t *sector)
 //
 //============================================================================
 
-DDoor::DDoor (sector_t *sec, EVlDoor type, fixed_t speed, int delay, int lightTag)
+// [BC] Added bNoSound. When creating doors when connecting to a server, we don't want a sound to be played.
+DDoor::DDoor (sector_t *sec, EVlDoor type, fixed_t speed, int delay, int lightTag, bool bNoSound)
 	: DMovingCeiling (sec),
   	  m_Type (type), m_Speed (speed), m_TopWait (delay), m_LightTag (lightTag)
 {
@@ -364,7 +478,9 @@ DDoor::DDoor (sector_t *sec, EVlDoor type, fixed_t speed, int delay, int lightTa
 		m_Direction = -1;
 		height = sec->FindLowestCeilingSurrounding (&spot);
 		m_TopDist = sec->ceilingplane.PointToDist (spot, height - 4*FRACUNIT);
-		DoorSound (false);
+		// [BC] Added option to create the door soundlessly.
+		if ( bNoSound == false )
+			DoorSound (false);
 		break;
 
 	case doorOpen:
@@ -372,14 +488,17 @@ DDoor::DDoor (sector_t *sec, EVlDoor type, fixed_t speed, int delay, int lightTa
 		m_Direction = 1;
 		height = sec->FindLowestCeilingSurrounding (&spot);
 		m_TopDist = sec->ceilingplane.PointToDist (spot, height - 4*FRACUNIT);
-		if (m_TopDist != sec->ceilingplane.d)
+		// [BC] Added option to create the door soundlessly.
+		if ((m_TopDist != sec->ceilingplane.d) && ( bNoSound == false ))
 			DoorSound (true);
 		break;
 
 	case doorCloseWaitOpen:
 		m_TopDist = sec->ceilingplane.d;
 		m_Direction = -1;
-		DoorSound (false);
+		// [BC] Added option to create the door soundlessly.
+		if ( bNoSound == false )
+			DoorSound (false);
 		break;
 
 	case doorRaiseIn5Mins:
@@ -402,6 +521,52 @@ DDoor::DDoor (sector_t *sec, EVlDoor type, fixed_t speed, int delay, int lightTa
 		m_BotDist = sec->ceilingplane.PointToDist (m_BotSpot, height);
 	}
 	m_OldFloorDist = sec->floorplane.d;
+
+	// [BB] We need to initialize the ID, because P_GetFirstFreeDoorID relies on this.
+	m_lDoorID = -1;
+	// [BC] Assign the door's network ID.
+	if ( NETWORK_InClientMode() == false )
+		m_lDoorID = P_GetFirstFreeDoorID( );
+}
+
+LONG DDoor::GetID( void )
+{
+	return ( m_lDoorID );
+}
+
+void DDoor::SetID( LONG lID )
+{
+	m_lDoorID = lID;
+}
+
+DDoor::EVlDoor DDoor::GetType( void )
+{
+	return ( m_Type );
+}
+
+void DDoor::SetType( DDoor::EVlDoor Type )
+{
+	m_Type = Type;
+}
+
+LONG DDoor::GetSpeed( void )
+{
+	return ( m_Speed );
+}
+
+void DDoor::SetSpeed( LONG lSpeed )
+{
+	m_Speed = lSpeed;
+}
+
+LONG DDoor::GetLightTag( void )
+{
+	return ( m_LightTag );
+}
+
+void DDoor::SetLightTag( LONG lTag )
+{
+	m_LightTag = lTag;
 }
 
 //============================================================================
@@ -417,6 +582,7 @@ bool EV_DoDoor (DDoor::EVlDoor type, line_t *line, AActor *thing,
 	bool		rtn = false;
 	int 		secnum;
 	sector_t*	sec;
+	DDoor		*pDoor;
 
 	if (lock != 0 && !P_CheckKeys (thing, lock, tag != 0))
 		return false;
@@ -430,6 +596,16 @@ bool EV_DoDoor (DDoor::EVlDoor type, line_t *line, AActor *thing,
 		if (line->sidedef[1] == NULL)			// killough
 		{
 			S_Sound (thing, CHAN_VOICE, "*usefail", 1, ATTN_NORM);
+
+			// [BC] Tell clients of the "oof" sound.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			{
+				if ( thing && thing->player )
+					SERVERCOMMANDS_SoundActor( thing, CHAN_VOICE, "*usefail", 1, ATTN_NORM, ULONG( thing->player - players ), SVCF_SKIPTHISCLIENT );
+				else
+					SERVERCOMMANDS_SoundActor( thing, CHAN_VOICE, "*usefail", 1, ATTN_NORM );
+			}
+
 			return false;
 		}
 
@@ -454,20 +630,30 @@ bool EV_DoDoor (DDoor::EVlDoor type, line_t *line, AActor *thing,
 					{
 						door->m_Direction = 1;	// go back up
 						door->DoorSound (true);	// [RH] Make noise
+
+						// [BC] If we're the server, tell clients to change the door's direction.
+						if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+							SERVERCOMMANDS_ChangeDoorDirection( door->GetID( ), door->m_Direction );
 					}
 					else if (!(line->activation & (SPAC_Push|SPAC_MPush)))
 						// [RH] activate push doors don't go back down when you
 						//		run into them (otherwise opening them would be
 						//		a real pain).
 					{
-						if (!thing->player || thing->player->isbot)
+						// [BC] Added !thing, because sometimes thing can be NULL when this function
+						// is called by client_DoDoor.
+						if (!thing || !thing->player)
 							return false;	// JDC: bad guys never close doors
-											//Added by MC: Neither do bots.
 
 						door->m_Direction = -1;	// start going down immediately
 
 						// Start the door close sequence.
 						door->DoorSound(false, SN_CheckSequence(sec, CHAN_CEILING));
+
+						// [BC] If we're the server, tell clients to change the door's direction.
+						if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+							SERVERCOMMANDS_ChangeDoorDirection( door->GetID( ), door->m_Direction );
+
 						return true;
 					}
 					else
@@ -478,8 +664,13 @@ bool EV_DoDoor (DDoor::EVlDoor type, line_t *line, AActor *thing,
 			}
 			return false;
 		}
-		if (new DDoor (sec, type, speed, delay, lightTag))
+		if ( (pDoor = new DDoor (sec, type, speed, delay, lightTag)))
+		{
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_DoDoor( sec, type, speed, pDoor->GetDirection( ), lightTag, pDoor->GetID( ));
+
 			rtn = true;
+		}
 	}
 	else
 	{	// [RH] Remote door
@@ -492,8 +683,13 @@ bool EV_DoDoor (DDoor::EVlDoor type, line_t *line, AActor *thing,
 			if (sec->PlaneMoving(sector_t::ceiling))
 				continue;
 
-			if (new DDoor (sec, type, speed, delay, lightTag))
+			if ( (pDoor = new DDoor (sec, type, speed, delay, lightTag)))
+			{
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_DoDoor( sec, type, speed, pDoor->GetDirection( ), lightTag, pDoor->GetID( ));
+
 				rtn = true;
+			}
 		}
 				
 	}
@@ -537,8 +733,53 @@ void P_SpawnDoorRaiseIn5Mins (sector_t *sec)
 	new DDoor (sec, DDoor::doorRaiseIn5Mins, 2*FRACUNIT, TICRATE*30/7, 0);
 }
 
-
 //============================================================================
+DDoor *P_GetDoorByID( LONG lID )
+{
+	DDoor	*pDoor;
+
+	TThinkerIterator<DDoor>		Iterator;
+
+	while (( pDoor = Iterator.Next( )))
+	{
+		if ( pDoor->GetID( ) == lID )
+			return ( pDoor );
+	}
+
+	return ( NULL );
+}
+
+//*****************************************************************************
+//
+LONG P_GetFirstFreeDoorID( void )
+{
+	LONG		lIdx;
+	DDoor		*pDoor;
+	bool		bIDIsAvailable;
+
+	for ( lIdx = 0; lIdx < 8192; lIdx++ )
+	{
+		TThinkerIterator<DDoor>		Iterator;
+
+		bIDIsAvailable = true;
+		while (( pDoor = Iterator.Next( )))
+		{
+			if ( pDoor->GetID( ) == lIdx )
+			{
+				bIDIsAvailable = false;
+				break;
+			}
+		}
+
+		if ( bIDIsAvailable )
+			return ( lIdx );
+	}
+
+	return ( -1 );
+}
+
+//*****************************************************************************
+//
 //
 // animated doors
 //
@@ -594,9 +835,24 @@ bool DAnimatedDoor::StartClosing ()
 
 	m_Line1->flags |= ML_BLOCKING;
 	m_Line2->flags |= ML_BLOCKING;
+
+	// [BC] If we're the server, tell clients to alter this line's blocking status.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		SERVERCOMMANDS_SetSomeLineFlags( ULONG( m_Line1 - lines ));
+		SERVERCOMMANDS_SetSomeLineFlags( ULONG( m_Line2 - lines ));
+
+		// Also, tell clients to move the ceiling.
+		SERVERCOMMANDS_SetSectorCeilingPlane( ULONG( m_Sector - sectors ));
+	}
+
 	if (m_DoorAnim->CloseSound != NAME_None)
 	{
 		SN_StartSequence (m_Sector, CHAN_CEILING, m_DoorAnim->CloseSound, 1);
+
+		// [BB] Tell the clients to play the sound.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_StartSectorSequence( m_Sector, CHAN_CEILING, m_DoorAnim->CloseSound.GetChars(), 1 );
 	}
 
 	m_Status = Closing;
@@ -635,6 +891,13 @@ void DAnimatedDoor::Tick ()
 				m_Line1->flags &= ~ML_BLOCKING;
 				m_Line2->flags &= ~ML_BLOCKING;
 
+				// [BC] If we're the server, tell clients to alter this line's blocking status.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				{
+					SERVERCOMMANDS_SetSomeLineFlags( ULONG( m_Line1 - lines ));
+					SERVERCOMMANDS_SetSomeLineFlags( ULONG( m_Line2 - lines ));
+				}
+
 				if (m_Delay == 0)
 				{
 					m_Sector->ceilingdata = NULL;
@@ -654,6 +917,18 @@ void DAnimatedDoor::Tick ()
 				m_Line1->sidedef[1]->SetTexture(side_t::mid, m_DoorAnim->TextureFrames[m_Frame]);
 				m_Line2->sidedef[0]->SetTexture(side_t::mid, m_DoorAnim->TextureFrames[m_Frame]);
 				m_Line2->sidedef[1]->SetTexture(side_t::mid, m_DoorAnim->TextureFrames[m_Frame]);
+
+				// [BC] Mark this line's textures as having been changed.
+				m_Line1->ulTexChangeFlags |= TEXCHANGE_FRONTMEDIUM|TEXCHANGE_BACKMEDIUM;
+				m_Line2->ulTexChangeFlags |= TEXCHANGE_FRONTMEDIUM|TEXCHANGE_BACKMEDIUM;
+
+				// [BC] If we're the server, tell clients that these lines' texture
+				// has changed.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				{
+					SERVERCOMMANDS_SetLineTexture( ULONG( m_Line1 - lines ));
+					SERVERCOMMANDS_SetLineTexture( ULONG( m_Line2 - lines ));
+				}
 			}
 		}
 		break;
@@ -676,6 +951,11 @@ void DAnimatedDoor::Tick ()
 			{
 				// IF DOOR IS DONE CLOSING...
 				MoveCeiling (2048*FRACUNIT, m_BotDist, -1);
+
+				// [BC] If we're the server, tell clients to move the ceiling.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_SetSectorCeilingPlane( ULONG( m_Sector - sectors ));
+
 				m_Sector->ceilingdata = NULL;
 				Destroy ();
 				// Unset blocking flags on lines that didn't start with them. Since the
@@ -700,6 +980,18 @@ void DAnimatedDoor::Tick ()
 				m_Line1->sidedef[1]->SetTexture(side_t::mid, m_DoorAnim->TextureFrames[m_Frame]);
 				m_Line2->sidedef[0]->SetTexture(side_t::mid, m_DoorAnim->TextureFrames[m_Frame]);
 				m_Line2->sidedef[1]->SetTexture(side_t::mid, m_DoorAnim->TextureFrames[m_Frame]);
+
+				// [BC] Mark this line's textures as having been changed.
+				m_Line1->ulTexChangeFlags |= TEXCHANGE_FRONTMEDIUM|TEXCHANGE_BACKMEDIUM;
+				m_Line2->ulTexChangeFlags |= TEXCHANGE_FRONTMEDIUM|TEXCHANGE_BACKMEDIUM;
+
+				// [BC] If we're the server, tell clients that these lines' texture
+				// has changed.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				{
+					SERVERCOMMANDS_SetLineTexture( ULONG( m_Line1 - lines ));
+					SERVERCOMMANDS_SetLineTexture( ULONG( m_Line2 - lines ));
+				}
 			}
 		}
 		break;
@@ -743,6 +1035,18 @@ DAnimatedDoor::DAnimatedDoor (sector_t *sec, line_t *line, int speed, int delay,
 	m_Line1->sidedef[0]->SetTexture(side_t::mid, picnum);
 	m_Line2->sidedef[0]->SetTexture(side_t::mid, picnum);
 
+	// [BC] Mark this line's textures as having been changed.
+	m_Line1->ulTexChangeFlags |= TEXCHANGE_FRONTMEDIUM|TEXCHANGE_BACKMEDIUM;
+	m_Line2->ulTexChangeFlags |= TEXCHANGE_FRONTMEDIUM|TEXCHANGE_BACKMEDIUM;
+
+	// [BC] If we're the server, tell clients that these lines' texture
+	// has changed.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		SERVERCOMMANDS_SetLineTexture( ULONG( m_Line1 - lines ));
+		SERVERCOMMANDS_SetLineTexture( ULONG( m_Line2 - lines ));
+	}
+
 	// don't forget texture scaling here!
 	FTexture *tex = TexMan[picnum];
 	topdist = tex ? tex->GetScaledHeight() : 64;
@@ -758,12 +1062,29 @@ DAnimatedDoor::DAnimatedDoor (sector_t *sec, line_t *line, int speed, int delay,
 	m_SetBlocking2 = !!(m_Line2->flags & ML_BLOCKING);
 	m_Line1->flags |= ML_BLOCKING;
 	m_Line2->flags |= ML_BLOCKING;
+
+	// [BC] If we're the server, tell clients that these lines' blocking status
+	// has changed.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		SERVERCOMMANDS_SetSomeLineFlags( ULONG( m_Line1 - lines ));
+		SERVERCOMMANDS_SetSomeLineFlags( ULONG( m_Line2 - lines ));
+	}
+
 	m_BotDist = m_Sector->ceilingplane.d;
 	MoveCeiling (2048*FRACUNIT, topdist, 1);
 	if (m_DoorAnim->OpenSound != NAME_None)
 	{
 		SN_StartSequence (m_Sector, CHAN_INTERIOR, m_DoorAnim->OpenSound, 1);
+
+		// [BB] Tell the clients to play the sound.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_StartSectorSequence( m_Sector, CHAN_INTERIOR, m_DoorAnim->OpenSound.GetChars(), 1 );
 	}
+
+	// [BC] If we're the server, tell clients to move the ceiling.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SetSectorCeilingPlane( ULONG( m_Sector - sectors ));
 }
 
 //============================================================================

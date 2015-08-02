@@ -61,6 +61,10 @@ extern HWND Window;
 #include "doomstat.h"
 #include "i_system.h"
 #include "gi.h"
+// [BC] New #includes.
+#include "network.h"
+// [RC] For name cleaning
+#include "v_text.h"
 
 EXTERN_CVAR (Bool, con_centernotify)
 EXTERN_CVAR (Int, msg0color)
@@ -342,6 +346,15 @@ void FGameConfigFile::DoGlobalSetup ()
 				}
 			}
 		}
+
+		// [TP] Same as above except for Zandronum-specific stuff
+		lastver = GetValueForKey( "Version-" GAMESIG );
+
+		if ( lastver != NULL )
+		{
+			// [TP] Insert migration here.
+			// double last = atof( lastver );
+		}
 	}
 }
 
@@ -479,6 +492,13 @@ void FGameConfigFile::ReadNetVars ()
 	}
 }
 
+void FGameConfigFile::ReadRevealedBotsAndSkins ()
+{
+	strcpy (subsection, "RevealedBotsAndSkins");
+	if ( SetSection( section ))
+		BOTS_RestoreRevealedBotsAndSkins( *this );
+}
+
 // Read cvars from a cvar section of the ini. Flags are the flags to give
 // to newly-created cvars that were not already defined.
 void FGameConfigFile::ReadCVars (DWORD flags)
@@ -496,7 +516,21 @@ void FGameConfigFile::ReadCVars (DWORD flags)
 			cvar = new FStringCVar (key, NULL, flags);
 		}
 		val.String = const_cast<char *>(value);
-		cvar->SetGenericRep (val, CVAR_String);
+
+		// [RC] Clean player names
+		// This is mainly to ease the transition to the new standards.
+		// In later series (98? 99?), this can be removed to boost speed.
+
+		if(strcmp(key,"name") == 0) {
+			FString cleanedName = val.String;
+			V_ColorizeString(cleanedName); // Convert \ to color escapes
+			V_CleanPlayerName(cleanedName);
+			V_UnColorizeString(cleanedName);
+			val.String = const_cast<char *>(cleanedName.GetChars());
+			cvar->SetGenericRep (val, CVAR_String);
+		}
+		else
+			cvar->SetGenericRep (val, CVAR_String);
 	}
 }
 
@@ -527,16 +561,16 @@ void FGameConfigFile::ArchiveGameData (const char *gamename)
 
 	// Do not overwrite the serverinfo section if playing a netgame, and
 	// this machine was not the initial host.
-	if (!netgame || consoleplayer == 0)
+	if (( NETWORK_GetState( ) == NETSTATE_SINGLE ) || consoleplayer == 0)
 	{
-		strncpy (subsection, netgame ? "NetServerInfo" : "LocalServerInfo", sublen);
+		strncpy (subsection, ( NETWORK_GetState( ) != NETSTATE_SINGLE ) ? "NetServerInfo" : "LocalServerInfo", sublen);
 		SetSection (section, true);
 		ClearCurrentSection ();
 		C_ArchiveCVars (this, CVAR_ARCHIVE|CVAR_SERVERINFO);
 
 		if (bModSetup)
 		{
-			strncpy (subsection, netgame ? "NetServerInfo.Mod" : "LocalServerInfo.Mod", sublen);
+			strncpy (subsection, ( NETWORK_GetState( ) != NETSTATE_SINGLE ) ? "NetServerInfo.Mod" : "LocalServerInfo.Mod", sublen);
 			SetSection (section, true);
 			ClearCurrentSection ();
 			C_ArchiveCVars (this, CVAR_MOD|CVAR_ARCHIVE|CVAR_AUTO|CVAR_SERVERINFO);
@@ -566,6 +600,11 @@ void FGameConfigFile::ArchiveGameData (const char *gamename)
 	strncpy (subsection, "AutomapBindings", sublen);
 	SetSection (section, true);
 	AutomapBindings.ArchiveBindings (this);
+
+	strcpy (subsection, "RevealedBotsAndSkins");
+	SetSection (section, true);
+	ClearCurrentSection ();
+	BOTS_ArchiveRevealedBotsAndSkins (this);
 }
 
 void FGameConfigFile::ArchiveGlobalData ()
@@ -573,6 +612,7 @@ void FGameConfigFile::ArchiveGlobalData ()
 	SetSection ("LastRun", true);
 	ClearCurrentSection ();
 	SetValueForKey ("Version", LASTRUNVERSION);
+	SetValueForKey( "Version-" GAMESIG, LASTZARUNVERSION ); // [TP]
 
 	SetSection ("GlobalSettings", true);
 	ClearCurrentSection ();
