@@ -1,4 +1,4 @@
-// Microsoft Visual C++ generated resource script.
+//Microsoft Developer Studio generated resource script.
 //
 #include "resource.h"
 
@@ -8,9 +8,8 @@
 // Generated from the TEXTINCLUDE 2 resource.
 //
 #include "afxres.h"
-#include "../version.h"
+#include "../version.h"
 #include "../gitinfo.h"
-
 /////////////////////////////////////////////////////////////////////////////
 #undef APSTUDIO_READONLY_SYMBOLS
 
@@ -29,64 +28,23 @@ LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 // TEXTINCLUDE
 //
 
-1 TEXTINCLUDE 
+1 TEXTINCLUDE MOVEABLE PURE 
 BEGIN
     "resource.h\0"
 END
 
-2 TEXTINCLUDE 
+2 TEXTINCLUDE MOVEABLE PURE 
 BEGIN
     "#include ""afxres.h""\r\n"
     "#include ""../version.h""\r\r\n"
     "#include ""../gitinfo.h""\r\0"
 END
 
-3 TEXTINCLUDE 
+3 TEXTINCLUDE MOVEABLE PURE 
 BEGIN
     "#ifndef NO_MANIFEST\r\n"
     "   CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST ""zdoom.exe.manifest""\r\n"
     "#endif\r\n"
-    "\r\n"
-    "/////////////////////////////////////////////////////////////////////////////\r\n"
-    "//\r\n"
-    "// Version\r\n"
-    "//\r\n"
-    "#define RC_FILEVERSION2 GIT_DESCRIPTION\r\n"
-    "\r\n"
-    "VS_VERSION_INFO VERSIONINFO\r\n"
-    " FILEVERSION RC_FILEVERSION\r\n"
-    " PRODUCTVERSION RC_PRODUCTVERSION\r\n"
-    " FILEFLAGSMASK 0x3fL\r\n"
-    "#ifdef _DEBUG\r\n"
-    " FILEFLAGS 0x3L\r\n"
-    "#else\r\n"
-    " FILEFLAGS 0x2L\r\n"
-    "#endif\r\n"
-    " FILEOS 0x40004L\r\n"
-    " FILETYPE 0x1L\r\n"
-    " FILESUBTYPE 0x0L\r\n"
-    "BEGIN\r\n"
-    "    BLOCK ""StringFileInfo""\r\n"
-    "    BEGIN\r\n"
-    "        BLOCK ""040904b0""\r\n"
-    "        BEGIN\r\n"
-    "            VALUE ""Comments"", ""Thanks to id Software for creating DOOM and then releasing the source code. Thanks also to TeamTNT for creating BOOM, which ZDoom is partially based on. Includes code based on the Cajun Bot 0.97 by Martin Collberg.""\r\n"
-    "            VALUE ""CompanyName"", "" ""\r\n"
-    "            VALUE ""FileDescription"", ""GZDoom""\r\n"
-    "            VALUE ""FileVersion"", RC_FILEVERSION2\r\n"
-    "            VALUE ""InternalName"", ""GZDoom""\r\n"
-    "            VALUE ""LegalCopyright"", ""Copyright \\u00A9 1993-1996 id Software, 1998-2010 Randy Heit, 2002-2010 Christoph Oelckers, et al.""\r\n"
-    "            VALUE ""LegalTrademarks"", ""DoomR is a Registered Trademark of id Software, Inc.""\r\n"
-    "            VALUE ""OriginalFilename"", ""gzdoom.exe""\r\n"
-    "            VALUE ""ProductName"", ""GZDoom""\r\n"
-    "            VALUE ""ProductVersion"", RC_PRODUCTVERSION2\r\n"
-    "        END\r\n"
-    "    END\r\n"
-    "    BLOCK ""VarFileInfo""\r\n"
-    "    BEGIN\r\n"
-    "        VALUE ""Translation"", 0x409, 1200\r\n"
-    "    END\r\n"
-    "END\r\n"
 END
 
 #endif    // APSTUDIO_INVOKED
@@ -99,15 +57,19 @@ END
 
 // Icon with lowest ID value placed first to ensure application icon
 // remains consistent on all systems.
-IDI_ICON1               ICON                    "icon1.ico"
-IDI_BOING1              ICON                    "boing1.ico"
-IDI_BOING2              ICON                    "boing2.ico"
-IDI_BOING3              ICON                    "boing3.ico"
-IDI_BOING4              ICON                    "boing4.ico"
-IDI_BOING5              ICON                    "boing5.ico"
-IDI_BOING6              ICON                    "boing6.ico"
-IDI_BOING7              ICON                    "boing7.ico"
-IDI_BOING8              ICON                    "boing8.ico"
+IDI_ICONST              ICON    DISCARDABLE     "zandronum.ico"
+//IDI_BOING1              ICON    DISCARDABLE     "boing1.ico"
+//IDI_BOING2              ICON    DISCARDABLE     "boing2.ico"
+//IDI_BOING3              ICON    DISCARDABLE     "boing3.ico"
+//IDI_BOING4              ICON    DISCARDABLE     "boing4.ico"
+//IDI_BOING5              ICON    DISCARDABLE     "boing5.ico"
+//IDI_BOING6              ICON    DISCARDABLE     "boing6.ico"
+//IDI_BOING7              ICON    DISCARDABLE     "boing7.ico"
+//IDI_BOING8              ICON    DISCARDABLE     "boing8.ico"
+G15_ICON_ORION			ICON					"g15/res/orion.ico"
+G15_ICON_ARMOR			ICON					"g15/res/armor.ico"
+G15_ICON_STIMPACK		ICON					"g15/res/stimpack.ico"
+G15_ICON_SHELLS			ICON					"g15/res/shells.ico"
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -115,8 +77,16 @@ IDI_BOING8              ICON                    "boing8.ico"
 //
 
 #ifdef APSTUDIO_INVOKED
-GUIDELINES DESIGNINFO 
+GUIDELINES DESIGNINFO MOVEABLE PURE 
 BEGIN
+    IDD_FMODINITFAILED, DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 179
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 55
+    END
+
     IDD_IWADDIALOG, DIALOG
     BEGIN
         LEFTMARGIN, 5
@@ -195,52 +165,116 @@ BEGIN
         VERTGUIDE, 33
         TOPMARGIN, 7
     END
-
-    IDD_ERRORPANE, DIALOG
-    BEGIN
-        LEFTMARGIN, 7
-        RIGHTMARGIN, 183
-        TOPMARGIN, 7
-        BOTTOMMARGIN, 21
-    END
-
-    IDD_NETSTARTPANE, DIALOG
-    BEGIN
-        LEFTMARGIN, 7
-        RIGHTMARGIN, 182
-        TOPMARGIN, 7
-        BOTTOMMARGIN, 48
-    END
 END
 #endif    // APSTUDIO_INVOKED
+
+
+#ifndef _MAC
+/////////////////////////////////////////////////////////////////////////////
+//
+// Version
+//
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION GAME_MAJOR_VERSION,GAME_MINOR_VERSION,HG_REVISION_NUMBER,BUILD_ID
+ PRODUCTVERSION GAME_MAJOR_VERSION,GAME_MINOR_VERSION,0,0
+ FILEFLAGSMASK 0x3fL
+#ifdef _DEBUG
+ FILEFLAGS 0x3L
+#else
+ FILEFLAGS 0x2L
+#endif
+ FILEOS 0x40004L
+ FILETYPE 0x1L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "Comments", "Thanks to id Software for creating DOOM and then releasing the source code. Thanks also to TeamTNT for creating BOOM, which ZDoom (and thus " GAMENAME ") is partially based on.  Giant thanks to Randy Heit for his wonderful ZDoom, Graf Zahl for GZDoom and Carnevil for Skulltag.\0"
+            VALUE "CompanyName", " \0"
+            VALUE "FileDescription", GAMENAME "\0"
+            VALUE "FileVersion", "v" DOTVERSIONSTR_REV "\0"
+            VALUE "InternalName", GAMENAME "\0"
+            VALUE "LegalCopyright", "Copyright © 1993-1996 id Software, 1998-2013 Randy Heit, Christoph Oelckers, Braden Obrzut, et al."
+            VALUE "LegalTrademarks", "Doom® is a Registered Trademark of id Software, Inc.\0"
+            VALUE "OriginalFilename", GAMENAMELOWERCASE ".exe\0"
+            VALUE "PrivateBuild", "\0"
+            VALUE "ProductName", GAMENAME "\0"
+            VALUE "ProductVersion", DOTVERSIONSTR_REV
+            VALUE "SpecialBuild", BUILD_ID_STR "-" DOTVERSIONSTR_REV "\0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
+
+#endif    // !_MAC
 
 
 /////////////////////////////////////////////////////////////////////////////
 //
 // Dialog
 //
-
-IDD_IWADDIALOG DIALOGEX 0, 0, 212, 186
-STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+/*
+IDD_FMODINITFAILED DIALOGEX 0, 0, 186, 62
+STYLE DS_MODALFRAME | DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_CAPTION | 
+    WS_SYSMENU
 EXSTYLE WS_EX_APPWINDOW
-CAPTION "Select an IWAD to use"
-FONT 8, "MS Shell Dlg", 0, 0, 0x0
+CAPTION "ZDoom Sound Initialization Failure"
+FONT 8, "MS Shell Dlg", 0, 0, 0x1
 BEGIN
-    LISTBOX         IDC_IWADLIST,5,25,200,124,LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP
-    CONTROL         "Don't ask me this again",IDC_DONTASKIWAD,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,61,153,89,10
-    DEFPUSHBUTTON   "OK",IDOK,5,165,50,14
-    PUSHBUTTON      "Cancel",IDCANCEL,155,165,50,14
-    LTEXT           "ZDoom found more than one IWAD present.",IDC_STATIC,5,5,140,8
-    LTEXT           "Select from the list below to determine which one to use:",IDC_STATIC,5,15,200,8
+    DEFPUSHBUTTON   "Retry",IDOK,129,7,50,14,WS_GROUP
+    PUSHBUTTON      "No Sound",IDC_NOSOUND,129,24,50,14,WS_GROUP
+    PUSHBUTTON      "Quit",IDCANCEL,129,41,50,14,WS_GROUP
+    LTEXT           "Could not initialize sound. If the sound hardware is in use, stop the other program that is making sound and click Retry. Alternatively, click No Sound to play without sound.",
+                    IDC_STATIC,7,7,116,42
+END
+*/
+IDD_IWADDIALOG DIALOGEX 0, 0, 224, 236
+STYLE DS_MODALFRAME | DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_CAPTION | 
+    WS_SYSMENU
+EXSTYLE WS_EX_APPWINDOW
+CAPTION "Welcome"
+FONT 8, "MS Shell Dlg", 0, 0, 0x1
+BEGIN
+	ICON            IDI_ICONST,IDC_STATIC,7,7,32,32
+	LTEXT           "Welcome to Zandronum!",IDC_STATIC,42,8,180,8
+	LTEXT           "<Version info>",IDC_WELCOME_VERSION,42,18,180,8
+	GROUPBOX        "IWAD selection",IDC_STATIC,8,32,224-16,102
+	LTEXT           "Select which game file (IWAD) to run.", IDC_STATIC,12,32+12,190,8
+    LISTBOX         IDC_IWADLIST,12,32+24,224-24,72,LBS_NOINTEGRALHEIGHT | 
+                    WS_VSCROLL | WS_TABSTOP
+	GROUPBOX        "Video settings",IDC_STATIC,8,138,224-16,48
+	LTEXT           "Choose how Zandronum will render the game.", IDC_STATIC,12,148,190,8
+	CONTROL         "Hardware (OpenGL)",IDC_WELCOME_OPENGL,"Button",
+                    BS_AUTORADIOBUTTON,12,170,93,10
+	CONTROL         "Software (Doom)",IDC_WELCOME_SOFTWARE,"Button",
+                    BS_AUTORADIOBUTTON,12,160,93,10
+	CONTROL         "Fullscreen",IDC_WELCOME_FULLSCREEN,"Button",
+                    BS_AUTOCHECKBOX | WS_TABSTOP, 124,160,48,10
+	CONTROL         "GL compatibility mode",IDC_WELCOME_COMPAT,"Button",
+                    BS_AUTOCHECKBOX | WS_TABSTOP, 124,170,86,10
+	CONTROL         "Don't ask me this again",IDC_DONTASKIWAD,"Button",
+                    BS_AUTOCHECKBOX | WS_TABSTOP,72,192,87,10
+	CTEXT           "", IDC_WELCOME_SHIFTLABEL,12,204,200,8
+    DEFPUSHBUTTON   "Play Zandronum",IDOK,8,236-18,90,14
+    PUSHBUTTON      "Exit",IDCANCEL,224-58,236-18,50,14
+
 END
 
 IDD_EAXPROPERTYLIST DIALOGEX 0, 0, 265, 404
-STYLE DS_SETFONT | DS_3DLOOK | DS_FIXEDSYS | DS_CONTROL | WS_CHILD | WS_VSCROLL
+STYLE DS_3DLOOK | DS_FIXEDSYS | DS_CONTROL | WS_CHILD | WS_VSCROLL
 EXSTYLE WS_EX_CLIENTEDGE
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
-    EDITTEXT        IDCE_ENVIRONMENTSIZE,76,7,48,12,ES_AUTOHSCROLL,WS_EX_RIGHT
-    EDITTEXT        IDCE_ENVIRONMENTDIFFUSION,76,20,48,12,ES_AUTOHSCROLL,WS_EX_RIGHT
+    EDITTEXT        IDCE_ENVIRONMENTSIZE,76,7,48,12,ES_AUTOHSCROLL,
+                    WS_EX_RIGHT
+    EDITTEXT        IDCE_ENVIRONMENTDIFFUSION,76,20,48,12,ES_AUTOHSCROLL,
+                    WS_EX_RIGHT
     EDITTEXT        IDCE_ROOM,76,33,48,12,ES_AUTOHSCROLL,WS_EX_RIGHT
     EDITTEXT        IDCE_ROOMHF,76,46,48,12,ES_AUTOHSCROLL,WS_EX_RIGHT
     EDITTEXT        IDCE_ROOMLF,76,59,48,12,ES_AUTOHSCROLL,WS_EX_RIGHT
@@ -248,60 +282,102 @@ BEGIN
     EDITTEXT        IDCE_DECAYHFRATIO,76,85,48,12,ES_AUTOHSCROLL,WS_EX_RIGHT
     EDITTEXT        IDCE_DECAYLFRATIO,76,98,48,12,ES_AUTOHSCROLL,WS_EX_RIGHT
     EDITTEXT        IDCE_REFLECTIONS,76,111,48,12,ES_AUTOHSCROLL,WS_EX_RIGHT
-    EDITTEXT        IDCE_REFLECTIONSDELAY,76,124,48,12,ES_AUTOHSCROLL,WS_EX_RIGHT
+    EDITTEXT        IDCE_REFLECTIONSDELAY,76,124,48,12,ES_AUTOHSCROLL,
+                    WS_EX_RIGHT
     EDITTEXT        IDCE_REVERB,76,137,48,12,ES_AUTOHSCROLL,WS_EX_RIGHT
     EDITTEXT        IDCE_REVERBDELAY,76,150,48,12,ES_AUTOHSCROLL,WS_EX_RIGHT
     EDITTEXT        IDCE_ECHOTIME,76,163,48,12,ES_AUTOHSCROLL,WS_EX_RIGHT
     EDITTEXT        IDCE_ECHODEPTH,76,176,48,12,ES_AUTOHSCROLL,WS_EX_RIGHT
-    EDITTEXT        IDCE_MODULATIONTIME,76,189,48,12,ES_AUTOHSCROLL,WS_EX_RIGHT
-    EDITTEXT        IDCE_MODULATIONDEPTH,76,202,48,12,ES_AUTOHSCROLL,WS_EX_RIGHT
-    EDITTEXT        IDCE_AIRABSORPTIONHF,76,215,48,12,ES_AUTOHSCROLL,WS_EX_RIGHT
+    EDITTEXT        IDCE_MODULATIONTIME,76,189,48,12,ES_AUTOHSCROLL,
+                    WS_EX_RIGHT
+    EDITTEXT        IDCE_MODULATIONDEPTH,76,202,48,12,ES_AUTOHSCROLL,
+                    WS_EX_RIGHT
+    EDITTEXT        IDCE_AIRABSORPTIONHF,76,215,48,12,ES_AUTOHSCROLL,
+                    WS_EX_RIGHT
     EDITTEXT        IDCE_HFREFERENCE,76,228,48,12,ES_AUTOHSCROLL,WS_EX_RIGHT
     EDITTEXT        IDCE_LFREFERENCE,76,241,48,12,ES_AUTOHSCROLL,WS_EX_RIGHT
-    EDITTEXT        IDCE_ROOMROLLOFFFACTOR,76,254,48,12,ES_AUTOHSCROLL,WS_EX_RIGHT
-    EDITTEXT        IDCE_REFLECTIONSPANX,76,267,48,12,ES_AUTOHSCROLL,WS_EX_RIGHT
-    EDITTEXT        IDCE_REFLECTIONSPANY,76,280,48,12,ES_AUTOHSCROLL,WS_EX_RIGHT
-    EDITTEXT        IDCE_REFLECTIONSPANZ,76,293,48,12,ES_AUTOHSCROLL,WS_EX_RIGHT
+    EDITTEXT        IDCE_ROOMROLLOFFFACTOR,76,254,48,12,ES_AUTOHSCROLL,
+                    WS_EX_RIGHT
+    EDITTEXT        IDCE_REFLECTIONSPANX,76,267,48,12,ES_AUTOHSCROLL,
+                    WS_EX_RIGHT
+    EDITTEXT        IDCE_REFLECTIONSPANY,76,280,48,12,ES_AUTOHSCROLL,
+                    WS_EX_RIGHT
+    EDITTEXT        IDCE_REFLECTIONSPANZ,76,293,48,12,ES_AUTOHSCROLL,
+                    WS_EX_RIGHT
     EDITTEXT        IDCE_REVERBPANX,76,306,48,12,ES_AUTOHSCROLL,WS_EX_RIGHT
     EDITTEXT        IDCE_REVERBPANY,76,319,48,12,ES_AUTOHSCROLL,WS_EX_RIGHT
     EDITTEXT        IDCE_REVERBPANZ,76,332,48,12,ES_AUTOHSCROLL,WS_EX_RIGHT
-    CONTROL         "",IDCS_ENVIRONMENTSIZE,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,126,7,123,12
-    CONTROL         "",IDCS_ENVIRONMENTDIFFUSION,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,126,20,123,12
-    CONTROL         "",IDCS_ROOM,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,126,33,123,12
-    CONTROL         "",IDCS_ROOMHF,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,126,46,123,12
-    CONTROL         "",IDCS_ROOMLF,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,126,59,123,12
-    CONTROL         "",IDCS_DECAYTIME,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,126,72,123,12
-    CONTROL         "",IDCS_DECAYHFRATIO,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,126,85,123,12
-    CONTROL         "",IDCS_DECAYLFRATIO,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,126,98,123,12
-    CONTROL         "",IDCS_REFLECTIONS,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,126,111,123,12
-    CONTROL         "",IDCS_REFLECTIONSDELAY,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,126,124,123,12
-    CONTROL         "",IDCS_REVERB,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,126,137,123,12
-    CONTROL         "",IDCS_REVERBDELAY,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,126,150,123,12
-    CONTROL         "",IDCS_ECHOTIME,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,126,163,123,12
-    CONTROL         "",IDCS_ECHODEPTH,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,126,176,123,12
-    CONTROL         "",IDCS_MODULATIONTIME,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,126,189,123,12
-    CONTROL         "",IDCS_MODULATIONDEPTH,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,126,202,123,12
-    CONTROL         "",IDCS_AIRABSORPTIONHF,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,126,215,123,12
-    CONTROL         "",IDCS_HFREFERENCE,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,126,228,123,12
-    CONTROL         "",IDCS_LFREFERENCE,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,126,241,123,12
-    CONTROL         "",IDCS_ROOMROLLOFFFACTOR,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,126,254,123,12
-    CONTROL         "",IDCS_REFLECTIONSPANX,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,126,267,123,12
-    CONTROL         "",IDCS_REFLECTIONSPANY,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,126,280,123,12
-    CONTROL         "",IDCS_REFLECTIONSPANZ,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,126,293,123,12
-    CONTROL         "",IDCS_REVERBPANX,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,126,306,123,12
-    CONTROL         "",IDCS_REVERBPANY,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,126,319,123,12
-    CONTROL         "",IDCS_REVERBPANZ,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,126,332,123,12
-    CONTROL         "Reflections Scale",IDC_REFLECTIONSSCALE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,19,353,70,10
+    CONTROL         "",IDCS_ENVIRONMENTSIZE,"msctls_trackbar32",TBS_BOTH | 
+                    TBS_NOTICKS | WS_TABSTOP,126,7,123,12
+    CONTROL         "",IDCS_ENVIRONMENTDIFFUSION,"msctls_trackbar32",
+                    TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,126,20,123,12
+    CONTROL         "",IDCS_ROOM,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | 
+                    WS_TABSTOP,126,33,123,12
+    CONTROL         "",IDCS_ROOMHF,"msctls_trackbar32",TBS_BOTH | 
+                    TBS_NOTICKS | WS_TABSTOP,126,46,123,12
+    CONTROL         "",IDCS_ROOMLF,"msctls_trackbar32",TBS_BOTH | 
+                    TBS_NOTICKS | WS_TABSTOP,126,59,123,12
+    CONTROL         "",IDCS_DECAYTIME,"msctls_trackbar32",TBS_BOTH | 
+                    TBS_NOTICKS | WS_TABSTOP,126,72,123,12
+    CONTROL         "",IDCS_DECAYHFRATIO,"msctls_trackbar32",TBS_BOTH | 
+                    TBS_NOTICKS | WS_TABSTOP,126,85,123,12
+    CONTROL         "",IDCS_DECAYLFRATIO,"msctls_trackbar32",TBS_BOTH | 
+                    TBS_NOTICKS | WS_TABSTOP,126,98,123,12
+    CONTROL         "",IDCS_REFLECTIONS,"msctls_trackbar32",TBS_BOTH | 
+                    TBS_NOTICKS | WS_TABSTOP,126,111,123,12
+    CONTROL         "",IDCS_REFLECTIONSDELAY,"msctls_trackbar32",TBS_BOTH | 
+                    TBS_NOTICKS | WS_TABSTOP,126,124,123,12
+    CONTROL         "",IDCS_REVERB,"msctls_trackbar32",TBS_BOTH | 
+                    TBS_NOTICKS | WS_TABSTOP,126,137,123,12
+    CONTROL         "",IDCS_REVERBDELAY,"msctls_trackbar32",TBS_BOTH | 
+                    TBS_NOTICKS | WS_TABSTOP,126,150,123,12
+    CONTROL         "",IDCS_ECHOTIME,"msctls_trackbar32",TBS_BOTH | 
+                    TBS_NOTICKS | WS_TABSTOP,126,163,123,12
+    CONTROL         "",IDCS_ECHODEPTH,"msctls_trackbar32",TBS_BOTH | 
+                    TBS_NOTICKS | WS_TABSTOP,126,176,123,12
+    CONTROL         "",IDCS_MODULATIONTIME,"msctls_trackbar32",TBS_BOTH | 
+                    TBS_NOTICKS | WS_TABSTOP,126,189,123,12
+    CONTROL         "",IDCS_MODULATIONDEPTH,"msctls_trackbar32",TBS_BOTH | 
+                    TBS_NOTICKS | WS_TABSTOP,126,202,123,12
+    CONTROL         "",IDCS_AIRABSORPTIONHF,"msctls_trackbar32",TBS_BOTH | 
+                    TBS_NOTICKS | WS_TABSTOP,126,215,123,12
+    CONTROL         "",IDCS_HFREFERENCE,"msctls_trackbar32",TBS_BOTH | 
+                    TBS_NOTICKS | WS_TABSTOP,126,228,123,12
+    CONTROL         "",IDCS_LFREFERENCE,"msctls_trackbar32",TBS_BOTH | 
+                    TBS_NOTICKS | WS_TABSTOP,126,241,123,12
+    CONTROL         "",IDCS_ROOMROLLOFFFACTOR,"msctls_trackbar32",TBS_BOTH | 
+                    TBS_NOTICKS | WS_TABSTOP,126,254,123,12
+    CONTROL         "",IDCS_REFLECTIONSPANX,"msctls_trackbar32",TBS_BOTH | 
+                    TBS_NOTICKS | WS_TABSTOP,126,267,123,12
+    CONTROL         "",IDCS_REFLECTIONSPANY,"msctls_trackbar32",TBS_BOTH | 
+                    TBS_NOTICKS | WS_TABSTOP,126,280,123,12
+    CONTROL         "",IDCS_REFLECTIONSPANZ,"msctls_trackbar32",TBS_BOTH | 
+                    TBS_NOTICKS | WS_TABSTOP,126,293,123,12
+    CONTROL         "",IDCS_REVERBPANX,"msctls_trackbar32",TBS_BOTH | 
+                    TBS_NOTICKS | WS_TABSTOP,126,306,123,12
+    CONTROL         "",IDCS_REVERBPANY,"msctls_trackbar32",TBS_BOTH | 
+                    TBS_NOTICKS | WS_TABSTOP,126,319,123,12
+    CONTROL         "",IDCS_REVERBPANZ,"msctls_trackbar32",TBS_BOTH | 
+                    TBS_NOTICKS | WS_TABSTOP,126,332,123,12
+    CONTROL         "Reflections Scale",IDC_REFLECTIONSSCALE,"Button",
+                    BS_AUTOCHECKBOX | WS_TABSTOP,19,353,70,10
     CONTROL         "Reflections Delay Scale",IDC_REFLECTIONSDELAYSCALE,
                     "Button",BS_AUTOCHECKBOX | WS_TABSTOP,19,366,90,10
-    CONTROL         "Decay Time Scale",IDC_DECAYTIMESCALE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,19,377,71,10
-    CONTROL         "Decay HF Limit",IDC_DECAYHFLIMIT,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,19,390,63,10
-    CONTROL         "Reverb Scale",IDC_REVERBSCALE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,139,353,58,10
-    CONTROL         "Reverb Delay Scale",IDC_REVERBDELAYSCALE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,139,366,78,10
-    CONTROL         "Echo Time Scale",IDC_ECHOTIMESCALE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,139,377,67,10
-    CONTROL         "Modulation Time Scale",IDC_MODULATIONTIMESCALE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,139,390,86,10
+    CONTROL         "Decay Time Scale",IDC_DECAYTIMESCALE,"Button",
+                    BS_AUTOCHECKBOX | WS_TABSTOP,19,377,71,10
+    CONTROL         "Decay HF Limit",IDC_DECAYHFLIMIT,"Button",
+                    BS_AUTOCHECKBOX | WS_TABSTOP,19,390,63,10
+    CONTROL         "Reverb Scale",IDC_REVERBSCALE,"Button",BS_AUTOCHECKBOX | 
+                    WS_TABSTOP,139,353,58,10
+    CONTROL         "Reverb Delay Scale",IDC_REVERBDELAYSCALE,"Button",
+                    BS_AUTOCHECKBOX | WS_TABSTOP,139,366,78,10
+    CONTROL         "Echo Time Scale",IDC_ECHOTIMESCALE,"Button",
+                    BS_AUTOCHECKBOX | WS_TABSTOP,139,377,67,10
+    CONTROL         "Modulation Time Scale",IDC_MODULATIONTIMESCALE,"Button",
+                    BS_AUTOCHECKBOX | WS_TABSTOP,139,390,86,10
     LTEXT           "Environment Size",IDC_STATIC,17,9,56,8,0,WS_EX_RIGHT
-    LTEXT           "Environment Diffusion",IDC_STATIC,2,22,71,8,0,WS_EX_RIGHT
+    LTEXT           "Environment Diffusion",IDC_STATIC,2,22,71,8,0,
+                    WS_EX_RIGHT
     LTEXT           "Room",IDC_STATIC,53,35,19,8,0,WS_EX_RIGHT
     LTEXT           "Room HF",IDC_STATIC,43,48,30,8,0,WS_EX_RIGHT
     LTEXT           "Room LF",IDC_STATIC,45,60,28,8,0,WS_EX_RIGHT
@@ -325,23 +401,28 @@ BEGIN
     LTEXT           "Air Absorption HF",IDC_STATIC,16,215,57,8,0,WS_EX_RIGHT
     LTEXT           "HF Reference",IDC_STATIC,28,228,45,8,0,WS_EX_RIGHT
     LTEXT           "LF Reference",IDC_STATIC,29,241,44,8,0,WS_EX_RIGHT
-    LTEXT           "Room Rolloff Factor",IDC_STATIC,9,254,64,8,0,WS_EX_RIGHT
+    LTEXT           "Room Rolloff Factor",IDC_STATIC,9,254,64,8,0,
+                    WS_EX_RIGHT
 END
 
 IDD_EAXEDIT DIALOGEX 0, 0, 280, 326
-STYLE DS_SETFONT | DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+STYLE DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_VISIBLE | WS_CLIPSIBLINGS | 
+    WS_CLIPCHILDREN | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
 EXSTYLE WS_EX_TOOLWINDOW | WS_EX_WINDOWEDGE
 CAPTION "Environment Editor"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
-    COMBOBOX        IDC_CURRENTENVIRONMENT,7,19,265,14,CBS_DROPDOWNLIST | CBS_SORT | WS_VSCROLL | WS_TABSTOP
+    COMBOBOX        IDC_CURRENTENVIRONMENT,7,19,265,14,CBS_DROPDOWNLIST | 
+                    CBS_SORT | WS_VSCROLL | WS_TABSTOP
     LTEXT           "Static",IDC_DUMMY,7,36,265,263,0,WS_EX_CLIENTEDGE
     PUSHBUTTON      "&New...",IDC_NEW,8,305,45,14
     PUSHBUTTON      "&Save...",IDC_SAVE,60,305,45,14
     PUSHBUTTON      "&Revert",IDC_REVERT,112,305,45,14
-    CONTROL         "&Test in level",IDC_TESTEAX,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,165,307,54,10
+    CONTROL         "&Test in level",IDC_TESTEAX,"Button",BS_AUTOCHECKBOX | 
+                    WS_TABSTOP,165,307,54,10
     PUSHBUTTON      "&Done",IDOK,228,305,45,14
-    CONTROL         "Show &IDs in List",IDC_SHOWIDS,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,7,66,10
+    CONTROL         "Show &IDs in List",IDC_SHOWIDS,"Button",BS_AUTOCHECKBOX | 
+                    WS_TABSTOP,7,7,66,10
     LTEXT           "ID 2:",IDC_STATIC,239,7,19,8
     LTEXT           "ID 1:",IDC_STATIC,198,7,19,8
     LTEXT           "255",IDC_ID2,258,7,15,8
@@ -349,16 +430,23 @@ BEGIN
 END
 
 IDD_NEWEAX DIALOGEX 0, 0, 348, 257
-STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | DS_CENTERMOUSE | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
+STYLE DS_MODALFRAME | DS_FIXEDSYS | DS_CENTERMOUSE | WS_POPUP | WS_VISIBLE | 
+    WS_CAPTION | WS_SYSMENU
 CAPTION "Create New Environment..."
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     EDITTEXT        IDC_NEWENVNAME,32,216,187,12,ES_AUTOHSCROLL
     EDITTEXT        IDC_EDITID1,248,216,32,12,ES_AUTOHSCROLL | ES_NUMBER
-    CONTROL         "",IDC_SPINID1,"msctls_updown32",UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_AUTOBUDDY | UDS_ARROWKEYS,236,216,11,14
+    CONTROL         "",IDC_SPINID1,"msctls_updown32",UDS_SETBUDDYINT | 
+                    UDS_ALIGNRIGHT | UDS_AUTOBUDDY | UDS_ARROWKEYS,236,216,
+                    11,14
     EDITTEXT        IDC_EDITID2,309,216,32,12,ES_AUTOHSCROLL | ES_NUMBER
-    CONTROL         "",IDC_SPINID2,"msctls_updown32",UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_AUTOBUDDY | UDS_ARROWKEYS,297,216,11,14
-    CONTROL         "",IDC_ENVIRONMENTLIST,"SysListView32",LVS_LIST | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_SORTASCENDING | LVS_ALIGNLEFT | WS_BORDER | WS_TABSTOP,7,18,334,192
+    CONTROL         "",IDC_SPINID2,"msctls_updown32",UDS_SETBUDDYINT | 
+                    UDS_ALIGNRIGHT | UDS_AUTOBUDDY | UDS_ARROWKEYS,297,216,
+                    11,14
+    CONTROL         "",IDC_ENVIRONMENTLIST,"SysListView32",LVS_LIST | 
+                    LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_SORTASCENDING | 
+                    LVS_ALIGNLEFT | WS_BORDER | WS_TABSTOP,7,18,334,192
     DEFPUSHBUTTON   "Create",IDOK,246,236,45,14
     PUSHBUTTON      "Cancel",IDCANCEL,296,236,45,14
     LTEXT           "Name:",IDC_STATIC,7,218,22,8
@@ -368,12 +456,16 @@ BEGIN
 END
 
 IDD_SAVEEAX DIALOGEX 0, 0, 394, 95
-STYLE DS_SETFONT | DS_3DLOOK | DS_FIXEDSYS | DS_CONTROL | WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_SYSMENU
+STYLE DS_3DLOOK | DS_FIXEDSYS | DS_CONTROL | WS_CHILD | WS_CLIPSIBLINGS | 
+    WS_CLIPCHILDREN | WS_SYSMENU
 EXSTYLE WS_EX_TRANSPARENT
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
-    GROUPBOX        "Include these environments:",IDC_SAVEGROUP,6,0,371,90,0,WS_EX_TRANSPARENT
-    CONTROL         "",IDC_ENVLIST,"SysListView32",LVS_LIST | LVS_SHOWSELALWAYS | LVS_SORTASCENDING | LVS_ALIGNLEFT | WS_BORDER | WS_TABSTOP,12,12,303,72
+    GROUPBOX        "Include these environments:",IDC_SAVEGROUP,6,0,371,90,0,
+                    WS_EX_TRANSPARENT
+    CONTROL         "",IDC_ENVLIST,"SysListView32",LVS_LIST | 
+                    LVS_SHOWSELALWAYS | LVS_SORTASCENDING | LVS_ALIGNLEFT | 
+                    WS_BORDER | WS_TABSTOP,12,12,303,72
     PUSHBUTTON      "Select All",IDC_SELECTALL,320,12,50,14
     PUSHBUTTON      "Select None",IDC_SELECTNONE,320,31,50,14
 END
@@ -381,7 +473,7 @@ END
 IDD_CRASHDIALOG DIALOGEX 0, 0, 415, 308
 STYLE DS_SETFONT | DS_MODALFRAME | DS_SETFOREGROUND | DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
 EXSTYLE WS_EX_CONTROLPARENT | WS_EX_APPWINDOW
-CAPTION "ZDoom Very Fatal Error"
+CAPTION "Zandronum Very Fatal Error"
 FONT 8, "MS Shell Dlg", 400, 0, 0x0
 BEGIN
     CONTROL         "",IDC_CRASHTAB,"SysTabControl32",WS_TABSTOP,4,4,404,280
@@ -416,7 +508,8 @@ BEGIN
 END
 
 IDD_BOING DIALOGEX 0, 0, 187, 196
-STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | DS_CENTERMOUSE | WS_POPUP | WS_CAPTION | WS_SYSMENU
+STYLE DS_MODALFRAME | DS_FIXEDSYS | DS_CENTERMOUSE | WS_POPUP | WS_CAPTION | 
+    WS_SYSMENU
 CAPTION "Upload status"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
@@ -424,35 +517,75 @@ BEGIN
     ICON            IDI_BOING1,IDC_BOING,7,7,21,20
     LTEXT           "Static",IDC_BOINGSTATUS,33,12,147,8
     CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,0,166,189,1
-    CONTROL         "",IDC_BOINGEDIT,"RichEdit20A",ES_MULTILINE | ES_READONLY | WS_BORDER | WS_VSCROLL | WS_TABSTOP,7,34,173,124
-    CONTROL         "",IDC_BOINGPROGRESS,"msctls_progress32",NOT WS_VISIBLE | WS_BORDER | 0x1,33,22,147,9
+    CONTROL         "",IDC_BOINGEDIT,"RichEdit20A",WS_BORDER | WS_VSCROLL | 
+                    WS_TABSTOP | 0x804,7,34,173,124
+    CONTROL         "",IDC_BOINGPROGRESS,"msctls_progress32",PBS_SMOOTH | 
+                    NOT WS_VISIBLE | WS_BORDER,33,22,147,9
 END
 
-IDD_ERRORPANE DIALOGEX 0, 0, 190, 28
-STYLE DS_SETFONT | DS_FIXEDSYS | WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN
-EXSTYLE WS_EX_CONTROLPARENT
-FONT 8, "MS Shell Dlg", 400, 0, 0x1
-BEGIN
-    DEFPUSHBUTTON   "Quit",IDOK,133,7,50,14
-END
+//
+// [RC] Skulltag's "no IWAD" setup screen.
+//
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+IDD_NOIWADS DIALOG 0, 0, 279, 124
+STYLE DS_3DLOOK | DS_CENTER | DS_MODALFRAME | DS_SHELLFONT | WS_VISIBLE | WS_BORDER | WS_CAPTION | WS_DLGFRAME | WS_POPUP | WS_SYSMENU
+CAPTION "Welcome"
+FONT 8, "Tahoma"
+{
+	CONTROL         IDB_SETUP, IDC_STATIC, "Static", SS_BITMAP, 7, 4, 45, 42
+    LTEXT           "Welcome to Zandronum!", IDC_STTITLE, 48, 10, 235, 19, SS_LEFT
+    CONTROL         "", IDC_STATIC, "Static", SS_ETCHEDHORZ, 4294967276, 34, 373, 1
+}
 
-IDD_NETSTARTPANE DIALOGEX 0, 0, 189, 55
-STYLE DS_SETFONT | DS_3DLOOK | DS_FIXEDSYS | WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN
-FONT 8, "MS Shell Dlg", 400, 0, 0x1
-BEGIN
-    PUSHBUTTON      "Abort Network Game",IDCANCEL,45,34,89,14
-    CONTROL         "",IDC_NETSTARTMESSAGE,"Static",SS_LEFTNOWORDWRAP | SS_NOPREFIX | WS_GROUP,7,7,116,8
-    CONTROL         "",IDC_NETSTARTCOUNT,"Static",SS_LEFTNOWORDWRAP | SS_NOPREFIX | WS_GROUP,153,7,29,8,WS_EX_RIGHT
-    CONTROL         "",IDC_NETSTARTPROGRESS,"msctls_progress32",WS_BORDER,7,18,175,10
-END
 
+
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+IDD_NOIWADS_NODOOM DIALOG 0, 0, 265, 87
+STYLE DS_3DLOOK | DS_CENTER | DS_SHELLFONT | WS_VISIBLE | WS_CHILDWINDOW | WS_SYSMENU
+FONT 8, "Ms Shell Dlg 2"
+{
+    LTEXT           "Don't have Doom? That's OK! Here are your options:", IDC_STATIC, 19, 12, 169, 8, SS_LEFT
+    PUSHBUTTON      "Buy for $10", IDC_USESTEAM, 42, 33, 64, 16
+    LTEXT           "from Steam", IDC_STATIC, 112, 36, 38, 8, SS_LEFT
+    PUSHBUTTON      "Use FreeDoom", IDC_USEFREEDOOM, 42, 59, 64, 16
+    LTEXT           "a free community re-creation", IDC_STATIC, 111, 62, 94, 8, SS_LEFT
+}
+
+
+
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+IDD_NOIWADS_REDIRECT DIALOG 0, 0, 265, 87
+STYLE DS_3DLOOK | DS_CENTER | DS_SHELLFONT | WS_VISIBLE | WS_CHILDWINDOW | WS_SYSMENU
+FONT 8, "Ms Shell Dlg 2"
+{
+    LTEXT           "Redirecting you...", IDC_REDIRECTING1, 19, 12, 238, 8, SS_LEFT
+    PUSHBUTTON      "Restart", IDC_RESTART, 19, 41, 54, 16
+    LTEXT           "After you've downloaded Doom 2, simply restart Zandronum.", IDC_REDIRECTING2, 19, 24, 238, 8, SS_LEFT
+}
+
+
+
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+IDD_NOIWADS_WELCOME DIALOG 0, 0, 298, 93
+STYLE DS_3DLOOK | DS_CENTER | DS_SHELLFONT | WS_VISIBLE | WS_CHILDWINDOW | WS_SYSMENU
+FONT 8, "Ms Shell Dlg 2"
+{
+    LTEXT           "To play, please point us to your Doom directory.", IDC_STATIC, 22, 15, 156, 8, SS_LEFT
+    PUSHBUTTON      "I don't have Doom!", IDC_NODOOM, 19, 62, 72, 17
+    PUSHBUTTON      "Browse...", IDC_BROWSE, 187, 11, 46, 16
+    LTEXT           "Doom 2 is recommended for online play.\nYou can also use Heretic, Hexen, or Strife.", IDC_STATIC, 103, 63, 138, 16, SS_LEFT
+    CONTROL         "", IDC_STATIC, "Static", SS_ETCHEDHORZ, 4294967239, 53, 398, 1
+}
 
 /////////////////////////////////////////////////////////////////////////////
 //
 // Bitmap
 //
 
-IDB_DEADGUY             BITMAP                  "deadguy.bmp"
+IDB_DEADGUY             BITMAP  MOVEABLE PURE   "deadguy.bmp"
+IDB_SETUP				BITMAP  MOVEABLE PURE   "setup.bmp"
+
+
 #endif    // English (U.S.) resources
 /////////////////////////////////////////////////////////////////////////////
 
@@ -464,49 +597,12 @@ IDB_DEADGUY             BITMAP                  "deadguy.bmp"
 // Generated from the TEXTINCLUDE 3 resource.
 //
 #ifndef NO_MANIFEST
-//   CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "zdoom.exe.manifest"
+// [BB] Using the ZDoom manifest will link the binary to the 32 bit version of comctl32.dll.
+#ifndef __MINGW64__
+   CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "zdoom.exe.manifest"
+#endif
 #endif
 
-/////////////////////////////////////////////////////////////////////////////
-//
-// Version
-//
-#define RC_FILEVERSION2 GIT_DESCRIPTION
-
-VS_VERSION_INFO VERSIONINFO
- FILEVERSION RC_FILEVERSION
- PRODUCTVERSION RC_PRODUCTVERSION
- FILEFLAGSMASK 0x3fL
-#ifdef _DEBUG
- FILEFLAGS 0x3L
-#else
- FILEFLAGS 0x2L
-#endif
- FILEOS 0x40004L
- FILETYPE 0x1L
- FILESUBTYPE 0x0L
-BEGIN
-    BLOCK "StringFileInfo"
-    BEGIN
-        BLOCK "040904b0"
-        BEGIN
-            VALUE "Comments", "Thanks to id Software for creating DOOM and then releasing the source code. Thanks also to TeamTNT for creating BOOM, which ZDoom is partially based on. Includes code based on the Cajun Bot 0.97 by Martin Collberg."
-            VALUE "CompanyName", " "
-            VALUE "FileDescription", "GZDoom"
-            VALUE "FileVersion", RC_FILEVERSION2
-            VALUE "InternalName", "GZDoom"
-            VALUE "LegalCopyright", "Copyright \u00A9 1993-1996 id Software, 1998-2010 Randy Heit, 2002-2010 Christoph Oelckers, et al."
-            VALUE "LegalTrademarks", "DoomR is a Registered Trademark of id Software, Inc."
-            VALUE "OriginalFilename", "gzdoom.exe"
-            VALUE "ProductName", "GZDoom"
-            VALUE "ProductVersion", RC_PRODUCTVERSION2
-        END
-    END
-    BLOCK "VarFileInfo"
-    BEGIN
-        VALUE "Translation", 0x409, 1200
-    END
-END
 /////////////////////////////////////////////////////////////////////////////
 #endif    // not APSTUDIO_INVOKED
 

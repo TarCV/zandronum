@@ -32,7 +32,7 @@ class player_t;
 
 // Calculate # of glyphs in font.
 #define HU_FONTSIZE		(HU_FONTEND - HU_FONTSTART + 1)
-
+/* [BB] Zandronum doesn't use any of this.
 //
 // Chat routines
 //
@@ -49,5 +49,6 @@ void HU_DrawScores (player_t *me);
 void HU_GetPlayerWidths(int &maxnamewidth, int &maxscorewidth, int &maxiconheight);
 void HU_DrawColorBar(int x, int y, int height, int playernum);
 int HU_GetRowColor(player_t *player, bool hightlight);
+*/
 
 #endif

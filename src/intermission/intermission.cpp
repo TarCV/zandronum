@@ -165,10 +165,12 @@ int DIntermissionScreen::Ticker ()
 
 bool DIntermissionScreen::CheckOverlay(int i)
 {
-	if (mOverlays[i].mCondition == NAME_Multiplayer && !multiplayer) return false;
+	// [BB] !multiplayer -> ( NETWORK_GetState( ) == NETSTATE_SINGLE )
+	if (mOverlays[i].mCondition == NAME_Multiplayer && ( NETWORK_GetState( ) == NETSTATE_SINGLE )) return false;
 	else if (mOverlays[i].mCondition != NAME_None)
 	{
-		if (multiplayer || players[0].mo == NULL) return false;
+		// [BB] multiplayer -> ( NETWORK_GetState( ) != NETSTATE_SINGLE )
+		if (( NETWORK_GetState( ) != NETSTATE_SINGLE ) || players[0].mo == NULL) return false;
 		const PClass *cls = PClass::FindClass(mOverlays[i].mCondition);
 		if (cls == NULL) return false;
 		if (!players[0].mo->IsKindOf(cls)) return false;
@@ -594,7 +596,7 @@ void DIntermissionScreenCast::Drawer ()
 		if (!(mDefaults->flags4 & MF4_NOSKIN) &&
 			mDefaults->SpawnState != NULL && caststate->sprite == mDefaults->SpawnState->sprite &&
 			mClass->IsDescendantOf(RUNTIME_CLASS(APlayerPawn)) &&
-			skins != NULL)
+			( skins.Size() > static_cast<unsigned int> ( players[consoleplayer].userinfo.GetSkin() ) ) ) // [BB] Adapted the skins check
 		{
 			// Only use the skin sprite if this class has not been removed from the
 			// PlayerClasses list.

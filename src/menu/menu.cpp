@@ -55,6 +55,9 @@
 #include "r_utility.h"
 #include "menu/menu.h"
 #include "textures/textures.h"
+// [BB] New #includes.
+#include "chat.h"
+#include "d_netinf.h"
 
 //
 // Todo: Move these elsewhere
@@ -396,7 +399,8 @@ void M_SetMenu(FName menu, int param)
 		return;
 
 	case NAME_Savegamemenu:
-		if (!usergame || (players[consoleplayer].health <= 0 && !multiplayer) || gamestate != GS_LEVEL)
+		// [BB] !multiplayer -> ( NETWORK_GetState( ) == NETSTATE_SINGLE )
+		if (!usergame || (players[consoleplayer].health <= 0 && ( NETWORK_GetState( ) == NETSTATE_SINGLE ))|| gamestate != GS_LEVEL)
 		{
 			// cannot save outside the game.
 			M_StartMessage (GStrings("SAVEDEAD"), 1);
@@ -409,7 +413,8 @@ void M_SetMenu(FName menu, int param)
 	FMenuDescriptor **desc = MenuDescriptors.CheckKey(menu);
 	if (desc != NULL)
 	{
-		if ((*desc)->mNetgameMessage.IsNotEmpty() && netgame && !demoplayback)
+		// [BB] netgame -> ( NETWORK_GetState( ) != NETSTATE_SINGLE )
+		if ((*desc)->mNetgameMessage.IsNotEmpty() && ( NETWORK_GetState( ) != NETSTATE_SINGLE ) && !demoplayback)
 		{
 			M_StartMessage((*desc)->mNetgameMessage, 1);
 			return;
@@ -436,6 +441,13 @@ void M_SetMenu(FName menu, int param)
 		{
 			FOptionMenuDescriptor *ld = static_cast<FOptionMenuDescriptor*>(*desc);
 			const PClass *cls = ld->mClass == NULL? RUNTIME_CLASS(DOptionMenu) : ld->mClass;
+
+			// [TP]
+			if ( ld->mNetgameOnly && ( NETWORK_GetState() != NETSTATE_CLIENT ) )
+			{
+				M_StartMessage( "You must be in a netgame to use this.\n\npress a key.", 1 );
+				return;
+			}
 
 			DOptionMenu *newmenu = (DOptionMenu *)cls->CreateNew();
 			newmenu->Init(DMenu::CurrentMenu, ld);
@@ -473,7 +485,8 @@ bool M_Responder (event_t *ev)
 	int mkey = NUM_MKEYS;
 	bool fromcontroller = true;
 
-	if (chatmodeon)
+	// [BB] chatmodeon -> CHAT_GetChatMode( )
+	if (CHAT_GetChatMode( ))
 	{
 		return false;
 	}
@@ -734,6 +747,7 @@ void M_ClearMenus ()
 		DMenu::CurrentMenu->Destroy();
 		DMenu::CurrentMenu = NULL;
 	}
+	D_SendPendingUserinfoChanges(); // [TP]
 	V_SetBorderNeedRefresh();
 	menuactive = MENU_Off;
 }
