@@ -41,6 +41,12 @@
 
 typedef enum {
 #include "actionspecials.h"
+	// [BC]
+	Player_SetTeam = 145,
+
+	// [BC]
+	Team_Score = 152,
+	Team_GivePoints = 153,
 } linespecial_t;
 
 struct FLineSpecial

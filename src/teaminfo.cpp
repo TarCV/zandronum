@@ -1,9 +1,9 @@
 /*
 ** teaminfo.cpp
-** Parses TEAMINFO and manages teams.
+** Implementation of the TEAMINFO lump.
 **
 **---------------------------------------------------------------------------
-** Copyright 2007-2009 Christopher Westley
+** Copyright 2007-2008 Christopher Westley
 ** All rights reserved.
 **
 ** Redistribution and use in source and binary forms, with or without
@@ -34,13 +34,18 @@
 
 // HEADER FILES ------------------------------------------------------------
 
-#include "c_dispatch.h"
-#include "gi.h"
+#include "d_player.h"
 #include "i_system.h"
+#include "sc_man.h"
 #include "teaminfo.h"
-#include "v_font.h"
 #include "v_video.h"
+#include "v_palette.h"
+#include "v_font.h"
 #include "w_wad.h"
+
+// [CW] New includes.
+#include "team.h"
+#include "version.h"
 
 // MACROS ------------------------------------------------------------------
 
@@ -50,286 +55,237 @@
 
 // PUBLIC FUNCTION PROTOTYPES ----------------------------------------------
 
+void TEAMINFO_Init ();
+void TEAMINFO_ParseTeam (FScanner &sc);
+
+// [CW] See 'TEAM_CheckIfValid' in 'team.cpp'.
+
+//bool TEAMINFO_IsValidTeam (int team);
+
 // PRIVATE FUNCTION PROTOTYPES ---------------------------------------------
 
 // EXTERNAL DATA DECLARATIONS ----------------------------------------------
 
 // PUBLIC DATA DEFINITIONS -------------------------------------------------
 
-FTeam			TeamLibrary;
-TArray<FTeam>	Teams;
+TArray <TEAMINFO> teams;
 
 // PRIVATE DATA DEFINITIONS ------------------------------------------------
 
-static const char *TeamInfoOptions[] =
-{
-	"Game",
-	"PlayerColor",
-	"TextColor",
-	"Logo",
-	"AllowCustomPlayerColor",
-	"RailColor",
-	"FlagItem",
-	"SkullItem",
-	"PlayerStartThingNumber",
-	"SmallFlagHUDIcon",
-	"SmallSkullHUDIcon",
-	"LargeFlagHUDIcon",
-	"LargeSkullHUDIcon",
-	"WinnerPic",
-	"LoserPic",
-	"WinnerTheme",
-	"LoserTheme",
-};
-
-enum ETeamOptions
-{
-	TEAMINFO_Game,
-	TEAMINFO_PlayerColor,
-	TEAMINFO_TextColor,
-	TEAMINFO_Logo,
-	TEAMINFO_AllowCustomPlayerColor,
-	TEAMINFO_RailColor,
-	TEAMINFO_FlagItem,
-	TEAMINFO_SkullItem,
-	TEAMINFO_PlayerStartThingNumber,
-	TEAMINFO_SmallFlagHUDIcon,
-	TEAMINFO_SmallSkullHUDIcon,
-	TEAMINFO_LargeFlagHUDIcon,
-	TEAMINFO_LargeSkullHUDIcon,
-	TEAMINFO_WinnerPic,
-	TEAMINFO_LoserPic,
-	TEAMINFO_WinnerTheme,
-	TEAMINFO_LoserTheme,
+static const char *keywords_teaminfo [] = {
+	"PLAYERCOLOR",
+	"TEXTCOLOR",
+	"LOGO",
+	"FLAGITEM",
+	"SKULLITEM",
+	"RAILCOLOR",
+	"PLAYERSTARTTHINGNUMBER",
+	"SMALLFLAGHUDICON",
+	"SMALLSKULLHUDICON",
+	"LARGEFLAGHUDICON",
+	"LARGESKULLHUDICON",
+	"WINNERPIC",
+	"LOSERPIC",
+	"WINNERTHEME",
+	"LOSERTHEME",
+	"ALLOWCUSTOMPLAYERCOLOR",
+	NULL
 };
 
 // CODE --------------------------------------------------------------------
 
 //==========================================================================
 //
-// FTeam :: FTeam
+// TEAMINFO_Init
 //
 //==========================================================================
 
-FTeam::FTeam ()
+void TEAMINFO_Init ()
 {
-	m_iPlayerColor = 0;
-	m_iPlayerCount = 0;
-	m_iScore = 0;
-	m_iPresent = 0;
-	m_iTies = 0;
-	m_bAllowCustomPlayerColor = false;
-}
+	int lastlump = 0, lump;
 
-//==========================================================================
-//
-// FTeam :: ParseTeamInfo
-//
-//==========================================================================
-
-void FTeam::ParseTeamInfo ()
-{
-	int iLump, iLastLump = 0;
-
-	Teams.Clear();
-	while ((iLump = Wads.FindLump ("TEAMINFO", &iLastLump)) != -1)
+	while ((lump = Wads.FindLump ("TEAMINFO", &lastlump)) != -1)
 	{
-		FScanner Scan (iLump);
-
-		while (Scan.GetString ())
+		FScanner sc(lump);
+		while (sc.GetString ())
 		{
-			if (Scan.Compare ("ClearTeams"))
-				ClearTeams ();
-			else if (Scan.Compare ("Team"))
-				ParseTeamDefinition (Scan);
-			else
-				Scan.ScriptError ("ParseTeamInfo: Unknown team command '%s'.\n", Scan.String);
+			if (sc.Compare("CLEARTEAMS"))
+				teams.Clear ();
+			else if (sc.Compare("TEAM"))
+				TEAMINFO_ParseTeam (sc);
+			else 
+				sc.ScriptError ("Unknown command %s in TEAMINFO", sc.String);
 		}
 	}
 
-	if (Teams.Size () < 2)
-		I_FatalError ("ParseTeamInfo: At least two teams must be defined in TEAMINFO.");
-	else if (Teams.Size () > (unsigned)TEAM_MAXIMUM)
-		I_FatalError ("ParseTeamInfo: Too many teams defined. (Maximum: %d)", TEAM_MAXIMUM);
+	if (teams.Size () < 2)
+		I_FatalError ("At least two teams must be defined in TEAMINFO");
+
+	if ( teams.Size( ) > MAX_TEAMS )
+		I_FatalError ( "Only %d teams can be defined in TEAMINFO", MAX_TEAMS );
+
+	// [BB] Now that teams.Size() is known, make sure that sv_maxteams is in its allowed bounds.
+	sv_maxteams = sv_maxteams;
 }
 
 //==========================================================================
 //
-// FTeam :: ParseTeamDefinition
+// TEAMINFO_ParseTeam
 //
 //==========================================================================
 
-void FTeam::ParseTeamDefinition (FScanner &Scan)
+void TEAMINFO_ParseTeam (FScanner &sc)
 {
-	FTeam Team;
-	int valid = -1;
-	Scan.MustGetString ();
-	Team.m_Name = Scan.String;
-	Scan.MustGetStringName ("{");
+	TEAMINFO team;
+	// [BB] Initialize some values.
+	team.bCustomPlayerColorAllowed = false;
 
-	while (!Scan.CheckString ("}"))
+	int i;
+	char *color;
+
+	sc.MustGetString ();
+	team.Name = sc.String;
+
+	sc.MustGetStringName("{");
+	while (!sc.CheckString("}"))
 	{
-		Scan.MustGetString ();
-
-		switch (Scan.MatchString (TeamInfoOptions))
+		sc.MustGetString();
+		switch(i = sc.MatchString (keywords_teaminfo))
 		{
-		case TEAMINFO_Game:
-			Scan.MustGetString ();
-			if (Scan.Compare("Any")) valid = 1;
-			else if (CheckGame(Scan.String, false)) valid = 1;
-			else if (valid == -1) valid = 0;
+		case 0:
+			sc.MustGetString ();
+			color = sc.String;
+			team.lPlayerColor = V_GetColor (NULL, color);
 			break;
 
-		case TEAMINFO_PlayerColor:
-			Scan.MustGetString ();
-			Team.m_iPlayerColor = V_GetColor (NULL, Scan.String);
+		case 1:
+			sc.MustGetString();
+			team.TextColor = '[';
+			team.TextColor += sc.String;
+			team.TextColor += ']';
 			break;
 
-		case TEAMINFO_TextColor:
-			Scan.MustGetString ();
-			Team.m_TextColor.AppendFormat ("[%s]", Scan.String);
+		case 2:
+			sc.MustGetString( );
+			// [CW] 'Logo' isn't supported by Skulltag.
+			Printf( "WARNING: 'Logo' is not a supported TEAMINFO option in "GAMENAME".\n" );
 			break;
 
-		case TEAMINFO_Logo:
-			Scan.MustGetString ();
-			Team.m_Logo = Scan.String;
+		case 3:
+			sc.MustGetString( );
+			team.FlagItem = sc.String;
 			break;
 
-		case TEAMINFO_AllowCustomPlayerColor:
-			Team.m_bAllowCustomPlayerColor = true;
+		case 4:
+			sc.MustGetString( );
+			team.SkullItem = sc.String;
 			break;
 
-		case TEAMINFO_PlayerStartThingNumber:
-			Scan.MustGetNumber ();
+		case 5:
+			sc.MustGetString( );
+			team.lRailColor = V_GetColorFromString( NULL, sc.String );
 			break;
 
-		case TEAMINFO_RailColor:
-		case TEAMINFO_FlagItem:
-		case TEAMINFO_SkullItem:
-		case TEAMINFO_SmallFlagHUDIcon:
-		case TEAMINFO_SmallSkullHUDIcon:
-		case TEAMINFO_LargeFlagHUDIcon:
-		case TEAMINFO_LargeSkullHUDIcon:
-		case TEAMINFO_WinnerPic:
-		case TEAMINFO_LoserPic:
-		case TEAMINFO_WinnerTheme:
-		case TEAMINFO_LoserTheme:
-			Scan.MustGetString ();
+		case 6:
+			sc.MustGetNumber( );
+			team.ulPlayerStartThingNumber = sc.Number;
+			break;
+
+		case 7:
+			sc.MustGetString( );
+			team.SmallFlagHUDIcon = sc.String;
+			break;
+
+		case 8:
+			sc.MustGetString( );
+			team.SmallSkullHUDIcon = sc.String;
+			break;
+
+		case 9:
+			sc.MustGetString( );
+			team.LargeFlagHUDIcon = sc.String;
+			break;
+
+		case 10:
+			sc.MustGetString( );
+			team.LargeSkullHUDIcon = sc.String;
+			break;
+
+		case 11:
+			sc.MustGetString( );
+			team.WinnerPic = sc.String;
+			break;
+
+		case 12:
+			sc.MustGetString( );
+			team.LoserPic = sc.String;
+			break;
+
+		case 13:
+			sc.MustGetString( );
+			team.WinnerTheme = sc.String;
+			break;
+
+		case 14:
+			sc.MustGetString( );
+			team.LoserTheme = sc.String;
+			break;
+
+		case 15:
+			team.bCustomPlayerColorAllowed = true;
 			break;
 
 		default:
-			Scan.ScriptError ("ParseTeamDefinition: Unknown team option '%s'.\n", Scan.String);
+			I_FatalError( "Unknown option '%s', on line %d in TEAMINFO.", sc.String, sc.Line );
 			break;
 		}
 	}
 
-	if (valid) Teams.Push (Team);
+	teams.Push (team);
 }
 
+/*
+
+// [CW] See 'TEAM_CheckIfValid' in 'team.cpp'.
+
 //==========================================================================
 //
-// FTeam :: ClearTeams
+// TEAMINFO_IsValidTeam
 //
 //==========================================================================
 
-void FTeam::ClearTeams ()
+bool TEAMINFO_IsValidTeam (int team)
 {
-	Teams.Clear ();
-}
-
-//==========================================================================
-//
-// FTeam :: IsValidTeam
-//
-//==========================================================================
-
-bool FTeam::IsValidTeam (unsigned int uiTeam)
-{
-	if (uiTeam >= Teams.Size ())
+	if (team < 0 || team >= (signed)teams.Size ())
+	{
 		return false;
+	}
 
 	return true;
 }
 
+// [CW] See 'TEAM_GetTextColor' in 'team.cpp'.
+
 //==========================================================================
 //
-// FTeam :: GetName
+// TEAMINFO :: GetTextColor
 //
 //==========================================================================
 
-const char *FTeam::GetName () const
+int TEAMINFO::GetTextColor () const
 {
-	return m_Name;
-}
-
-//==========================================================================
-//
-// FTeam :: GetPlayerColor
-//
-//==========================================================================
-
-int FTeam::GetPlayerColor () const
-{
-	return m_iPlayerColor;
-}
-
-//==========================================================================
-//
-// FTeam :: GetTextColor
-//
-//==========================================================================
-
-int FTeam::GetTextColor () const
-{
-	if (m_TextColor.IsEmpty ())
-		return CR_UNTRANSLATED;
-
-	const BYTE *pColor = (const BYTE *)m_TextColor.GetChars ();
-	int iColor = V_ParseFontColor (pColor, 0, 0);
-
-	if (iColor == CR_UNDEFINED)
+	if (textcolor.IsEmpty())
 	{
-		Printf ("GetTextColor: Undefined color '%s' in definition of team '%s'.\n", m_TextColor.GetChars (), m_Name.GetChars ());
 		return CR_UNTRANSLATED;
 	}
-
-	return iColor;
+	const BYTE *cp = (const BYTE *)textcolor.GetChars();
+	int color = V_ParseFontColor(cp, 0, 0);
+	if (color == CR_UNDEFINED)
+	{
+		Printf("Undefined color '%s' in definition of team %s\n", textcolor.GetChars (), name.GetChars ());
+		color = CR_UNTRANSLATED;
+	}
+	return color;
 }
 
-//==========================================================================
-//
-// FTeam :: GetLogo
-//
-//==========================================================================
-
-FString FTeam::GetLogo () const
-{
-	return m_Logo;
-}
-
-//==========================================================================
-//
-// FTeam :: GetAllowCustomPlayerColor
-//
-//==========================================================================
-
-bool FTeam::GetAllowCustomPlayerColor () const
-{
-	return m_bAllowCustomPlayerColor;
-}
-
-//==========================================================================
-//
-// CCMD teamlist
-//
-//==========================================================================
-
-CCMD (teamlist)
-{
-	Printf ("Defined teams are as follows:\n");
-
-	for (unsigned int uiTeam = 0; uiTeam < Teams.Size (); uiTeam++)
-		Printf ("%d : %s\n", uiTeam, Teams[uiTeam].GetName ());
-
-	Printf ("End of team list.\n");
-}
+*/

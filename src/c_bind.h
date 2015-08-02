@@ -94,6 +94,9 @@ bool C_DoKey (event_t *ev, FKeyBindings *binds, FKeyBindings *doublebinds);
 void C_SetDefaultBindings ();
 void C_UnbindAll ();
 
+// [RC] Returns the key used for a command
+void C_FindBind(char *Command, char *Key);
+
 extern const char *KeyNames[];
 
 struct FKeyAction

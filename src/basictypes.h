@@ -27,6 +27,19 @@ typedef SDWORD					int32;
 typedef float					real32;
 typedef double					real64;
 
+// [BC] New additions.
+typedef	unsigned short			USHORT;
+typedef	short					SHORT;
+#ifdef __WINE__
+typedef unsigned int ULONG;
+typedef int LONG;
+#else
+typedef	unsigned long			ULONG;
+typedef	long					LONG;
+#endif
+typedef unsigned int			UINT;
+typedef	int						INT;
+
 // windef.h, included by windows.h, has its own incompatible definition
 // of DWORD as a long. In files that mix Doom and Windows code, you
 // must define USE_WINDOWS_DWORD before including doomtype.h so that

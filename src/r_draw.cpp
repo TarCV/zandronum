@@ -39,6 +39,9 @@
 #include "r_data/r_translate.h"
 #include "v_palette.h"
 #include "r_data/colormaps.h"
+// [BB] New #includes.
+#include "deathmatch.h"
+#include "team.h"
 
 #include "gi.h"
 #include "stats.h"
@@ -2211,7 +2214,8 @@ static bool R_SetBlendFunc (int op, fixed_t fglevel, fixed_t bglevel, int flags)
 {
 	// r_drawtrans is a seriously bad thing to turn off. I wonder if I should
 	// just remove it completely.
-	if (!r_drawtrans || (op == STYLEOP_Add && fglevel == FRACUNIT && bglevel == 0 && !(flags & STYLEF_InvertSource)))
+	// [BB] ZADF_FORCE_ALPHA overrides the r_drawtrans setting.
+	if (!(r_drawtrans || (zadmflags & ZADF_FORCE_ALPHA) ) || (op == STYLEOP_Add && fglevel == FRACUNIT && bglevel == 0 && !(flags & STYLEF_InvertSource)))
 	{
 		if (flags & STYLEF_ColorIsFixed)
 		{
