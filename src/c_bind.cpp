@@ -43,6 +43,10 @@
 #include "configfile.h"
 #include "i_system.h"
 #include "d_event.h"
+// [BC] New #includes.
+#include "chat.h"
+#include "p_local.h"
+#include "p_acs.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -98,11 +102,15 @@ static const FBinding DefBindings[] =
 	{ "tab", "togglemap" },
 	{ "pause", "pause" },
 	{ "sysrq", "screenshot" },
-	{ "t", "messagemode" },
+	{ "t", "say" },	// [BC] messagemode changed to "say"
 	{ "\\", "+showscores" },
 	{ "f12", "spynext" },
 	{ "mwheeldown", "weapnext" },
 	{ "mwheelup", "weapprev" },
+	{ "m", "+showmedals" },	// [BC] New buttons below for Skulltag.
+	{ "u", "taunt" },
+	{ "pgup", "vote_yes" },
+	{ "pgdn", "vote_no" },
 
 	// Generic joystick buttons
 	{ "joy1", "+attack" },
@@ -191,6 +199,16 @@ static const FBinding DefAutomapBindings[] =
 	{ "mwheelup", "am_zoom 1.2" },
 	{ "mwheeldown", "am_zoom -1.2" },
 	{ NULL, NULL }
+};
+
+// [BB] WASD control layout (clashes with Strife's default controls).
+static const FBinding DefNonStrifeBindings[] =
+{
+	{ "w", "+forward" },
+	{ "s", "+back" },
+	{ "a", "+moveleft" },
+	{ "d", "+moveright" },
+	{ NULL }
 };
 
 
@@ -502,6 +520,10 @@ void FKeyBindings::PerformBind(FCommandLine &argv, const char *msg)
 {
 	int i;
 
+	// [BC] This function may not be used by ConsoleCommand.
+	if ( ACS_IsCalledFromConsoleCommand( ))
+		return;
+
 	if (argv.argc() > 1)
 	{
 		i = GetKeyFromName (argv[1]);
@@ -666,6 +688,10 @@ void C_UnbindAll ()
 
 CCMD (unbindall)
 {
+	// [BC] This function may not be used by ConsoleCommand.
+	if ( ACS_IsCalledFromConsoleCommand( ))
+		return;
+
 	C_UnbindAll ();
 }
 
@@ -677,6 +703,10 @@ CCMD (unbindall)
 
 CCMD (unbind)
 {
+	// [BC] This function may not be used by ConsoleCommand.
+	if ( ACS_IsCalledFromConsoleCommand( ))
+		return;
+
 	if (argv.argc() > 1)
 	{
 		Bindings.UnbindKey(argv[1]);
@@ -802,6 +832,9 @@ void C_BindDefaults ()
 	{
 		Bindings.SetBinds (DefStrifeBindings);
 	}
+	// [BB] WASD control layout (clashes with Strife's default controls).
+	else
+		Bindings.SetBinds (DefNonStrifeBindings);
 
 	AutomapBindings.SetBinds(DefAutomapBindings);
 }
@@ -877,7 +910,8 @@ bool C_DoKey (event_t *ev, FKeyBindings *binds, FKeyBindings *doublebinds)
 		dclick = false;
 	}
 
-	if (!binding.IsEmpty() && (chatmodeon == 0 || ev->data1 < 256))
+	// [BC] chatmodeon becomes CHAT_GetChatMode().
+	if (!binding.IsEmpty() && (( CHAT_GetChatMode( ) == CHATMODE_NONE ) || ev->data1 < 256))
 	{
 		if (ev->type == EV_KeyUp && binding[0] != '+')
 		{
@@ -895,5 +929,16 @@ bool C_DoKey (event_t *ev, FKeyBindings *binds, FKeyBindings *doublebinds)
 		return true;
 	}
 	return false;
+}
+
+
+// [RC] Returns the (first) key name, if any, used for a command 
+void C_FindBind(char *Command, char *Key) {
+	int key1 = -1; int key2 = -1;
+	Bindings.GetKeysForCommand(Command, &key1, &key2);
+	if(key1 <= 0)
+		sprintf(Key, "None");
+	else
+		sprintf(Key, "%s", KeyNames[key1]);
 }
 

@@ -285,6 +285,10 @@ void S_CacheRandomSound (sfxinfo_t *sfx);
 // Checks if a copy of this sound is already playing.
 bool S_CheckSingular (int sound_id);
 
+// [BB]
+bool S_IsMusicPaused ( void );
+void S_StopSoundID (int sound_id, int channel);
+
 // Stops a sound emanating from one of an emitter's channels.
 void S_StopSound (AActor *ent, int channel);
 void S_StopSound (const sector_t *sec, int channel);
@@ -295,6 +299,9 @@ void S_StopSound (int channel);
 
 // Stop sound for all channels
 void S_StopAllChannels (void);
+
+// [BB] Stop sound of an actor for all channels
+void S_StopAllSoundsFromActor (AActor *ent);
 
 // Is the sound playing on one of the emitter's channels?
 bool S_GetSoundPlayingInfo (const AActor *actor, int sound_id);
@@ -368,6 +375,9 @@ sfxinfo_t *S_LoadSound(sfxinfo_t *sfx);
 unsigned int S_GetMSLength(FSoundID sound);
 void S_ParseMusInfo();
 bool S_ParseTimeTag(const char *tag, bool *as_samples, unsigned int *time);
+
+// [BC]
+const char	*S_GetName( LONG lSoundID );
 
 // [RH] Prints sound debug info to the screen.
 //		Modelled after Hexen's noise cheat.

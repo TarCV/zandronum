@@ -38,6 +38,8 @@
 #include "dobject.h"
 #include "dthinker.h"
 #include "doomtype.h"
+// [BB] New #includes.
+#include "r_data/r_translate.h"
 
 #define LOCAL_SIZE				20
 #define NUM_MAPVARS				128
@@ -100,6 +102,7 @@ public:
 private:
 	int FindString(const char *str, size_t len, unsigned int h, unsigned int bucketnum);
 	int InsertString(FString &str, unsigned int h, unsigned int bucketnum, const SDWORD *stack, int stackdepth);
+	void FindFirstFreeEntry(unsigned int base);
 
 	enum { NUM_BUCKETS = 251 };
 	enum { FREE_ENTRY = 0xFFFFFFFE };	// Stored in PoolEntry's Next field
@@ -213,15 +216,86 @@ enum
 	SCRIPT_Unloading	= 13,
 	SCRIPT_Disconnect	= 14,
 	SCRIPT_Return		= 15,
+	SCRIPT_Event		= 16, // [BB]
 };
 
 // Script flags
 enum
 {
-	SCRIPTF_Net = 0x0001	// Safe to "puke" in multiplayer
+	SCRIPTF_Net = 0x0001,	// Safe to "puke" in multiplayer
+	SCRIPTF_ClientSide = 0x0002	// [BB] Is executed on the clients, not on the server.
 };
 
 enum ACSFormat { ACS_Old, ACS_Enhanced, ACS_LittleEnhanced, ACS_Unknown };
+
+// [BB] Moved here from p_acs.cpp
+enum
+{
+	APROP_Health		= 0,
+	APROP_Speed			= 1,
+	APROP_Damage		= 2,
+	APROP_Alpha			= 3,
+	APROP_RenderStyle	= 4,
+	APROP_SeeSound		= 5,	// Sounds can only be set, not gotten
+	APROP_AttackSound	= 6,
+	APROP_PainSound		= 7,
+	APROP_DeathSound	= 8,
+	APROP_ActiveSound	= 9,
+	APROP_Ambush		= 10,
+	APROP_Invulnerable	= 11,
+	APROP_JumpZ			= 12,	// [GRB]
+	APROP_ChaseGoal		= 13,
+	APROP_Frightened	= 14,
+	APROP_Gravity		= 15,
+	APROP_Friendly		= 16,
+	APROP_SpawnHealth   = 17,
+	APROP_Dropped		= 18,
+	APROP_Notarget		= 19,
+	APROP_Species		= 20,
+	APROP_NameTag		= 21,
+	APROP_Score			= 22,
+	APROP_Notrigger		= 23,
+	APROP_DamageFactor	= 24,
+	APROP_MasterTID     = 25,
+	APROP_TargetTID		= 26,
+	APROP_TracerTID		= 27,
+	APROP_WaterLevel	= 28,
+	APROP_ScaleX        = 29,
+	APROP_ScaleY        = 30,
+	APROP_Dormant		= 31,
+	APROP_Mass			= 32,
+	APROP_Accuracy      = 33,
+	APROP_Stamina       = 34,
+	APROP_Height		= 35,
+	APROP_Radius		= 36,
+	APROP_ReactionTime  = 37,
+	APROP_MeleeRange	= 38,
+	APROP_ViewHeight	= 39,
+	APROP_AttackZOffset	= 40,
+};	
+
+// [Dusk] Enumeration for GetTeamProperty
+enum
+{
+	TPROP_Name = 0,
+	TPROP_Score,
+	TPROP_IsValid,
+	TPROP_NumPlayers,
+	TPROP_NumLivePlayers,
+	TPROP_TextColor,
+	TPROP_PlayerStartNum,
+	TPROP_Spread,
+	TPROP_Carrier,
+	TPROP_Assister,
+	TPROP_FragCount,
+	TPROP_DeathCount,
+	TPROP_WinCount,
+	TPROP_PointCount,
+	TPROP_ReturnTics,
+	TPROP_TeamItem,
+	TPROP_WinnerTheme,
+	TPROP_LoserTheme,
+};
 
 class FBehavior
 {
@@ -233,7 +307,8 @@ public:
 	BYTE *FindChunk (DWORD id) const;
 	BYTE *NextChunk (BYTE *chunk) const;
 	const ScriptPtr *FindScript (int number) const;
-	void StartTypedScripts (WORD type, AActor *activator, bool always, int arg1, bool runNow);
+	void StartTypedScripts (WORD type, AActor *activator, bool always, int arg1, bool runNow, bool onlyClientSideScripts=false, int arg2=0, int arg3=0); // [BB] Added arg2+arg3
+	int CountTypedScripts( WORD type );
 	DWORD PC2Ofs (int *pc) const { return (DWORD)((BYTE *)pc - Data); }
 	int *Ofs2PC (DWORD ofs) const {	return (int *)(Data + ofs); }
 	int *Jump2PC (DWORD jumpPoint) const { return Ofs2PC(JumpPoints[jumpPoint]); }
@@ -270,8 +345,12 @@ public:
 
 	static const ScriptPtr *StaticFindScript (int script, FBehavior *&module);
 	static const char *StaticLookupString (DWORD index);
-	static void StaticStartTypedScripts (WORD type, AActor *activator, bool always, int arg1=0, bool runNow=false);
+	static void StaticStartTypedScripts (WORD type, AActor *activator, bool always, int arg1=0, bool runNow=false, bool onlyClientSideScripts=false, int arg2=0, int arg3=0); // [BB] Added arg2+arg3
 	static void StaticStopMyScripts (AActor *actor);
+	static int StaticCountTypedScripts( WORD type );
+
+	// [TP]
+	static FString RepresentScript ( int script );
 
 private:
 	struct ArrayInfo;
@@ -445,7 +524,7 @@ public:
 		PCD_PLAYERGOLDSKULL,
 		PCD_PLAYERBLACKCARD,
 		PCD_PLAYERSILVERCARD,
-		PCD_PLAYERONTEAM,
+		PCD_ISMULTIPLAYER,
 		PCD_PLAYERTEAM,
 /*120*/	PCD_PLAYERHEALTH,
 		PCD_PLAYERARMORPOINTS,
@@ -456,11 +535,11 @@ public:
 		PCD_BLUETEAMSCORE,
 		PCD_REDTEAMSCORE,
 		PCD_ISONEFLAGCTF,
-		PCD_LSPEC6,				// These are never used. They should probably
-/*130*/	PCD_LSPEC6DIRECT,		// be given names like PCD_DUMMY.
+		PCD_GETINVASIONWAVE,
+/*130*/	PCD_GETINVASIONSTATE,
 		PCD_PRINTNAME,
 		PCD_MUSICCHANGE,
-		PCD_TEAM2FRAGPOINTS,
+		PCD_CONSOLECOMMANDDIRECT,
 		PCD_CONSOLECOMMAND,
 		PCD_SINGLEPLAYER,		// [RH] End of Skull Tag p-codes
 		PCD_FIXEDMUL,
@@ -694,6 +773,10 @@ public:
 		PCD_TRANSLATIONRANGE3,
 		PCD_GOTOSTACK,
 
+		// [BB] We need to fix the number for the new commands!
+		// [CW] Begin team additions.
+		PCD_GETTEAMPLAYERCOUNT,
+		// [CW] End team additions.
 /*363*/	PCODE_COMMAND_COUNT
 	};
 
@@ -715,7 +798,8 @@ public:
 		GAME_SINGLE_PLAYER =	0,
 		GAME_NET_COOPERATIVE =	1,
 		GAME_NET_DEATHMATCH =	2,
-		GAME_TITLE_MAP =		3
+		GAME_TITLE_MAP =		3,
+		GAME_NET_TEAMGAME =		4,
 	};
 	enum {
 		CLASS_FIGHTER =			0,
@@ -817,6 +901,7 @@ protected:
 	int				WrapWidth;
 	FBehavior	    *activeBehavior;
 	int				InModuleScriptNumber;
+	FString			activefontname; // [TP]
 
 	void Link ();
 	void Unlink ();
@@ -852,6 +937,9 @@ private:
 	DLevelScript ();
 
 	friend class DACSThinker;
+
+	// [BB] The clients need to call some of the static functions from DLevelScript.
+	friend class STClient;
 };
 
 class DACSThinker : public DThinker
@@ -871,6 +959,8 @@ public:
 
 	void DumpScriptStatus();
 	void StopScriptsFor (AActor *actor);
+	// [BB] Added StopAndDestroyAllScripts, which is needed in GAME_ResetMap.
+	void StopAndDestroyAllScripts ();
 
 private:
 	DLevelScript *LastScript;
@@ -898,5 +988,18 @@ struct acsdefered_t
 };
 
 FArchive &operator<< (FArchive &arc, acsdefered_t *&defer);
+
+//*****************************************************************************
+//	PROTOTYPES
+
+bool	ACS_IsCalledFromConsoleCommand( void );
+bool	ACS_IsScriptClientSide( ULONG ulScript );
+bool	ACS_IsScriptClientSide( const ScriptPtr *pScriptData );
+bool	ACS_IsScriptPukeable( ULONG ulScript );
+int		ACS_GetTranslationIndex( FRemapTable *pTranslation );
+int		ACS_PushAndReturnDynamicString ( const FString &Work, const SDWORD *stack, int stackdepth );
+
+// [BB] Export DoGiveInv
+bool	DoGiveInv(AActor *actor, const PClass *info, int amount);
 
 #endif //__P_ACS_H__
