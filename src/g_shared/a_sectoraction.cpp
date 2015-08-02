@@ -34,12 +34,18 @@
 
 #include "r_defs.h"
 #include "p_lnspec.h"
+// [BB] New #includes.
+#include "d_player.h"
+#include "network.h"
+#include "gamemode.h"
 
 // The base class for sector actions ----------------------------------------
 
 IMPLEMENT_CLASS (ASectorAction)
 
-void ASectorAction::Destroy ()
+// [BB] Moved the code from ASectorAction::Destroy() here, so that it also can
+// be used in ASectorAction::PrepareForHiding()
+void ASectorAction::RemoveFromSectorActionsList ()
 {
 	// Remove ourself from this sector's list of actions
 	AActor *probe = Sector->SecActTarget;
@@ -59,6 +65,18 @@ void ASectorAction::Destroy ()
 	{
 		*prev.act = probe->tracer;
 	}
+}
+
+void ASectorAction::PrepareForHiding ()
+{
+	RemoveFromSectorActionsList();
+	Super::PrepareForHiding ();
+}
+
+void ASectorAction::Destroy ()
+{
+	// [BB] Moved code from here into the new function called below.
+	RemoveFromSectorActionsList();
 
 	Super::Destroy ();
 }
@@ -92,6 +110,10 @@ bool ASectorAction::TriggerAction (AActor *triggerer, int activationType)
 
 bool ASectorAction::CheckTrigger (AActor *triggerer) const
 {
+	// Special Zandronum checks
+	if ( GAMEMODE_IsHandledSpecial (triggerer, special) == false )
+		return false;
+
 	if (special &&
 		(triggerer->player ||
 		 ((flags & MF_AMBUSH) && (triggerer->flags2 & MF2_MCROSS)) ||

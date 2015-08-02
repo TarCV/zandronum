@@ -204,7 +204,7 @@ FString M_GetConfigPath(bool for_reading)
 	{
 		path += "/" GAME_DIR;
 		CreatePath(path);
-		path += "/zdoom.ini";
+		path += "/"GAMENAMELOWERCASE".ini"; // [BB]
 	}
 	else
 	{ // construct "$PROGDIR/zdoom-$USER.ini"
@@ -224,11 +224,11 @@ FString M_GetConfigPath(bool for_reading)
 					*probe = '_';
 				++probe;
 			}
-			path << "zdoom-" << uname << ".ini";
+			path << GAMENAMELOWERCASE"-" << uname << ".ini"; // [BB]
 		}
 		else
 		{ // Couldn't get user name, so just use zdoom.ini
-			path += "zdoom.ini";
+			path += GAMENAMELOWERCASE".ini"; // [BB]
 		}
 	}
 
@@ -239,7 +239,7 @@ FString M_GetConfigPath(bool for_reading)
 		if (!FileExists(path))
 		{
 			path = progdir;
-			path << "zdoom.ini";
+			path << GAMENAMELOWERCASE".ini"; // [BB]
 		}
 	}
 
@@ -411,11 +411,11 @@ FString M_GetConfigPath(bool for_reading)
 		noErr == FSRefMakePath(&folder, (UInt8*)cpath, PATH_MAX))
 	{
 		FString path;
-		path << cpath << "/zdoom.ini";
+		path << cpath << "/"GAMENAMELOWERCASE".ini"; // [BB]
 		return path;
 	}
 	// Ungh.
-	return "zdoom.ini";
+	return GAMENAMELOWERCASE".ini"; // [BB]
 }
 
 //===========================================================================
@@ -497,7 +497,7 @@ FString GetUserFile (const char *file)
 		// This can be removed after a release or two
 		// Transfer the old zdoom directory to the new location
 		bool moved = false;
-		FString oldpath = NicePath("~/.zdoom/");
+		FString oldpath = NicePath("~/." GAMENAMELOWERCASE "/"); // [BB]
 		if (stat (oldpath, &extrainfo) != -1)
 		{
 			if (rename(oldpath, path) == -1)
@@ -598,7 +598,7 @@ FString M_GetCajunPath(const char *botfilename)
 
 FString M_GetConfigPath(bool for_reading)
 {
-	return GetUserFile("zdoom.ini");
+	return GetUserFile(GAMENAMELOWERCASE".ini"); // [BB]
 }
 
 //===========================================================================

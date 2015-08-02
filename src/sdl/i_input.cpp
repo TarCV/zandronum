@@ -17,6 +17,8 @@
 #include "dikeys.h"
 #include "templates.h"
 #include "s_sound.h"
+// [BB] New #includes.
+#include "chat.h"
 
 static void I_CheckGUICapture ();
 static void I_CheckNativeMouse ();
@@ -33,7 +35,7 @@ CVAR (Bool,  sdl_nokeyrepeat,		false, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 
 EXTERN_CVAR (Bool, fullscreen)
 
-extern int WaitingForKey, chatmodeon;
+extern int WaitingForKey;
 extern constate_e ConsoleState;
 
 extern SDL_Surface *cursorSurface;
@@ -105,7 +107,7 @@ static void I_CheckGUICapture ()
 
 	if (menuactive == MENU_Off)
 	{
-		wantCapt = ConsoleState == c_down || ConsoleState == c_falling || chatmodeon;
+		wantCapt = ConsoleState == c_down || ConsoleState == c_falling || CHAT_GetChatMode();
 	}
 	else
 	{

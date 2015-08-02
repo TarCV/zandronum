@@ -103,7 +103,8 @@ static FSpecialColormapParameters SpecialColormapParms[] =
 	{ { 0, 0, 0 }, {    0,    0, 1.5 } },
 };
 
-static void FreeSpecialLights();
+// [BC]
+//static void FreeSpecialLights();
 
 
 
@@ -206,7 +207,8 @@ FDynamicColormap *GetSpecialLights (PalEntry color, PalEntry fade, int desaturat
 	colormap->Desaturate = desaturate;
 	NormalLight.Next = colormap;
 
-	if (Renderer->UsesColormap())
+	// [BB] The server doesn't have a Renderer.
+	if ( (NETWORK_GetState( ) != NETSTATE_SERVER) && Renderer->UsesColormap())
 	{
 		colormap->Maps = new BYTE[NUMCOLORMAPS*256];
 		colormap->BuildLights ();
@@ -222,7 +224,8 @@ FDynamicColormap *GetSpecialLights (PalEntry color, PalEntry fade, int desaturat
 //
 //==========================================================================
 
-static void FreeSpecialLights()
+// [BC] No longer static.
+/*static*/ void FreeSpecialLights()
 {
 	FDynamicColormap *colormap, *next;
 
@@ -389,6 +392,10 @@ void FDynamicColormap::RebuildAllLights()
 
 void R_SetDefaultColormap (const char *name)
 {
+	// [BC] The server doesn't have colormaps.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
+
 	if (strnicmp (fakecmaps[0].name, name, 8) != 0)
 	{
 		int lump, i, j;
