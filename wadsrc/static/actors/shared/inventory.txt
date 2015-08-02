@@ -30,7 +30,7 @@ ACTOR Inventory native
 	action native A_FireSTGrenade(class<Actor> grenadetype = "Grenade");
 	action native A_FireMissile();
 	action native A_FirePlasma();
-	action native A_FireRailgun();
+	action native A_FireRailgun( class<Actor> puffType = "None" ); // [TP] Now takes a puff parameter
 	action native A_FireRailgunLeft();
 	action native A_FireRailgunRight();
 	action native A_RailWait();
@@ -49,6 +49,9 @@ ACTOR Inventory native
 	action native A_RestoreSpecialThing1();
 	action native A_RestoreSpecialThing2();
 	
+	// [BB] Skulltag specific code pointers
+	action native A_CheckRailReload();
+
 	States
 	{
 	HideDoomish:
@@ -69,6 +72,10 @@ ACTOR Inventory native
 	HoldAndDestroy:
 		TNT1 A 1
 		Stop
+	// [BC] Hide this item until told to return.
+	HideIndefinitely:
+		TNT1 A 1050
+		Loop
 	}
 }
 
@@ -127,14 +134,14 @@ ACTOR FakeInventory : Inventory native {}
 
 ACTOR CustomInventory : Inventory native {}
 
-Actor Health : Inventory native 
+Actor Health : Inventory native
 {
 	Inventory.Amount 1
 	Inventory.MaxAmount 0
 	Inventory.PickupSound "misc/health_pkup"
 }
 
-Actor HealthPickup : Inventory native 
+Actor HealthPickup : Inventory native
 {
 	Inventory.DefMaxAmount
 	+INVENTORY.INVBAR
@@ -192,6 +199,12 @@ ACTOR PowerShadow : PowerInvisibility
 	Powerup.Duration -55
 	Powerup.Strength 75
 	Powerup.Mode "Cumulative"
+}
+
+// [BB]
+ACTOR PowerTranslucency : PowerInvisibility native
+{
+	Powerup.Duration -45
 }
 
 ACTOR PowerIronFeet : Powerup native
@@ -318,7 +331,7 @@ ACTOR PowerInfiniteAmmo : Powerup native
 
 ACTOR MapRevealer : Inventory native {}
 
-ACTOR PuzzleItem : Inventory native 
+ACTOR PuzzleItem : Inventory native
 {
 	+NOGRAVITY
 	+INVENTORY.INVBAR

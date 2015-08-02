@@ -38,6 +38,8 @@
 #include "doomdef.h"
 #include "sc_man.h"
 #include "s_sound.h"
+//[BL] New Includes
+#include "sectinfo.h"
 
 struct level_info_t;
 struct cluster_info_t;
@@ -214,6 +216,12 @@ enum ELevelFlags
 	LEVEL2_ENDGAME				= 0x20000000,	// This is an epilogue level that cannot be quit.
 	LEVEL2_NOAUTOSAVEHINT		= 0x40000000,	// tell the game that an autosave for this level does not need to be kept
 	LEVEL2_FORGETSTATE			= 0x80000000,	// forget this map's state in a hub
+
+	// [BB] Zandronum flags
+	LEVEL_ZA_NOBOTNODES			= 0x00000001,	// [BC] Level does not use bot nodes.
+	// [BB] Ceartain game modes are supposed to behave differently on
+	// the map. For example in duel mode the countdown and the map reset are skipped.
+	LEVEL_ZA_ISLOBBY				= 0x00000002,
 };
 
 
@@ -283,6 +291,9 @@ struct level_info_t
 	int			sucktime;
 	DWORD		flags;
 	DWORD		flags2;
+	// [BB]
+	DWORD		flagsZA;
+
 	FString		Music;
 	FString		LevelName;
 	SBYTE		WallVertLight, WallHorizLight;
@@ -329,6 +340,9 @@ struct level_info_t
 	TArray<FSpecialAction> specialactions;
 
 	TArray<FSoundID> PrecacheSounds;
+
+	//[BL] Link a sectinfo to a map
+	SectInfo	SectorInfo;
 
 	level_info_t() 
 	{ 
@@ -396,6 +410,8 @@ struct FLevelLocals
 
 	DWORD		flags;
 	DWORD		flags2;
+	// [BB]
+	DWORD		flagsZA;
 
 	DWORD		fadeto;					// The color the palette fades to (usually black)
 	DWORD		outsidefog;				// The fog for sectors with sky ceilings
@@ -510,12 +526,17 @@ void G_ChangeLevel(const char *levelname, int position, int flags, int nextSkill
 void G_StartTravel ();
 void G_FinishTravel ();
 
+// [BC]
+bool G_AllowTravel( void );
+
 void G_DoLoadLevel (int position, bool autosave);
 
 void G_InitLevelLocals (void);
 
 void G_AirControlChanged ();
 
+// [RC] Finds a level given its name.
+level_info_t *FindLevelByName( const char *mapname );
 cluster_info_t *FindClusterInfo (int cluster);
 level_info_t *FindLevelInfo (const char *mapname, bool allowdefault=true);
 level_info_t *FindLevelByNum (int num);

@@ -7,6 +7,9 @@
 #include "g_level.h"
 #include "d_player.h"
 #include "farchive.h"
+// [BB] New #includes.
+#include "doomstat.h"
+#include "sv_commands.h"
 
 
 IMPLEMENT_CLASS (AArmor)
@@ -49,6 +52,11 @@ void ABasicArmor::Tick ()
 
 		if (icon[0] != 0)
 			Icon = TexMan.CheckForTexture (icon, FTexture::TEX_Any);
+
+		// [BB] If the icon is now valid, let the clients know about it. This is necessary because the
+		// clients don't necessarily know the correct SavePercent value.
+		if ( ( NETWORK_GetState( ) == NETSTATE_SERVER ) && Icon.isValid() && Owner && Owner->player )
+			SERVERCOMMANDS_SetPlayerArmor( static_cast<ULONG>( Owner->player - players ) );
 	}
 }
 
@@ -184,6 +192,24 @@ void ABasicArmor::AbsorbDamage (int damage, FName damageType, int &newdamage)
 			}
 		}
 	}
+
+	// Once the armor has absorbed its part of the damage, then apply its damage factor, if any, to the player
+	if ((damage > 0) && (ArmorType != NAME_None)) // BasicArmor is not going to have any damage factor, so skip it.
+	{
+		// This code is taken and adapted from APowerProtection::ModifyDamage().
+		// The differences include not checking for the NAME_None key (doesn't seem appropriate here), 
+		// not using a default value, and of course the way the damage factor info is obtained.
+		const fixed_t *pdf = NULL;
+		DmgFactors *df = PClass::FindClass(ArmorType)->ActorInfo->DamageFactors;
+		if (df != NULL && df->CountUsed() != 0)
+		{
+			pdf = df->CheckKey(damageType);
+			if (pdf != NULL)
+			{
+				damage = newdamage = FixedMul(damage, *pdf);
+			}
+		}
+	}
 	if (Inventory != NULL)
 	{
 		Inventory->AbsorbDamage (damage, damageType, newdamage);
@@ -240,30 +266,54 @@ AInventory *ABasicArmorPickup::CreateCopy (AActor *other)
 bool ABasicArmorPickup::Use (bool pickup)
 {
 	ABasicArmor *armor = Owner->FindInventory<ABasicArmor> ();
+	LONG	lMaxAmount;
 
 	if (armor == NULL)
 	{
 		armor = Spawn<ABasicArmor> (0,0,0, NO_REPLACE);
 		armor->BecomeItem ();
+		armor->SavePercent = SavePercent;
+		armor->Amount = armor->MaxAmount = SaveAmount;
+		armor->Icon = Icon;
 		Owner->AddInventory (armor);
+		return true;
 	}
-	else
+
+	// [BC] Handle max. armor bonuses, and the prosperity rune.
+	lMaxAmount = SaveAmount;
+	if ( Owner->player )
 	{
-		// If you already have more armor than this item gives you, you can't
-		// use it.
-		if (armor->Amount >= SaveAmount + armor->BonusCount)
-		{
-			return false;
-		}
-		// Don't use it if you're picking it up and already have some.
-		if (pickup && armor->Amount > 0 && MaxAmount > 0)
-		{
-			return false;
-		}
+		if ( Owner->player->cheats & CF_PROSPERITY )
+			lMaxAmount = ( deh.BlueAC * 100 ) + 50;
+		else
+			lMaxAmount += armor->BonusCount;
+	}
+
+	// [BC] Changed ">=" to ">" so we can do a check below to potentially pick up armor
+	// that offers the same amount of armor, but a better SavePercent.
+
+	// If you already have more armor than this item gives you, you can't
+	// use it.
+	if (armor->Amount > lMaxAmount)
+	{
+		return false;
+	}
+
+	// [BC] If we have the same amount of the armor we're trying to use, but our armor offers
+	// better protection, don't pick it up.
+	if (( armor->Amount == lMaxAmount ) && ( armor->SavePercent >= SavePercent ))
+		return ( false );
+
+	// Don't use it if you're picking it up and already have some.
+	if (pickup && armor->Amount > 0 && MaxAmount > 0)
+	{
+		return false;
 	}
 	armor->SavePercent = SavePercent;
-	armor->Amount = SaveAmount + armor->BonusCount;
 	armor->MaxAmount = SaveAmount;
+	armor->Amount += SaveAmount;
+	if ( armor->Amount > lMaxAmount )
+		armor->Amount = lMaxAmount;
 	armor->Icon = Icon;
 	armor->MaxAbsorb = MaxAbsorb;
 	armor->MaxFullAbsorb = MaxFullAbsorb;
@@ -345,9 +395,16 @@ bool ABasicArmorBonus::Use (bool pickup)
 		return BonusCount > 0 ? result : true;
 	}
 
+	// [BB] Handle the prosperity rune.
+	int maxAmountPlusBonus;
+	if ( Owner->player && Owner->player->cheats & CF_PROSPERITY )
+		maxAmountPlusBonus = ( deh.BlueAC * 100 ) + 50;
+	else
+		maxAmountPlusBonus = MaxSaveAmount + armor->BonusCount;
+
 	// If you already have more armor than this item can give you, you can't
 	// use it.
-	if (armor->Amount >= MaxSaveAmount + armor->BonusCount)
+	if (armor->Amount >= maxAmountPlusBonus)
 	{
 		return result;
 	}
@@ -362,7 +419,7 @@ bool ABasicArmorBonus::Use (bool pickup)
 		armor->MaxFullAbsorb = MaxFullAbsorb;
 	}
 
-	armor->Amount = MIN(armor->Amount + saveAmount, MaxSaveAmount + armor->BonusCount);
+	armor->Amount = MIN(armor->Amount + saveAmount, maxAmountPlusBonus);
 	armor->MaxAmount = MAX (armor->MaxAmount, MaxSaveAmount);
 	return true;
 }
@@ -490,6 +547,8 @@ bool AHexenArmor::AddArmorToSlot (AActor *actor, int slot, int amount)
 
 void AHexenArmor::AbsorbDamage (int damage, FName damageType, int &newdamage)
 {
+	bool bAbsorbed = false; // [Dusk]
+
 	if (!DamageTypeDefinition::IgnoreArmor(damageType))
 	{
 		fixed_t savedPercent = Slots[0] + Slots[1] + Slots[2] + Slots[3] + Slots[4];
@@ -518,6 +577,10 @@ void AHexenArmor::AbsorbDamage (int damage, FName damageType, int &newdamage)
 					{
 						Slots[i] = 0;
 					}
+
+					// [Dusk] mark down that we need to update the armor
+					// values back to the client afterwards
+					bAbsorbed = true;
 				}
 			}
 			int saved = Scale (damage, savedPercent, 100*FRACUNIT);
@@ -533,5 +596,8 @@ void AHexenArmor::AbsorbDamage (int damage, FName damageType, int &newdamage)
 	{
 		Inventory->AbsorbDamage (damage, damageType, newdamage);
 	}
+
+	if ( bAbsorbed && ( NETWORK_GetState( ) == NETSTATE_SERVER ) ) // [Dusk]
+		SERVERCOMMANDS_SetHexenArmorSlots( Owner->player - players, this );
 }
 
