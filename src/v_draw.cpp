@@ -61,6 +61,9 @@
 #include "d_net.h"
 #include "colormatcher.h"
 #include "r_data/colormaps.h"
+// [BB] New #includes.
+#include "chat.h"
+#include "v_font.h"
 
 // [RH] Stretch values to make a 320x200 image best fit the screen
 // without using fractional steppings
@@ -76,6 +79,9 @@ int CleanXfac_1, CleanYfac_1, CleanWidth_1, CleanHeight_1;
 extern "C" short spanend[MAXHEIGHT];
 
 CVAR (Bool, hud_scale, false, CVAR_ARCHIVE);
+
+// [BB]
+CVAR (Bool, con_scaletext_usescreenratio, false, CVAR_ARCHIVE)
 
 // For routines that take RGB colors, cache the previous lookup in case there
 // are several repetitions with the same color.
@@ -682,6 +688,17 @@ bool DCanvas::ParseDrawTextureTags (FTexture *img, double x, double y, DWORD tag
 
 		case DTA_ColormapStyle:
 			parms->colormapstyle = va_arg(tags, FColormapStyle *);
+			break;
+
+		// [BB]
+		case DTA_UseVirtualScreen:
+			if ( !!va_arg( tags, INTBOOL ) )
+			{
+				parms->virtWidth = con_virtualwidth;
+				parms->virtHeight = con_virtualheight;
+				// [BB]
+				parms->keepratio = con_scaletext_usescreenratio;
+			}
 			break;
 		}
 		tag = va_arg(tags, DWORD);

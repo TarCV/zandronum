@@ -87,6 +87,12 @@ DEFINE_ACTION_FUNCTION(AActor, A_WraithMelee)
 {
 	int amount;
 
+	// [BB] This is server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	// Steal health from target and give to self
 	if (self->CheckMeleeRange() && (pr_stealhealth()<220))
 	{
@@ -98,6 +104,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_WraithMelee)
 
 //============================================================================
 //
+
 // A_WraithFX2 - spawns sparkle tail of missile
 //
 //============================================================================

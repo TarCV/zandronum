@@ -28,6 +28,10 @@
 #include <malloc.h>		// for alloca()
 #endif
 
+// [BB] network.h has to be included before stats.h under Linux.
+// The reason should be investigated.
+#include "network.h"
+
 #include "templates.h"
 #include "m_argv.h"
 #include "m_swap.h"
@@ -68,8 +72,24 @@
 #include "po_man.h"
 #include "r_renderer.h"
 #include "r_data/colormaps.h"
+// [BB] New #includes.
+#include "cooperative.h"
+#include "deathmatch.h"
+#include "duel.h"
+#include "team.h"
+#include "a_doomglobal.h"
+#include "lastmanstanding.h"
+#include "astar.h"
+#include "campaign.h"
+#include "invasion.h"
+#include "survival.h"
+#include "possession.h"
+#include "joinqueue.h"
+#include "cl_demo.h"
+#include "domination.h"
 
-#include "fragglescript/t_fs.h"
+// [BB] New #includes..
+#include "gl/dynlights/gl_dynlight.h"
 
 #define MISSING_TEXTURE_WARN_LIMIT		20
 
@@ -187,6 +207,22 @@ bool		ForceNodeBuild;
 TArray<FPlayerStart> deathmatchstarts (16);
 FPlayerStart		playerstarts[MAXPLAYERS];
 TArray<FPlayerStart> AllPlayerStarts;
+
+// [BC] Temporary team spawn spots.
+TArray<FPlayerStart>	TemporaryTeamStarts( 16 );
+
+// [BC] Generic invasion spawn spots.
+TArray<FPlayerStart>	GenericInvasionStarts( 16 );
+
+// [RC] Possession starts
+TArray<FPlayerStart> PossessionStarts(16);
+
+// [RC] Terminator starts
+TArray<FPlayerStart> TerminatorStarts(16);
+
+// [BB] All player starts, including those for voodoo dolls.
+TArray<FPlayerStart> AllStartsOfPlayer[MAXPLAYERS];
+
 
 static void P_AllocateSideDefs (int count);
 
@@ -639,6 +675,35 @@ void SetTexture (sector_t *sector, int index, int position, const char *name8, F
 		texture = TexMan.GetDefaultTexture();
 	}
 	sector->SetTexture(position, texture);
+}
+
+//===========================================================================
+//
+// [BB] Check if a map with name mapname exists. Also works, if the map is contained in a pk3.
+//
+//===========================================================================
+
+bool P_CheckIfMapExists(const char * mapname){
+	// [BB] P_OpenMapData throws an exception if we open a non-map lump.
+	try {
+		bool mapExists = true;
+		MapData* map = P_OpenMapData( mapname, false );
+		// [BB] P_OpenMapData returns a valid pointer if a lump named mapname exists, no matter
+		// if the lump is a map or not. So we must check if the lump actually contains valid map data.
+		if( ( map == NULL ) || ( ( map->isText == false ) && ( map->Size(ML_VERTEXES) == 0 ) ) )
+		{
+			mapExists = false;
+		}
+		// We only created the map pointer to check if we have the map.
+		// We don't need it anymore.
+		delete map;
+		return mapExists;
+	}
+	catch ( CRecoverableError &/*error*/ )
+	{
+		// [BB] Opening the lump apparently failed, so the map doesn't exist.
+		return false;
+	}
 }
 
 //===========================================================================
@@ -1504,6 +1569,13 @@ void P_LoadSectors (MapData *map, FMissingTextureTracker &missingtex)
 
 	for (i = 0; i < numsectors; i++, ss++, ms++)
 	{
+		// [BC] Store changes for flats, height, and light. If these change over the course of
+		// the level, tell new clients about them.
+		ss->bFlatChange = false;
+		ss->bFloorHeightChange = false;
+		ss->bCeilingHeightChange = false;
+		ss->bLightChange = false;
+
 		ss->e = &sectors[0].e[i];
 		if (!map->HasBehavior) ss->Flags |= SECF_FLOORDROP;
 		ss->SetPlaneTexZ(sector_t::floor, LittleShort(ms->floorheight)<<FRACBITS);
@@ -1562,6 +1634,10 @@ void P_LoadSectors (MapData *map, FMissingTextureTracker &missingtex)
 		ss->friction = ORIG_FRICTION;
 		ss->movefactor = ORIG_FRICTION_FACTOR;
 		ss->sectornum = i;
+
+		// [Dusk] Init 3d midtex move counter
+		if ( ss->e )
+			ss->e->Midtex.Floor.MoveDistance = ss->e->Midtex.Ceiling.MoveDistance = 0;
 	}
 	delete[] msp;
 }
@@ -1676,7 +1752,9 @@ AActor *SpawnMapThing(int index, FMapThing *mt, int position)
 			index, mt->x>>FRACBITS, mt->y>>FRACBITS, mt->z>>FRACBITS, mt->type, mt->flags, 
 			spawned? spawned->GetClass()->TypeName.GetChars() : "(none)");
 	}
+	/*
 	T_AddSpawnedThing(spawned);
+	*/
 	return spawned;
 }
 
@@ -1857,9 +1935,17 @@ void P_SpawnThings (int position)
 	}
 	for(int i=0; i<MAXPLAYERS; i++)
 	{
+		// [BB] If the map has voodoo dolls and we want to use them online, we need to spawn them now.
+		// NOTE: The server didn't spawn any players so far.
+		// [BB] When we are using unassigned voodoo dolls, we have to enforce the spawning
+		// of all dolls for all players (even those who are not in the game) now.
+		COOP_SpawnVoodooDollsForPlayerIfNecessary ( i, sv_coopunassignedvoodoodolls );
 		if (playeringame[i] && players[i].mo != NULL)
 			P_PlayerStartStomp(players[i].mo);
 	}
+	// [BB] When initially spawning the voodoo dolls, we also need to clear the stored pickups
+	// of the unassigned dolls.
+	COOP_ClearStoredUVDPickups();
 }
 
 
@@ -2014,6 +2100,9 @@ void P_FinishLoadingLineDef(line_t *ld, int alpha)
 		ld->sidedef[1]->TexelLength = len;
 	}
 
+	// [BC] Back up the line's alpha here.
+	ld->SavedAlpha = ld->Alpha;
+
 	switch (ld->special)
 	{						// killough 4/11/98: handle special types
 		int j;
@@ -2035,10 +2124,17 @@ void P_FinishLoadingLineDef(line_t *ld, int alpha)
 		if (!ld->args[0])
 		{
 			ld->Alpha = alpha;
+
+			// [BC] Back up the line's alpha here.
+			ld->SavedAlpha = ld->Alpha;
+
 			if (additive)
 			{
 				ld->flags |= ML_ADDTRANS;
 			}
+
+			// [Dusk] back up the line's flags here
+			ld->SavedFlags = ld->flags;
 		}
 		else
 		{
@@ -2047,14 +2143,25 @@ void P_FinishLoadingLineDef(line_t *ld, int alpha)
 				if (lines[j].id == ld->args[0])
 				{
 					lines[j].Alpha = alpha;
+
+					// [BC] Back up the line's alpha here.
+					lines[j].SavedAlpha = lines[j].Alpha;
+
 					if (additive)
 					{
 						lines[j].flags |= ML_ADDTRANS;
 					}
+
+					// [Dusk] back up the line's flags here
+					lines[j].SavedFlags = lines[j].flags;
 				}
 			}
 		}
 		ld->special = 0;
+
+		// [BC] Erase the line's backed up special.
+		ld->SavedSpecial = ld->special;
+
 		break;
 	}
 }
@@ -2166,6 +2273,9 @@ void P_LoadLineDefs (MapData * map)
 		if (level.flags2 & LEVEL2_CLIPMIDTEX) ld->flags |= ML_CLIP_MIDTEX;
 		if (level.flags2 & LEVEL2_WRAPMIDTEX) ld->flags |= ML_WRAP_MIDTEX;
 		if (level.flags2 & LEVEL2_CHECKSWITCHRANGE) ld->flags |= ML_CHECKSWITCHRANGE;
+
+		// [BC] Backup certain properties of the line.
+		GAME_BackupLineProperties ( ld );
 	}
 	delete[] mldf;
 }
@@ -2262,6 +2372,9 @@ void P_LoadLineDefs2 (MapData * map)
 			ld->activation = SPAC_Impact | SPAC_PCross;
 		}
 		ld->flags &= ~ML_SPAC_MASK;
+
+		// [BC] Backup certain properties of the line.
+		GAME_BackupLineProperties ( ld );
 	}
 	delete[] mldf;
 }
@@ -2574,6 +2687,11 @@ void P_ProcessSideTextures(bool checktranmap, side_t *sd, sector_t *sec, mapside
 		SetTexture(sd, side_t::bottom, msd->bottomtexture, missingtex);
 		break;
 	}
+
+	// [BC/BB] Backup certain properties.
+	sd->SavedTopTexture = sd->GetTexture(side_t::top);
+	sd->SavedMidTexture = sd->GetTexture(side_t::mid);
+	sd->SavedBottomTexture = sd->GetTexture(side_t::bottom);
 }
 
 // killough 4/4/98: delay using texture names until
@@ -3047,6 +3165,14 @@ void P_LoadBlockMap (MapData * map)
 	blocklinks = new FBlockNode *[count];
 	memset (blocklinks, 0, count*sizeof(*blocklinks));
 	blockmap = blockmaplump+4;
+
+	// [BC] Also, build the node list for the bot pathing module.
+	if (( NETWORK_InClientMode() == false ) &&
+		(( level.flagsZA & LEVEL_ZA_NOBOTNODES ) == false ) &&
+		(( NETWORK_GetState( ) != NETSTATE_SERVER ) || ( sv_disallowbots == false )))
+	{
+		ASTAR_BuildNodes( );
+	}
 }
 
 
@@ -3384,6 +3510,208 @@ void P_GetPolySpots (MapData * map, TArray<FNodeBuilder::FPolyStart> &spots, TAr
 	}
 }
 
+//=============================================================================
+//
+// [BC] P_RemoveThingLocal
+//
+// Destroys an individual thing, and properly updates the level total monster
+// and item count. [BB] Doesn't do anything network related (unlike P_RemoveThing)
+//
+//=============================================================================
+
+void P_RemoveThingLocal( AActor *pActor )
+{
+	if ( pActor->CountsAsKill( ))
+		level.total_monsters--;
+	if ( pActor->flags & MF_COUNTITEM )
+		level.total_items--;
+
+	// Destroy the thing.
+	pActor->Destroy( );
+}
+
+//
+// [BC] P_RemoveThings
+//
+// Remove any items that were spawned that shouldn't be due to game mode
+void P_RemoveThings( void )
+{
+	AActor						*pActor;
+	TThinkerIterator<AActor>	Iterator;
+
+	// [BB] Buckshot only makes sense if this is a Doom, but not a Doom 1 game.
+	const bool bBuckshotPossible = ((gameinfo.gametype == GAME_Doom) && (gameinfo.flags & GI_MAPxx) );
+
+	while ( (pActor = Iterator.Next( )))
+	{
+		// No special items are spawned during instagib, shotgun battle, or LMS.
+		if ((( instagib || (buckshot && bBuckshotPossible) ) && ( deathmatch || teamgame )) || ( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode( )) & GMF_DONTSPAWNMAPTHINGS ))
+		{
+			if ( pActor->flags & MF_SPECIAL )
+			{
+				// Don't destroy flags in teamgame modes.
+				if ((( ctf || oneflagctf || skulltag ) && ( pActor->GetClass( )->IsDescendantOf( PClass::FindClass( "TeamItem" )))) == false )
+				{
+					P_RemoveThingLocal( pActor );
+					continue;
+				}
+			}
+		}
+
+		// don't spawn keycards and players in deathmatch
+		if ( deathmatch && ( pActor->flags & MF_NOTDMATCH ))
+		{
+			P_RemoveThingLocal( pActor );
+			continue;
+		}
+
+		// [RH] don't spawn extra weapons in coop if so desired
+		if (( NETWORK_GetState( ) != NETSTATE_SINGLE ) &&
+			( deathmatch == false ) &&
+			( teamgame == false ) &&
+			( dmflags & DF_NO_COOP_WEAPON_SPAWN ))
+		{
+			if ( pActor->GetClass( )->IsDescendantOf( RUNTIME_CLASS( AWeapon )))
+			{
+				if (( pActor->SpawnFlags & ( MTF_DEATHMATCH|MTF_SINGLE )) == MTF_DEATHMATCH )
+				{
+					P_RemoveThingLocal( pActor );
+					continue;
+				}
+			}
+		}
+
+		// don't spawn any monsters if -nomonsters
+		if (( dmflags & DF_NO_MONSTERS ) &&
+			( pActor->flags3 & MF3_ISMONSTER ))
+		{
+			P_RemoveThingLocal( pActor );
+			continue;
+		}
+
+		// [RH] Other things that shouldn't be spawned depending on dmflags
+		if ( deathmatch || teamgame || alwaysapplydmflags )
+		{
+			if ( dmflags & DF_NO_HEALTH )
+			{
+				if (( pActor->GetClass( )->IsDescendantOf( RUNTIME_CLASS( AHealth ))) ||
+					( pActor->GetClass( )->IsDescendantOf( RUNTIME_CLASS( AMaxHealth ))))
+				{
+					P_RemoveThingLocal( pActor );
+					continue;
+				}
+				if (( pActor->GetClass( )->TypeName == NAME_Berserk ) ||
+					( pActor->GetClass( )->TypeName == NAME_Soulsphere ) ||
+					( pActor->GetClass( )->TypeName == NAME_Megasphere ))
+				{
+					P_RemoveThingLocal( pActor );
+					continue;
+				}
+			}
+/*
+			if ( dmflags & DF_NO_ITEMS )
+			{
+				if ( pActor->GetClass( )->IsDescendantOf( RUNTIME_CLASS( AArtifact )))
+				{
+					pActor->Destroy( );
+					continue;
+				}
+			}
+*/
+			if ( dmflags & DF_NO_ARMOR )
+			{
+				if ( pActor->GetClass( )->IsDescendantOf( RUNTIME_CLASS( AArmor )))
+				{
+					P_RemoveThingLocal( pActor );
+					continue;
+				}
+				if ( pActor->GetClass( )->TypeName == NAME_Megasphere )
+				{
+					P_RemoveThingLocal( pActor );
+					continue;
+				}
+			}
+
+			if ( dmflags2 & DF2_NO_RUNES )
+			{
+				if ( pActor->GetClass( )->IsDescendantOf( PClass::FindClass( "RuneGiver" )))
+				{
+					P_RemoveThingLocal( pActor );
+					continue;
+				}
+			}
+		}
+
+		// check for appropriate game type
+		{
+			LONG	lMask;
+
+			if ( deathmatch )
+			{
+				lMask = MTF_DEATHMATCH;
+			}
+			// [TIHan/BB] only spawn single-player actors in coop if desired.
+			else if ( ( NETWORK_GetState( ) != NETSTATE_SINGLE ) && !(zadmflags & ZADF_COOP_SP_ACTOR_SPAWN) )
+			{
+				lMask = MTF_COOPERATIVE;
+			}
+			else
+			{
+				lMask = MTF_SINGLE;
+			}
+
+			// If an object was spawned from a mapthing, mapflags will be > 0.
+			if (( pActor->SpawnFlags > 0 ) && (( pActor->SpawnFlags & lMask ) == false ))
+			{
+				// [BB] We may not delete the dynamic lights here!
+				// If we do, the game crashes directly in a cooperative skirmish.
+				if( !pActor->IsKindOf( RUNTIME_CLASS( ADynamicLight ) ) )
+					P_RemoveThingLocal( pActor );
+				continue;
+			}
+		}
+		
+		// [BC] I don't see this point of this block. It seems like it does the same thing
+		// as an earlier block, and I don't see it in the original ZDoom code from
+		// P_SpawnMapThing(). Therefore, I'm commenting it out.
+/*
+		// [RH] don't spawn extra weapons in coop
+		if (( NETWORK_GetState( ) != NETSTATE_SINGLE ) && (( deathmatch || teamgame ) == false ))
+		{
+			if (( pActor->SpawnFlags & MTF_COOPERATIVE ) == false )
+			{
+				// [BB] We may not delete the dynamic lights here!
+				// If we do, the game crashes directly in a cooperative skirmish.
+				if( !pActor->IsKindOf( RUNTIME_CLASS( ADynamicLight ) ) )
+					pActor->Destroy( );
+				continue;
+			}
+		}
+*/
+		// I haven't seen a need for this block of code. If I get complaints, I'll uncomment it.
+/*
+		if ( NETWORK_GetState( ) == NETSTATE_SINGLE && ( deathmatch || teamgame ) == false )
+		{
+			if (( pActor->mapflags & MTF_SINGLE ) == false )
+			{
+				pActor->Destroy( );
+				continue;
+			}
+		}
+*/
+		// If we're in a team game, and it's not one flag CTF, make sure
+		// to delete the white flags, which are used for one flag CTF.
+		if (( teamgame ) && ( oneflagctf == false ))
+		{
+			if ( pActor->IsKindOf( PClass::FindClass( "WhiteFlag" )))
+			{
+				P_RemoveThingLocal( pActor );
+				continue;
+			}
+		}
+	}
+}
+
 extern polyblock_t **PolyBlockMap;
 
 void P_FreeLevelData ()
@@ -3431,6 +3759,13 @@ void P_FreeLevelData ()
 	}
 	if (subsectors != NULL)
 	{
+		// [BB] This case is not handled by gl_CleanLevelData, but it is crucial to do this.
+		if ( gamesubsectors == subsectors )
+		{
+			gamesubsectors = NULL;
+			numgamesubsectors = 0;
+		}
+
 		for (int i = 0; i < numsubsectors; ++i)
 		{
 			if (subsectors[i].BSP != NULL)
@@ -3442,6 +3777,12 @@ void P_FreeLevelData ()
 	}
 	if (nodes != NULL)
 	{
+		// [BB] This case is not handled by gl_CleanLevelData, but it is crucial to do this.
+		if ( gamenodes == nodes )
+		{
+			gamenodes = NULL;
+			numgamenodes = 0;
+		}
 		delete[] nodes;
 	}
 	subsectors = gamesubsectors = NULL;
@@ -3515,6 +3856,10 @@ void P_FreeLevelData ()
 		level.Scrolls = NULL;
 	}
 	P_ClearUDMFKeys();
+
+	// [BC] Clear the bots' nodes.
+	if ( ASTAR_IsInitialized( ))
+		ASTAR_ClearNodes( );
 }
 
 extern msecnode_t *headsecnode;
@@ -3605,6 +3950,14 @@ void P_SetupLevel (char *lumpname, int position)
 	}
 	translationtables[TRANSLATION_LevelScripted].Clear();
 
+	// [BC] Also clear out the edited translation list that servers keep.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		SERVER_ClearEditedTranslations( );
+		// [BB] And the stored sector links.
+		SERVER_ClearSectorLinks( );
+	}
+
 	// Initial height of PointOfView will be set by player think.
 	players[consoleplayer].viewz = 1; 
 
@@ -3687,7 +4040,9 @@ void P_SetupLevel (char *lumpname, int position)
 		{
 			ForceNodeBuild = true;
 		}
+		/* [BB] ST doesn't do this.
 		T_LoadScripts(map);
+		*/
 
 		if (!map->HasBehavior || map->isText)
 		{
@@ -3884,7 +4239,8 @@ void P_SetupLevel (char *lumpname, int position)
 	bool BuildGLNodes;
 	if (ForceNodeBuild)
 	{
-		BuildGLNodes = RequireGLNodes || multiplayer || demoplayback || demorecording || genglnodes;
+		// [BB] multiplayer -> ( NETWORK_GetState( ) != NETSTATE_SINGLE )
+		BuildGLNodes = RequireGLNodes || ( NETWORK_GetState( ) != NETSTATE_SINGLE ) || demoplayback || demorecording || genglnodes;
 
 		startTime = I_FPSTime ();
 		TArray<FNodeBuilder::FPolyStart> polyspots, anchors;
@@ -3993,6 +4349,37 @@ void P_SetupLevel (char *lumpname, int position)
 	deathmatchstarts.Clear();
 	AllPlayerStarts.Clear();
 	memset(playerstarts, 0, sizeof(playerstarts));
+	TemporaryTeamStarts.Clear( );
+	GenericInvasionStarts.Clear( );
+	PossessionStarts.Clear();
+	TerminatorStarts.Clear();
+	for (i = 0; i < MAXPLAYERS; ++i)
+		AllStartsOfPlayer[i].Clear();
+
+	for ( ULONG i = 0; i < teams.Size( ); i++ )
+		teams[i].TeamStarts.Clear( );
+
+	for ( i = 0; i < MAXPLAYERS; i++ )
+		playerstarts[i].type = 0;
+
+	// [BB] In case the map has invasion spots, we automatically switch to invasion. Since invasion allows
+	// 3D floors, we have to check this before calling P_Spawn3DFloors() and can't wait for GAME_CheckMode to do this.
+	if ( invasion == false )
+	{
+		const int numThings = !buildmap ? MapThingsConverted.Size() : numbuildthings;
+		// [BB] Make use of the TArray memory layout, i.e. internally the data is just stored like in a C array.
+		const FMapThing *pThings = ( !buildmap && MapThingsConverted.Size() > 0 ) ? &MapThingsConverted[0] : buildthings;
+		for ( int i = 0; i < numThings; ++i)
+		{
+			if ( INVASION_IsMapThingInvasionSpot ( &pThings[i] ) )
+			{
+				UCVarValue Val;
+				Val.Bool = true;
+				invasion.ForceSet( Val, CVAR_Bool );
+				break;
+			}
+		}
+	}
 
 	if (!buildmap)
 	{
@@ -4036,7 +4423,24 @@ void P_SetupLevel (char *lumpname, int position)
 	P_SpawnSpecials ();
 
 	// This must be done BEFORE the PolyObj Spawn!!!
-	Renderer->PreprocessLevel();
+	// [BB] The server may not execute this
+	if ( NETWORK_GetState( ) != NETSTATE_SERVER )
+		Renderer->PreprocessLevel();
+	// [BB] but still needs to initialize some stuff.
+	else
+	{
+		for ( int i = 0; i < numvertexes; ++i )
+		{
+			vertexes[i].numheights=0;
+			vertexes[i].numsectors=0;
+		}
+	}
+
+	// [BC] Now that all the items have been loaded, potentially set the game mode.
+	GAME_CheckMode( );
+
+	// [BC] Delete things that shouldn't have been spawned depending on the game mode.
+	P_RemoveThings( );
 
 	times[16].Clock();
 	if (reloop) P_LoopSidedefs (false);
@@ -4047,6 +4451,7 @@ void P_SetupLevel (char *lumpname, int position)
 	delete[] sidetemp;
 	sidetemp = NULL;
 
+	/* [BC/BB] Zandronum handles spawning differently.
 	// if deathmatch, randomly spawn the active players
 	if (deathmatch)
 	{
@@ -4072,6 +4477,88 @@ void P_SetupLevel (char *lumpname, int position)
 			}
 		}
 	}
+	*/
+	for ( i = 0; i < MAXPLAYERS; i++ )
+	{
+		if ( playeringame[i] == false )
+			continue;
+
+		if (( NETWORK_GetState( ) != NETSTATE_SINGLE ) ||
+			( deathmatch ) ||
+			( teamgame ))
+		{
+			players[i].mo = NULL;
+		}
+
+		// Clients don't do anything else.
+		if ( NETWORK_InClientMode() )
+			continue;
+
+		// If the player should spawn as a spectator, set that flag now.
+		{
+//			if ( PLAYER_ShouldSpawnAsSpectator( &players[i] ))
+//				players[i].bSpectating = true;
+			if (( duel == false ) || ( DUEL_IsDueler( i ) == false ))
+			{
+				// If the player should spawn as a spectator, mark them as being a spectator.
+				// Otherwise, let their spectator status persist.
+				if ( PLAYER_ShouldSpawnAsSpectator( &players[i] ))
+				{
+					players[i].bSpectating = true;
+
+					// [BB] If we turned a player on a team into a spectator, remove the team affiliation.
+					if ( players[i].bOnTeam && ( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode( )) & GMF_PLAYERSONTEAMS ) )
+						PLAYER_SetTeam( &players[i], teams.Size( ), true );
+
+					// [BB] In duel the players should keep their position in line after a "changemap"
+					// map change.
+					if ( duel == false )
+					{
+						// [BB] If the player was in the join queue, remove him.
+						JOINQUEUE_RemovePlayerFromQueue ( i, false );
+						// [BB] Tell the client about the removal.
+						if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+							SERVERCOMMANDS_SetQueuePosition( i, SVCF_ONLYTHISCLIENT );
+					}
+
+					// If this bot spawned as a spectator, let him know.
+					if ( players[i].pSkullBot )
+						players[i].pSkullBot->PostEvent( BOTEVENT_SPECTATING );
+				}
+			}
+		}
+
+		if ( deathmatch )
+		{
+			// Set the player's state to PST_REBORNNOINVENTORY so they everything is cleared (weapons, etc.)
+			if (( players[i].playerstate != PST_ENTER ) && ( players[i].playerstate != PST_ENTERNOINVENTORY ))
+				players[i].playerstate = PST_REBORNNOINVENTORY;
+			G_DeathMatchSpawnPlayer( i, false );
+			continue;
+		}
+
+		if ( teamgame )
+		{
+			// Set the player's state to PST_REBORNNOINVENTORY so they everything is cleared (weapons, etc.)
+			if (( players[i].playerstate != PST_ENTER ) && ( players[i].playerstate != PST_ENTERNOINVENTORY ))
+				players[i].playerstate = PST_REBORNNOINVENTORY;
+
+			// The campaign could have already put them on a team.
+			if ( players[i].bOnTeam )
+			{
+				G_TeamgameSpawnPlayer( i, players[i].ulTeam, false );
+			}
+			else
+				G_TemporaryTeamSpawnPlayer( i, false );
+			continue;
+		}
+
+		if ( NETWORK_GetState( ) != NETSTATE_SINGLE )
+			G_CooperativeSpawnPlayer( i, false );
+	}
+
+	// set up world state
+	//P_SpawnSpecials ();
 
 	// Don't count monsters in end-of-level sectors if option is on
 	if (dmflags2 & DF2_NOCOUNTENDMONST)
@@ -4091,7 +4578,7 @@ void P_SetupLevel (char *lumpname, int position)
 		}
 	}
 
-	T_PreprocessScripts();        // preprocess FraggleScript scripts
+	//T_PreprocessScripts();        // preprocess FraggleScript scripts
 
 	// build subsector connect matrix
 	//	UNUSED P_ConnectSubsectors ();
@@ -4110,10 +4597,11 @@ void P_SetupLevel (char *lumpname, int position)
 	}
 	times[17].Unclock();
 
-	if (deathmatch)
-	{
-		AnnounceGameStart ();
-	}
+	// Reset announcer "frags/points left" variables.
+	ANNOUNCER_AllowNumFragsAndPointsLeftSounds( );
+
+	// Reset the first frag awarded flag.
+	MEDAL_ResetFirstFragAwarded( );
 
 	P_ResetSightCounters (true);
 	//Printf ("free memory: 0x%x\n", Z_FreeMemory());
@@ -4156,7 +4644,52 @@ void P_SetupLevel (char *lumpname, int position)
 		delete[] glsegextras;
 		glsegextras = NULL;
 	}
+
+	// Set these modules' state to "waiting for players", which may or may not begin the next match.
+	// [BB] The clients also need to reset the gamemode state. Otherwise, for instance, when making
+	// a "map" map change during possessions hold countdown to a CTF/ST map, the counter would stay
+	// on the screen of the clients after the map change.
+	{
+		DUEL_SetState( DS_WAITINGFORPLAYERS );
+		LASTMANSTANDING_SetState( LMSS_WAITINGFORPLAYERS );
+		POSSESSION_SetState( PSNS_WAITINGFORPLAYERS );
+		INVASION_SetState( IS_WAITINGFORPLAYERS );
+
+		// [BB] Unless the game is in survival's countdown, we can keep the state (survival allows to
+		// advance to the next map without an additional countdown after the map change).
+		// [BB] We have to reset the state though when this is a new game.
+		if ( ( SURVIVAL_GetState( ) == SURVS_COUNTDOWN ) || ( gameaction == ga_newgame ) )
+			SURVIVAL_SetState( SURVS_WAITINGFORPLAYERS );
+	}
+
+	if ( NETWORK_InClientMode() == false )
+	{
+		if ( duel && ( DUEL_GetStartNextDuelOnLevelLoad( ) == true ) && ( CAMPAIGN_InCampaign( ) == false ))
+		{
+			// Send the loser of the duel to the spectators, starting the next duel.
+			DUEL_SendLoserToSpectators( );
+
+			// Reset the flag.
+			DUEL_SetStartNextDuelOnLevelLoad( false );
+
+			// Set number of duels to 0.
+			DUEL_SetNumDuels( 0 );
+		}
+	}
+
+	if ( lastmanstanding || teamlms )
+	{
+		// Reset the flag.
+		if ( NETWORK_InClientMode() == false )
+		{
+			LASTMANSTANDING_SetStartNextMatchOnLevelLoad( false );
+		}
+	}
+
+	// Call Init function to set sector colors if in Domination
+	DOMINATION_Init();
 }
+
 
 
 

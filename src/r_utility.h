@@ -94,6 +94,9 @@ struct FCanvasTextureInfo
 	static void Serialize (FArchive &arc);
 	static void Mark();
 
+	// [BC]
+	static void UpdateToClient( ULONG ulClient );
+
 private:
 	static FCanvasTextureInfo *List;
 };

@@ -32,6 +32,10 @@
 **
 */
 
+// [BB] network.h has to be included before stats.h under Linux.
+// The reason should be investigated.
+#include "network.h"
+
 #include "dthinker.h"
 #include "stats.h"
 #include "p_local.h"
@@ -39,11 +43,12 @@
 #include "i_system.h"
 #include "doomerrors.h"
 #include "farchive.h"
+// [BB] New #includes.
+#include "cl_demo.h"
+#include "doomstat.h"
 
 
 static cycle_t ThinkCycles;
-extern cycle_t BotSupportCycles;
-extern int BotWTG;
 
 IMPLEMENT_CLASS (DThinker)
 
@@ -405,8 +410,6 @@ void DThinker::RunThinkers ()
 	int i, count;
 
 	ThinkCycles.Reset();
-	BotSupportCycles.Reset();
-	BotWTG = 0;
 
 	ThinkCycles.Clock();
 
@@ -460,7 +463,14 @@ int DThinker::TickThinkers (FThinkerList *list, FThinkerList *dest)
 
 		if (!(node->ObjectFlags & OF_EuthanizeMe))
 		{ // Only tick thinkers not scheduled for destruction
-			node->Tick();
+			// [BC] Don't tick the consoleplayer's actor in client
+			// mode, because that's done in the main prediction function
+			if (( NETWORK_InClientMode() == false ) ||
+				( node->IsKindOf( RUNTIME_CLASS( AActor )) == false ) ||
+				( static_cast<AActor *>( node ) != players[consoleplayer].mo ))
+			{
+				node->Tick();
+			}
 			node->ObjectFlags &= ~OF_JustSpawned;
 			GC::CheckGC();
 		}

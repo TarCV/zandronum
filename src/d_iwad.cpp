@@ -47,6 +47,9 @@
 #include "v_video.h"
 #include "gameconfigfile.h"
 #include "resourcefiles/resourcefile.h"
+// [BB] New #includes.
+#include "doomerrors.h"
+#include "version.h"
 
 
 CVAR (Bool, queryiwad, true, CVAR_ARCHIVE|CVAR_GLOBALCONFIG);
@@ -512,13 +515,17 @@ int FIWadManager::IdentifyVersion (TArray<FString> &wadfiles, const char *iwad, 
 	}
 
 	if (numwads == 0)
+// [BB] Skulltag uses Rivecoder's IWAD setup screen now (only available under Windows).
+#ifdef _WIN32
+		throw CNoIWADError(); // [RC]
+#else
 	{
 		I_FatalError ("Cannot find a game IWAD (doom.wad, doom2.wad, heretic.wad, etc.).\n"
-					  "Did you install ZDoom properly? You can do either of the following:\n"
+					  "Did you install "GAMENAME" properly? You can do either of the following:\n"
 					  "\n"
 #if defined(_WIN32)
-					  "1. Place one or more of these wads in the same directory as ZDoom.\n"
-					  "2. Edit your zdoom-username.ini and add the directories of your iwads\n"
+					  "1. Place one or more of these wads in the same directory as "GAMENAME".\n"
+					  "2. Edit your "GAMENAMELOWERCASE"-username.ini and add the directories of your iwads\n"
 					  "to the list beneath [IWADSearch.Directories]");
 #elif defined(__APPLE__)
 					  "1. Place one or more of these wads in ~/Library/Application Support/zdoom/\n"
@@ -530,6 +537,7 @@ int FIWadManager::IdentifyVersion (TArray<FString> &wadfiles, const char *iwad, 
 					  "iwads to the list beneath [IWADSearch.Directories]");
 #endif
 	}
+#endif
 
 	pickwad = 0;
 
@@ -612,4 +620,19 @@ const FIWADInfo *FIWadManager::FindIWAD(TArray<FString> &wadfiles, const char *i
 	}
 	I_SetIWADInfo();
 	return iwad_info;
+}
+
+//==========================================================================
+//
+// [RC] DoesDirectoryHaveIWADs
+//
+// Checks if a directory contains any IWADs.
+// 
+//==========================================================================
+
+bool FIWadManager::DoesDirectoryHaveIWADs( const char *pszPath )
+{
+	TArray<WadStuff> wads;
+	wads.Resize(mIWadNames.Size());
+	return ( CheckIWAD( pszPath, &wads[0] ) > 0 );
 }
