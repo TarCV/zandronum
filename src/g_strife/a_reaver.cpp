@@ -13,12 +13,23 @@ static FRandom pr_reaverattack ("ReaverAttack");
 
 DEFINE_ACTION_FUNCTION(AActor, A_ReaverRanged)
 {
+	// [BC] This is handled server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (self->target != NULL)
 	{
 		angle_t bangle;
 		int pitch;
 
 		A_FaceTarget (self);
+
+		// [BC] If we're the server, play the sound to clients.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SoundActor( self, CHAN_WEAPON, "reaver/attack", 1, ATTN_NORM );
+
 		S_Sound (self, CHAN_WEAPON, "reaver/attack", 1, ATTN_NORM);
 		bangle = self->angle;
 		pitch = P_AimLineAttack (self, bangle, MISSILERANGE);

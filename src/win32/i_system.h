@@ -71,6 +71,10 @@ fixed_t I_GetTimeFrac (uint32 *ms);
 // Return a seed value for the RNG.
 unsigned int I_MakeRNGSeed();
 
+float	I_GetTimeFloat( void );
+// [BB] Use I_MSTime instead, since it does the same as I_GetMSElapsed did and is also available under Linux.
+//int		I_GetMSElapsed( void );
+void	I_Sleep( int iMS );
 
 //
 // Called by D_DoomLoop,
@@ -124,8 +128,15 @@ void I_PaintConsole (void);
 // Print a console string
 void I_PrintStr (const char *cp);
 
+// [RC] Get the key associated with the Welcome/IWAD box.
+int I_GetWelcomeScreenKeyCode( void );
+void I_GetWelcomeScreenKeyString( char *pszString );
+
 // Set the title string of the startup window
 void I_SetIWADInfo ();
+
+// [RC] Show a helpful dialog when no IWADs were found.
+void I_ShowNoIWADsScreen( void );
 
 // Pick from multiple IWADs to use
 int I_PickIWad (WadStuff *wads, int numwads, bool queryiwad, int defaultiwad);
@@ -143,6 +154,9 @@ void I_SetWndProc();
 // [RH] Checks the registry for Steam's install path, so we can scan its
 // directories for IWADs if the user purchased any through Steam.
 FString I_GetSteamPath();
+
+// [RC] Lunches the path given. This was encapsulated to make wragling with #includes easier.
+void I_RunProgram( const char *szPath );
 
 // Damn Microsoft for doing Get/SetWindowLongPtr half-assed. Instead of
 // giving them proper prototypes under Win32, they are just macros for

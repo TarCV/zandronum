@@ -43,6 +43,8 @@
 #include "thingdef/thingdef.h"
 #include "i_system.h"
 
+// [BB] New #includes.
+#include "network.h"
 
 #include "gl/renderer/gl_renderer.h"
 #include "gl/data/gl_data.h"
@@ -181,6 +183,13 @@ void ADynamicLight::PostBeginPlay()
 //==========================================================================
 void ADynamicLight::Activate(AActor *activator)
 {
+	// [BB] The server never displays dynamic light, so just keep them deactivated.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		flags2 |= MF2_DORMANT;
+		return;
+	}
+
 	//Super::Activate(activator);
 	flags2&=~MF2_DORMANT;	
 

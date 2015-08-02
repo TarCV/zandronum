@@ -81,8 +81,28 @@ DEFINE_ACTION_FUNCTION(AActor, A_CFlameAttack)
 		if (!weapon->DepleteAmmo (weapon->bAltFire))
 			return;
 	}
+
+	// [BC] Weapons are handled by the server.
+	if ( NETWORK_InClientMode() )
+	{
+		S_Sound (self, CHAN_WEAPON, "ClericFlameFire", 1, ATTN_NORM);
+		return;
+	}
+
 	P_SpawnPlayerMissile (self, RUNTIME_CLASS(ACFlameMissile));
+	
+	// [BC] Apply spread.
+	if ( player->cheats2 & CF2_SPREAD )
+	{
+		P_SpawnPlayerMissile( self, RUNTIME_CLASS(ACFlameMissile), self->angle + ( ANGLE_45 / 3 ));
+		P_SpawnPlayerMissile( self, RUNTIME_CLASS(ACFlameMissile), self->angle - ( ANGLE_45 / 3 ));
+	}
+
 	S_Sound (self, CHAN_WEAPON, "ClericFlameFire", 1, ATTN_NORM);
+
+	// [BC] If we're the server, tell other clients to make the sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_WeaponSound( ULONG( player - players ), "ClericFlameFire", ULONG( player - players ), SVCF_SKIPTHISCLIENT );
 }
 
 //============================================================================
@@ -115,6 +135,13 @@ DEFINE_ACTION_FUNCTION(AActor, A_CFlameMissile)
 	
 	self->renderflags &= ~RF_INVISIBLE;
 	S_Sound (self, CHAN_BODY, "ClericFlameExplode", 1, ATTN_NORM);
+
+	// [BC] Let the server handle this.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	AActor *BlockingMobj = self->BlockingMobj;
 	if (BlockingMobj && BlockingMobj->flags&MF_SHOOTABLE)
 	{ // Hit something, so spawn the flame circle around the thing
@@ -133,6 +160,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_CFlameMissile)
 				mo->velx = mo->special1 = FixedMul(FLAMESPEED, finecosine[an]);
 				mo->vely = mo->special2 = FixedMul(FLAMESPEED, finesine[an]);
 				mo->tics -= pr_missile()&3;
+
+				// [BC] If we're the server, spawn this to clients.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_SpawnThingExact( mo );
 			}
 			mo = Spawn ("CircleFlame", BlockingMobj->x-FixedMul(dist, finecosine[an]),
 				BlockingMobj->y-FixedMul(dist, finesine[an]), 
@@ -144,6 +175,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_CFlameMissile)
 				mo->velx = mo->special1 = FixedMul(-FLAMESPEED, finecosine[an]);
 				mo->vely = mo->special2 = FixedMul(-FLAMESPEED, finesine[an]);
 				mo->tics -= pr_missile()&3;
+
+				// [BC] If we're the server, spawn this to clients.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_SpawnThingExact( mo );
 			}
 		}
 		self->SetState (self->SpawnState);

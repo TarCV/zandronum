@@ -45,6 +45,13 @@
 #include "d_dehacked.h"
 #include "g_level.h"
 #include "teaminfo.h"
+// [BB] New #includes.
+#include "cl_demo.h"
+#include "cooperative.h"
+#include "deathmatch.h"
+#include "network.h"
+#include "team.h"
+#include "invasion.h"
 
 #include "gi.h"
 
@@ -564,7 +571,9 @@ bool P_Move (AActor *actor)
 
 	if (!try_ok)
 	{
-		if (((actor->flags6 & MF6_CANJUMP)||(actor->flags & MF_FLOAT)) && tm.floatok)
+		// [BC] Don't float in client mode.
+		if (((actor->flags6 & MF6_CANJUMP)||(actor->flags & MF_FLOAT)) && tm.floatok &&
+			( NETWORK_InClientMode() == false ))
 		{ // must adjust height
 			fixed_t savedz = actor->z;
 
@@ -577,6 +586,10 @@ bool P_Move (AActor *actor)
 			// [RH] Check to make sure there's nothing in the way of the float
 			if (P_TestMobjZ (actor))
 			{
+				// [BB] If we're the server, tell clients to update the thing's Z position.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_MoveThingExact( actor, CM_Z );
+
 				actor->flags |= MF_INFLOAT;
 				return true;
 			}
@@ -590,6 +603,13 @@ bool P_Move (AActor *actor)
 
 		// open any specials
 		actor->movedir = DI_NODIR;
+
+		// [BC] Set the thing's movement direction. Also, update the thing's
+		// position.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			SERVERCOMMANDS_MoveThing( actor, CM_X|CM_Y|CM_Z|CM_MOVEDIR );
+		}
 
 		// if the special is not a door that can be opened, return false
 		//
@@ -696,7 +716,16 @@ void P_DoNewChaseDir (AActor *actor, fixed_t deltax, fixed_t deltay)
 	{
 		actor->movedir = diags[((deltay<0)<<1) + (deltax>0)];
 		if (actor->movedir != turnaround && P_TryWalk(actor))
+		{
+			// [BC] Set the thing's movement direction. Also, update the thing's
+			// position.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			{
+				SERVERCOMMANDS_MoveThing( actor, CM_X|CM_Y|CM_Z|CM_MOVEDIR );
+			}
+
 			return;
+		}
 	}
 
 	// try other directions
@@ -718,6 +747,13 @@ void P_DoNewChaseDir (AActor *actor, fixed_t deltax, fixed_t deltay)
 		actor->movedir = d[1];
 		if (P_TryWalk (actor))
 		{
+			// [BC] Set the thing's movement direction. Also, update the thing's
+			// position.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			{
+				SERVERCOMMANDS_MoveThing( actor, CM_X|CM_Y|CM_Z|CM_MOVEDIR );
+			}
+
 			// either moved forward or attacked
 			return;
 		}
@@ -727,7 +763,16 @@ void P_DoNewChaseDir (AActor *actor, fixed_t deltax, fixed_t deltay)
 	{
 		actor->movedir = d[2];
 		if (P_TryWalk (actor))
+		{
+			// [BC] Set the thing's movement direction. Also, update the thing's
+			// position.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			{
+				SERVERCOMMANDS_MoveThing( actor, CM_X|CM_Y|CM_Z|CM_MOVEDIR );
+			}
+
 			return;
+		}
 	}
 
 	if (!(actor->flags5 & MF5_AVOIDINGDROPOFF))
@@ -737,7 +782,16 @@ void P_DoNewChaseDir (AActor *actor, fixed_t deltax, fixed_t deltay)
 		{
 			actor->movedir = olddir;
 			if (P_TryWalk (actor))
+			{
+				// [BC] Set the thing's movement direction. Also, update the thing's
+				// position.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				{
+					SERVERCOMMANDS_MoveThing( actor, CM_X|CM_Y|CM_Z|CM_MOVEDIR );
+				}
+
 				return;
+			}
 		}
 	}
 
@@ -750,7 +804,16 @@ void P_DoNewChaseDir (AActor *actor, fixed_t deltax, fixed_t deltay)
 			{
 				actor->movedir = tdir;
 				if ( P_TryWalk(actor) )
+				{
+					// [BC] Set the thing's movement direction. Also, update the thing's
+					// position.
+					if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					{
+						SERVERCOMMANDS_MoveThing( actor, CM_X|CM_Y|CM_Z|CM_MOVEDIR );
+					}
+
 					return;
+				}
 			}
 		}
 	}
@@ -762,7 +825,16 @@ void P_DoNewChaseDir (AActor *actor, fixed_t deltax, fixed_t deltay)
 			{
 				actor->movedir = tdir;
 				if ( P_TryWalk(actor) )
+				{
+					// [BC] Set the thing's movement direction. Also, update the thing's
+					// position.
+					if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					{
+						SERVERCOMMANDS_MoveThing( actor, CM_X|CM_Y|CM_Z|CM_MOVEDIR );
+					}
+
 					return;
+				}
 			}
 		}
 	}
@@ -771,10 +843,26 @@ void P_DoNewChaseDir (AActor *actor, fixed_t deltax, fixed_t deltay)
 	{
 		actor->movedir =turnaround;
 		if ( P_TryWalk(actor) )
+		{
+			// [BC] Set the thing's movement direction. Also, update the thing's
+			// position.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			{
+				SERVERCOMMANDS_MoveThing( actor, CM_X|CM_Y|CM_Z|CM_MOVEDIR );
+			}
+
 			return;
+		}
 	}
 
 	actor->movedir = DI_NODIR;	// cannot move
+
+	// [BC] Set the thing's movement direction. Also, update the thing's
+	// position.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		SERVERCOMMANDS_MoveThing( actor, CM_X|CM_Y|CM_Z|CM_MOVEDIR );
+	}
 }
 
 
@@ -975,13 +1063,17 @@ void P_RandomChaseDir (AActor *actor)
 		fixed_t deltax, deltay;
 		dirtype_t d[3];
 
-		if (actor->FriendPlayer != 0)
+		// [BB] Don't try to head towards a spectator.
+		if ( (actor->FriendPlayer != 0 ) && ( players[actor->FriendPlayer - 1].bSpectating == false ) )
 		{
 			player = players[i = actor->FriendPlayer - 1].mo;
 		}
 		else
 		{
-			if (!multiplayer)
+			if ( ( NETWORK_GetState( ) == NETSTATE_SINGLE )
+				// [BB] On the server it's possible that there are no players. In this case the
+				// for loop below would get stuck, so we may not enter it.
+				|| ( ( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( SERVER_CalcNumPlayers() == 0 ) ) )
 			{
 				i = 0;
 			}
@@ -992,7 +1084,11 @@ void P_RandomChaseDir (AActor *actor)
 		}
 		if (player != NULL && playeringame[i])
 		{
-			if (pr_newchasedir() & 1 || !P_CheckSight (actor, player))
+			// [BB] The else block above possibly selects a spectating player. In that case
+			// don't try to move towards the spectator. This is not exactly the same as
+			// skipping spectators in the above loop, but should work well enough.
+			if ((pr_newchasedir() & 1 || !P_CheckSight (actor, player))
+				&& player->player && ( player->player->bSpectating == false ) )
 			{
 				deltax = player->x - actor->x;
 				deltay = player->y - actor->y;
@@ -1016,7 +1112,15 @@ void P_RandomChaseDir (AActor *actor)
 				{
 					actor->movedir = diags[((deltay<0)<<1) + (deltax>0)];
 					if (actor->movedir != turnaround && P_TryWalk(actor))
+					{
+						// [BC] Set the thing's movement direction. Also, update the thing's
+						// position.
+						if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+						{
+							SERVERCOMMANDS_MoveThing( actor, CM_X|CM_Y|CM_Z|CM_MOVEDIR );
+						}
 						return;
+					}
 				}
 
 				// try other directions
@@ -1035,6 +1139,13 @@ void P_RandomChaseDir (AActor *actor)
 					actor->movedir = d[1];
 					if (P_TryWalk (actor))
 					{
+						// [BC] Set the thing's movement direction. Also, update the thing's
+						// position.
+						if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+						{
+							SERVERCOMMANDS_MoveThing( actor, CM_X|CM_Y|CM_Z|CM_MOVEDIR );
+						}
+
 						// either moved forward or attacked
 						return;
 					}
@@ -1044,7 +1155,16 @@ void P_RandomChaseDir (AActor *actor)
 				{
 					actor->movedir = d[2];
 					if (P_TryWalk (actor))
+					{
+						// [BC] Set the thing's movement direction. Also, update the thing's
+						// position.
+						if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+						{
+							SERVERCOMMANDS_MoveThing( actor, CM_X|CM_Y|CM_Z|CM_MOVEDIR );
+						}
+
 						return;
+					}
 				}
 			}
 		}
@@ -1055,7 +1175,13 @@ void P_RandomChaseDir (AActor *actor)
 	if (pr_newchasedir() < 150)
 	{
 		if (P_TryWalk (actor))
+		{
+			// [BB] Set the thing's position.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_MoveThing( actor, CM_X|CM_Y|CM_Z );
+
 			return;
+		}
 	}
 
 	turndir = (pr_newchasedir() & 1) ? -1 : 1;
@@ -1070,7 +1196,16 @@ void P_RandomChaseDir (AActor *actor)
 		{
 			actor->movedir = tdir;
 			if (P_TryWalk (actor))
+			{
+				// [BC] Set the thing's movement direction. Also, update the thing's
+				// position.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				{
+					SERVERCOMMANDS_MoveThing( actor, CM_X|CM_Y|CM_Z|CM_MOVEDIR );
+				}
+
 				return;
+			}
 		}
 	}
 /*
@@ -1104,12 +1239,26 @@ void P_RandomChaseDir (AActor *actor)
 		actor->movedir = turnaround;
 		if (P_TryWalk (actor))
 		{
+			// [BC] Set the thing's movement direction. Also, update the thing's
+			// position.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			{
+				SERVERCOMMANDS_MoveThing( actor, CM_X|CM_Y|CM_Z|CM_MOVEDIR );
+			}
+
 			actor->movecount = pr_newchasedir() & 15;
 			return;
 		}
 	}
 
 	actor->movedir = DI_NODIR;	// cannot move
+
+	// [BC] Set the thing's movement direction. Also, update the thing's
+	// position.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		SERVERCOMMANDS_MoveThing( actor, CM_X|CM_Y|CM_Z|CM_MOVEDIR );
+	}
 }
 
 //---------------------------------------------------------------------------
@@ -1178,6 +1327,10 @@ bool P_LookForMonsters (AActor *actor)
 	int count;
 	AActor *mo;
 	TThinkerIterator<AActor> iterator;
+
+	// [BC] This is handled server side.
+	if ( NETWORK_InClientMode() )
+		return ( false );
 
 	if (!P_CheckSight (players[0].mo, actor, SF_SEEPASTBLOCKEVERYTHING))
 	{ // Player can't see monster
@@ -1541,11 +1694,29 @@ bool P_LookForEnemies (AActor *actor, INTBOOL allaround, FLookExParams *params)
 
 bool P_LookForPlayers (AActor *actor, INTBOOL allaround, FLookExParams *params)
 {
-	int 		c;
-	int 		stop;
 	int			pnum;
 	player_t*	player;
 	bool chasegoal = params? (!(params->flags & LOF_DONTCHASEGOAL)) : true;
+	// [BC] Could new variables.
+	ULONG		ulIdx;
+	bool		abSearched[MAXPLAYERS];
+	bool		bAllDone;
+
+	// [BC] This is handled server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return ( false );
+	}
+
+	// [BC]
+	//
+	// This function had to be completely rewritten. Because of how it was written, for some
+	// reason, the actors passed into this function were doing far more sight checks than
+	// actually necessary (it seemed to be doing them repeatedly on a single player, with the
+	// number of times somehow linked with MAXPLAYERS). This problem became extremely apparent
+	// on levels with many, many actors (nuts2.wad for example), after I upped MAXPLAYERS to 32.
+	// The framerate became unbearable. Anyway, this function has been completely rewritten (as
+	// well as cleaned), and now works properly. Framerates are sky high once again.
 
 	if (actor->TIDtoHate != 0)
 	{
@@ -1593,33 +1764,52 @@ bool P_LookForPlayers (AActor *actor, INTBOOL allaround, FLookExParams *params)
 		}
 #endif
 		// [SP] If you don't see any enemies in deathmatch, look for players (but only when friend to a specific player.)
-		if (actor->FriendPlayer == 0 && (!teamplay || actor->DesignatedTeam == TEAM_NONE)) return result;
-		if (result || !deathmatch) return true;
+		// [BB] TEAM_NONE -> TEAM_None
+		if (actor->FriendPlayer == 0 && (!teamplay || actor->DesignatedTeam == TEAM_None)) return result;
+		// [BB] Adapted to take into account teamgame.
+		if (result || (!deathmatch && !teamgame)) return true;
 
 
 	}	// [SP] if false, and in deathmatch, intentional fall-through
 
 	if (!(gameinfo.gametype & (GAME_DoomStrifeChex)) &&
-		!multiplayer &&
+		( NETWORK_GetState( ) == NETSTATE_SINGLE ) &&
 		players[0].health <= 0)
 	{ // Single player game and player is dead; look for monsters
 		return P_LookForMonsters (actor);
 	}
 
-	c = 0;
-	if (actor->TIDtoHate != 0)
+	bAllDone = false;
+	for ( ulIdx = 0; ulIdx < MAXPLAYERS; ulIdx++ )
+		abSearched[ulIdx] = false;
+
+	// Begin searching for players.
+	while ( 1 )
 	{
-		pnum = pr_look2() & (MAXPLAYERS-1);
-	}
-	else
-	{
-		pnum = actor->LastLookPlayerNumber;
-	}
-	stop = (pnum - 1) & (MAXPLAYERS-1);
-		
-	for (;;)
-	{
-		pnum = (pnum + 1) & (MAXPLAYERS-1);
+		if ( bAllDone )
+		{
+			pnum = MAXPLAYERS;
+			break;
+		}
+
+		// [BB] We have to make sure that P_Random (the old RNG from Doom) is not used here
+		// (it is called by M_Random() if ZACOMPATF_OLD_RANDOM_GENERATOR) since it never
+		// returns a few of the integers in [0,255] causing this while loop to never terminate.
+		pnum = M_Random( MAXPLAYERS );
+		if ( abSearched[pnum] == true )
+			continue;
+
+		abSearched[pnum] = true;
+		bAllDone = true;
+		for ( ulIdx = 0; ulIdx < MAXPLAYERS; ulIdx++ )
+		{
+			if ( abSearched[ulIdx] == false )
+			{
+				bAllDone = false;
+				break;
+			}
+		}
+
 		if (!playeringame[pnum])
 			continue;
 
@@ -1628,37 +1818,9 @@ bool P_LookForPlayers (AActor *actor, INTBOOL allaround, FLookExParams *params)
 			actor->LastLookPlayerNumber = pnum;
 		}
 
-		if (++c == MAXPLAYERS-1 || pnum == stop)
-		{
-			// done looking
-			if (actor->target == NULL)
-			{
-				// [RH] use goal as target
-				// [KS] ...unless we're ignoring goals and we don't already have one
-				if (actor->goal != NULL && chasegoal)
-				{
-					actor->target = actor->goal;
-					return true;
-				}
-				// Use last known enemy if no players sighted -- killough 2/15/98:
-				if (actor->lastenemy != NULL && actor->lastenemy->health > 0)
-				{
-					if (!actor->IsFriend(actor->lastenemy))
-					{
-						actor->target = actor->lastenemy;
-						actor->lastenemy = NULL;
-						return true;
-					}
-					else
-					{
-						actor->lastenemy = NULL;
-					}
-				}
-			}
-			return actor->target == actor->goal && actor->goal != NULL;
-		}
-
 		player = &players[pnum];
+		if ( player->mo == NULL )
+			continue;
 
 		if (!(player->mo->flags & MF_SHOOTABLE))
 			continue;			// not shootable (observer or dead)
@@ -1669,7 +1831,8 @@ bool P_LookForPlayers (AActor *actor, INTBOOL allaround, FLookExParams *params)
 		if (player->health <= 0)
 			continue;			// dead
 
-		if (!P_IsVisible (actor, player->mo, allaround, params))
+		// [BC] In invasion mode, player doesn't have to be visible to be chased by monsters.
+		if ((!P_IsVisible (actor, player->mo, allaround, params)) && ( invasion == false ))
 			continue;			// out of sight
 
 		// [SP] Deathmatch fixes - if we have MF_FRIENDLY we're definitely in deathmatch
@@ -1709,6 +1872,37 @@ bool P_LookForPlayers (AActor *actor, INTBOOL allaround, FLookExParams *params)
 		actor->target = player->mo;
 		return true;
 	}
+
+	if ( pnum == MAXPLAYERS )
+	{
+		// done looking
+		if (actor->target == NULL)
+		{
+			// [RH] use goal as target
+			if (actor->goal != NULL)
+			{
+				actor->target = actor->goal;
+				return true;
+			}
+			// Use last known enemy if no players sighted -- killough 2/15/98:
+			if (actor->lastenemy != NULL && actor->lastenemy->health > 0)
+			{
+				if (!actor->IsFriend(actor->lastenemy))
+				{
+					actor->target = actor->lastenemy;
+					actor->lastenemy = NULL;
+					return true;
+				}
+				else
+				{
+					actor->lastenemy = NULL;
+				}
+			}
+		}
+		return actor->target == actor->goal && actor->goal != NULL;
+	}
+
+	return false;
 }
 
 //
@@ -1723,6 +1917,18 @@ bool P_LookForPlayers (AActor *actor, INTBOOL allaround, FLookExParams *params)
 DEFINE_ACTION_FUNCTION(AActor, A_Look)
 {
 	AActor *targ;
+
+	// [BC] This is handled server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		// [RH] Andy Baker's stealth monsters
+		if (self->flags & MF_STEALTH)
+		{
+			self->visdir = -1;
+		}
+
+		return;
+	}
 
 	if (self->flags5 & MF5_INCONVERSATION)
 		return;
@@ -1779,6 +1985,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_Look)
 			// Let the self wander around aimlessly looking for a fight
 			if (self->SeeState != NULL)
 			{
+				// [BC] Tell clients to set the thing's state.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_SetThingState( self, STATE_SEE );
+
 				self->SetState (self->SeeState);
 			}
 			else
@@ -1816,15 +2026,27 @@ DEFINE_ACTION_FUNCTION(AActor, A_Look)
 		if (self->flags2 & MF2_BOSS)
 		{ // full volume
 			S_Sound (self, CHAN_VOICE, self->SeeSound, 1, ATTN_NONE);
+
+			// [BC] Play the sound for clients.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SoundActor( self, CHAN_VOICE, S_GetName( self->SeeSound ), 1, ATTN_NONE );
 		}
 		else
 		{
 			S_Sound (self, CHAN_VOICE, self->SeeSound, 1, ATTN_NORM);
+
+			// [BC] Play the sound for clients.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SoundActor( self, CHAN_VOICE, S_GetName( self->SeeSound ), 1, ATTN_NORM );
 		}
 	}
 
 	if (self->target)
 	{
+		// [BC] If we are the server, tell clients about the state change.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingState( self, STATE_SEE );
+
 		self->SetState (self->SeeState);
 	}
 }
@@ -1851,6 +2073,18 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_LookEx)
 	fixed_t dist;
 	angle_t fov = (fov_f == 0) ? ANGLE_180 : angle_t(fov_f * ANGLE_90 / 90);
 	FLookExParams params = { fov, minseedist, maxseedist, maxheardist, flags, seestate };
+
+	// [TP] The client does not execute this
+	if ( NETWORK_InClientMode() )
+	{
+		// [RH] Andy Baker's stealth monsters
+		if (self->flags & MF_STEALTH)
+		{
+			self->visdir = -1;
+		}
+
+		return;
+	}
 
 	if (self->flags5 & MF5_INCONVERSATION)
 		return;
@@ -1931,12 +2165,20 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_LookEx)
                 {
                     if (seestate)
                     {
+						// [TP] Tell clients to set the thing's state.
+						if ( NETWORK_GetState() == NETSTATE_SERVER )
+							SERVERCOMMANDS_SetThingFrame( self, seestate );
+
                         self->SetState (seestate);
                     }
                     else
                     {
                         if (self->SeeState != NULL)
                         {
+							// [TP] Tell clients to set the thing's state.
+							if ( NETWORK_GetState() == NETSTATE_SERVER )
+								SERVERCOMMANDS_SetThingState( self, STATE_SEE );
+
                             self->SetState (self->SeeState);
                         }
                         else
@@ -2002,6 +2244,13 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_LookEx)
 		{
 			S_Sound (self, CHAN_VOICE, self->SeeSound, 1, ATTN_NORM);
 		}
+
+		// [TP] If we're the server, play the sound
+		if ( NETWORK_GetState() == NETSTATE_SERVER )
+		{
+			SERVERCOMMANDS_SoundActor( self, CHAN_VOICE, self->SeeSound, 1,
+				(flags & LOF_FULLVOLSEESOUND) ? ATTN_NONE : ATTN_NORM );
+		}
 	}
 
 	if (self->target && !(self->flags & MF_INCHASE))
@@ -2010,10 +2259,18 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_LookEx)
         {
             if (seestate)
             {
+			// [TP] Tell clients to set the thing's state.
+			if ( NETWORK_GetState() == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetThingFrame( self, seestate );
+
                 self->SetState (seestate);
             }
             else
             {
+			// [TP] Tell clients to set the thing's state.
+			if ( NETWORK_GetState() == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetThingState( self, STATE_SEE );
+
                 self->SetState (self->SeeState);
             }
         }
@@ -2071,6 +2328,14 @@ DEFINE_ACTION_FUNCTION(AActor, A_Wander)
 		}
 	}
 
+	// [BC] In client mode, just keep walking until the server tells us to
+	// change directions.
+	if ( NETWORK_InClientMode() )
+	{
+		P_Move( self );
+		return;
+	}
+
 	if (--self->movecount < 0 || !P_Move (self))
 	{
 		P_RandomChaseDir (self);
@@ -2087,6 +2352,12 @@ DEFINE_ACTION_FUNCTION(AActor, A_Wander)
 DEFINE_ACTION_FUNCTION(AActor, A_Look2)
 {
 	AActor *targ;
+
+	// [BC] This is handled server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
 
 	if (self->flags5 & MF5_INCONVERSATION)
 		return;
@@ -2111,6 +2382,11 @@ DEFINE_ACTION_FUNCTION(AActor, A_Look2)
 			}
 			self->target = targ;
 			self->threshold = 10;
+
+			// [BC] Tell clients to set the thing's state.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetThingState( self, STATE_SEE );
+
 			self->SetState (self->SeeState);
 			return;
 		}
@@ -2118,6 +2394,11 @@ DEFINE_ACTION_FUNCTION(AActor, A_Look2)
 		{
 			if (!P_LookForPlayers (self, self->flags4 & MF4_LOOKALLAROUND, NULL))
 				goto nosee;
+
+			// [BC] Tell clients to set the thing's state.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetThingState( self, STATE_SEE );
+
 			self->SetState (self->SeeState);
 			self->flags4 |= MF4_INCOMBAT;
 			return;
@@ -2126,10 +2407,18 @@ DEFINE_ACTION_FUNCTION(AActor, A_Look2)
 nosee:
 	if (pr_look2() < 30)
 	{
+		// [BC] Tell clients to set the thing's state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingFrame( self, self->SpawnState + ( pr_look2( ) & 1 ) + 1 );
+
 		self->SetState (self->SpawnState + (pr_look2() & 1) + 1);
 	}
 	if (!(self->flags4 & MF4_STANDSTILL) && pr_look2() < 40)
 	{
+		// [BC] Tell clients to set the thing's state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingFrame( self, self->SpawnState + 3 );
+
 		self->SetState (self->SpawnState + 3);
 	}
 }
@@ -2179,6 +2468,13 @@ void A_DoChase (AActor *actor, bool fastchase, FState *meleestate, FState *missi
 		actor->target = NULL;
 	}
 
+	// [BC] Clients do not know what the target is.
+	if ( NETWORK_InClientMode() )
+	{
+		actor->target = NULL;
+		actor->goal = NULL;
+	}
+
 	// modify target threshold
 	if (actor->threshold)
 	{
@@ -2224,7 +2520,8 @@ void A_DoChase (AActor *actor, bool fastchase, FState *meleestate, FState *missi
 	}
 
 	// [RH] If the target is dead or a friend (and not a goal), stop chasing it.
-	if (actor->target && actor->target != actor->goal && (actor->target->health <= 0 || actor->IsFriend(actor->target)))
+	// [BC] Also stop chasing the target if it's a spectator.
+	if (actor->target && actor->target != actor->goal && (actor->target->health <= 0 || actor->IsFriend(actor->target) || ( actor->target->player && actor->target->player->bSpectating )))
 		actor->target = NULL;
 
 	// [RH] Friendly monsters will consider chasing whoever hurts a player if they
@@ -2240,7 +2537,10 @@ void A_DoChase (AActor *actor, bool fastchase, FState *meleestate, FState *missi
 		else
 		{
 			int i;
-			if (!multiplayer)
+			if ( ( NETWORK_GetState( ) == NETSTATE_SINGLE )
+				// [BB] On the server it's possible that there are no players. In this case the
+				// for loop below would get stuck, so we may not enter it.
+				|| ( ( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( SERVER_CalcNumPlayers() == 0 ) ) )
 			{
 				i = 0;
 			}
@@ -2274,7 +2574,8 @@ void A_DoChase (AActor *actor, bool fastchase, FState *meleestate, FState *missi
 			actor->flags &= ~MF_INCHASE;
 			return;
 		}
-		if (actor->target == NULL)
+		// [BC/BB] In client mode, just keep moving along.
+		if ( (actor->target == NULL) && ( NETWORK_InClientMode() == false ) )
 		{
 			if (actor->flags & MF_FRIENDLY)
 			{
@@ -2288,6 +2589,10 @@ void A_DoChase (AActor *actor, bool fastchase, FState *meleestate, FState *missi
 			}
 			else
 			{
+				// [BC] If we are the server, tell clients about the state change.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_SetThingState( actor, STATE_IDLE );
+
 				actor->SetIdle();
 				actor->flags &= ~MF_INCHASE;
 				return;
@@ -2299,7 +2604,9 @@ void A_DoChase (AActor *actor, bool fastchase, FState *meleestate, FState *missi
 	if (actor->flags & MF_JUSTATTACKED)
 	{
 		actor->flags &= ~MF_JUSTATTACKED;
-		if (!actor->isFast() && !dontmove)
+		if ((!actor->isFast()) && !dontmove &&
+			// [BC] Don't decide a new chase dir in client mode.
+			( NETWORK_InClientMode() == false ))
 		{
 			P_NewChaseDir (actor);
 		}
@@ -2343,12 +2650,21 @@ void A_DoChase (AActor *actor, bool fastchase, FState *meleestate, FState *missi
 				delay = 0;
 				actor->reactiontime = actor->GetDefault()->reactiontime;
 				actor->angle = lastgoalang;		// Look in direction of last goal
+
+				// [BC] Send the state change to clients.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_SetThingAngle( actor );
 			}
 			if (actor->target == actor->goal) actor->target = NULL;
 			actor->flags |= MF_JUSTATTACKED;
 			if (newgoal != NULL && delay != 0)
 			{
 				actor->flags4 |= MF4_INCOMBAT;
+
+				// [BC] Send the state change to clients.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_SetThingState( actor, STATE_IDLE );
+
 				actor->SetIdle();
 			}
 			actor->flags &= ~MF_INCHASE;
@@ -2363,11 +2679,17 @@ void A_DoChase (AActor *actor, bool fastchase, FState *meleestate, FState *missi
 	// it can be just as easily handled by a simple flag so the monsters
 	// can take advantage of all the other enhancements of A_Chase.
 
-	if (fastchase && !dontmove)
+	if (fastchase && !dontmove &&
+		// [BC] Don't fast chase in client mode.
+		( NETWORK_InClientMode() == false ))
 	{
 		if (actor->FastChaseStrafeCount > 0)
 		{
 			actor->FastChaseStrafeCount--;
+
+			// [Dusk] update strafecount
+			if ( actor->FastChaseStrafeCount == 0 && NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetFastChaseStrafeCount( actor );
 		}
 		else
 		{
@@ -2385,7 +2707,20 @@ void A_DoChase (AActor *actor, bool fastchase, FState *meleestate, FState *missi
 					actor->velx = 13 * finecosine[ang>>ANGLETOFINESHIFT];
 					actor->vely = 13 * finesine[ang>>ANGLETOFINESHIFT];
 					actor->FastChaseStrafeCount = 3;		// strafe time
+
+					// [Dusk] Update the strafecount to the clients. It is necessary
+					// to let clients know of this variable so that they can
+					// prevent the chasing during strafing
+					if( NETWORK_GetState( ) == NETSTATE_SERVER )
+						SERVERCOMMANDS_SetFastChaseStrafeCount( actor );
 				}
+			}
+
+			// [BC] If we're the server, update the thing's momentum.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			{
+				SERVERCOMMANDS_MoveThing( actor, CM_X|CM_Y|CM_Z );
+				SERVERCOMMANDS_MoveThingExact( actor, CM_MOMX|CM_MOMY );
 			}
 		}
 
@@ -2403,6 +2738,15 @@ void A_DoChase (AActor *actor, bool fastchase, FState *meleestate, FState *missi
 			if (actor->AttackSound)
 				S_Sound (actor, CHAN_WEAPON, actor->AttackSound, 1, ATTN_NORM);
 
+			// [BC] If we are the server, tell clients about the state change, and play
+			// the attack sound.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			{
+				SERVERCOMMANDS_SoundActor( actor, CHAN_WEAPON, S_GetName( actor->AttackSound ), 1, ATTN_NORM );
+				SERVERCOMMANDS_SetThingFrame( actor, meleestate );
+				SERVERCOMMANDS_MoveThing( actor, CM_X|CM_Y|CM_Z );
+			}
+
 			actor->SetState (meleestate);
 			actor->flags &= ~MF_INCHASE;
 			return;
@@ -2419,6 +2763,14 @@ void A_DoChase (AActor *actor, bool fastchase, FState *meleestate, FState *missi
 			if (!P_CheckMissileRange (actor))
 				goto nomissile;
 			
+			// [BC] If we are the server, tell clients about the state change.
+			// Also, update the thing's position.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			{
+				SERVERCOMMANDS_SetThingFrame( actor, missilestate );
+				SERVERCOMMANDS_MoveThing( actor, CM_X|CM_Y|CM_Z );
+			}
+
 			actor->SetState (missilestate);
 			actor->flags |= MF_JUSTATTACKED;
 			actor->flags4 |= MF4_INCOMBAT;
@@ -2429,9 +2781,12 @@ void A_DoChase (AActor *actor, bool fastchase, FState *meleestate, FState *missi
 
  nomissile:
 	// possibly choose another target
-	if ((multiplayer || actor->TIDtoHate)
+	if ((( NETWORK_GetState( ) != NETSTATE_SINGLE ) || actor->TIDtoHate)
 		&& !actor->threshold
-		&& !P_CheckSight (actor, actor->target, 0) )
+		&& ( NETWORK_InClientMode() == false )
+		// [BB] In invasion mode, player doesn't have to be visible to be chased by monsters.
+		// [BB] The flags argument of P_CheckSight has to be the same here as it is in P_LookForPlayers.
+		&& !P_CheckSight (actor, actor->target, SF_SEEPASTBLOCKEVERYTHING) && ( invasion == false ) )
 	{
 		bool lookForBetter = false;
 		bool gotNew;
@@ -2468,8 +2823,14 @@ void A_DoChase (AActor *actor, bool fastchase, FState *meleestate, FState *missi
 		fixed_t oldY = actor->y;
 		FTextureID oldFloor = actor->floorpic;
 
+		// [BC] In client mode, just keep walking until the server tells us to
+		// change directions.
+		if ( NETWORK_InClientMode() )
+		{
+			P_Move( actor );
+		}
 		// chase towards player
-		if (--actor->movecount < 0 || !P_Move (actor))
+		else if (--actor->movecount < 0 || !P_Move (actor))
 		{
 			P_NewChaseDir (actor);
 		}
@@ -2478,15 +2839,24 @@ void A_DoChase (AActor *actor, bool fastchase, FState *meleestate, FState *missi
 		// (copied from A_SerpentChase - it applies to everything with CANTLEAVEFLOORPIC!)
 		if (actor->flags2&MF2_CANTLEAVEFLOORPIC && actor->floorpic != oldFloor )
 		{
-			if (P_TryMove (actor, oldX, oldY, false))
+			// [BC] In client mode, just keep walking until the server tells us to
+			// change directions.
+			if ( NETWORK_InClientMode() )
 			{
-				if (nomonsterinterpolation)
-				{
-					actor->PrevX = oldX;
-					actor->PrevY = oldY;
-				}
+				P_TryMove( actor, oldX, oldY, false );
 			}
-			P_NewChaseDir (actor);
+			else
+			{
+				if (P_TryMove (actor, oldX, oldY, false))
+				{
+					if (nomonsterinterpolation)
+					{
+						actor->PrevX = oldX;
+						actor->PrevY = oldY;
+					}
+				}
+				P_NewChaseDir (actor);
+			}
 		}
 	}
 	else if (dontmove && actor->movecount > 0) actor->movecount--;
@@ -2513,6 +2883,16 @@ static bool P_CheckForResurrection(AActor *self, bool usevilestates)
 	const AActor *info;
 	AActor *temp;
 		
+	// [BC] Movement is server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		// Return to normal attack.
+		//A_Chase (self);
+		// [BB] Some changes here to adapt to the movement of the A_VileChase code
+		// to P_CheckForResurrection.
+		return false;
+	}
+
 	if (self->movedir != DI_NODIR)
 	{
 		const fixed_t absSpeed = abs (self->Speed);
@@ -2594,6 +2974,10 @@ static bool P_CheckForResurrection(AActor *self, bool usevilestates)
 			}
 			self->target = temp;
 								
+			// [BC] If we are the server, tell clients about the state change.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetThingState( self, STATE_HEAL );
+
 			// Make the state the monster enters customizable.
 			FState * state = self->FindState(NAME_Heal);
 			if (state != NULL)
@@ -2648,6 +3032,21 @@ static bool P_CheckForResurrection(AActor *self, bool usevilestates)
 			corpsehit->flags5 = info->flags5;
 			corpsehit->flags6 = info->flags6;
 			corpsehit->flags7 = info->flags7;
+
+			// [BC] Apply new ST flags as well.
+			// [BB] The STFL_LEVELSPAWNED flag may not be removed by the default flags.
+			// Otherwise level spawned actors revived by an Archvile won't be restored
+			// during a call of GAME_ResetMap.
+			// [WS] We also need this similar treatment for STFL_POSITIONCHANGED.
+			const bool actorWasLevelSpawned = !!(corpsehit->ulSTFlags & STFL_LEVELSPAWNED);
+			const bool actorHasPositionChanged = !!(corpsehit->ulSTFlags & STFL_POSITIONCHANGED);
+			corpsehit->ulSTFlags = info->ulSTFlags;
+			if ( actorWasLevelSpawned )
+				corpsehit->ulSTFlags |= STFL_LEVELSPAWNED;
+			if ( actorHasPositionChanged )
+				corpsehit->ulSTFlags |= STFL_POSITIONCHANGED;
+			corpsehit->ulNetworkFlags = info->ulNetworkFlags;
+
 			corpsehit->health = info->health;
 			corpsehit->target = NULL;
 			corpsehit->lastenemy = NULL;
@@ -2656,12 +3055,19 @@ static bool P_CheckForResurrection(AActor *self, bool usevilestates)
 			if (corpsehit->CountsAsKill())
 			{
 				level.total_monsters++;
+
+				// [BB] The number of total monsters was increased, update the invasion monster count accordingly.
+				INVASION_UpdateMonsterCount( corpsehit, false );
 			}
 
 			// You are the Archvile's minion now, so hate what it hates
 			corpsehit->CopyFriendliness (self, false);
-			corpsehit->SetState (raisestate);
 
+			// [BC] If we're the server, tell clients to put the thing into its raise state.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetThingState( corpsehit, STATE_RAISE );
+
+			corpsehit->SetState (raisestate);
 			return true;
 		}
 	}
@@ -2743,6 +3149,18 @@ void A_Chase(AActor *self)
 //=============================================================================
 void A_Face (AActor *self, AActor *other, angle_t max_turn, angle_t max_pitch)
 {
+	// [BC] This is handled server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		// [RH] Andy Baker's stealth monsters
+		if (self->flags & MF_STEALTH)
+		{
+			self->visdir = 1;
+		}
+
+		return;
+	}
+
 	if (!other)
 		return;
 
@@ -2834,6 +3252,10 @@ void A_Face (AActor *self, AActor *other, angle_t max_turn, angle_t max_pitch)
     {
 		self->angle += pr_facetarget.Random2() << 21;
     }
+
+	// [BC] Update the thing's angle.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SetThingAngle( self );
 }
 
 void A_FaceTarget (AActor *self, angle_t max_turn, angle_t max_pitch)
@@ -2887,6 +3309,18 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FaceTracer)
 //===========================================================================
 DEFINE_ACTION_FUNCTION(AActor, A_MonsterRail)
 {
+	// [BC] This is handled server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		// [RH] Andy Baker's stealth monsters
+		if (self->flags & MF_STEALTH)
+		{
+			self->visdir = 1;
+		}
+
+		return;
+	}
+
 	if (!self->target)
 		return;
 
@@ -2926,6 +3360,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_MonsterRail)
 	{
 		self->angle += pr_railface.Random2() << 21;
 	}
+
+	// [BC] Set the thing's angle.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SetThingAngle( self );
 
 	P_RailAttack (self, self->GetMissileDamage (0, 1), 0);
 	self->pitch = saved_pitch;
@@ -3053,11 +3491,16 @@ void ModifyDropAmount(AInventory *inv, int dropamount)
 // PROC P_DropItem
 //
 //---------------------------------------------------------------------------
-
 CVAR(Int, sv_dropstyle, 0, CVAR_SERVERINFO | CVAR_ARCHIVE);
 
 AInventory *P_DropItem (AActor *source, const PClass *type, int dropamount, int chance)
 {
+	// [BC] This is handled server side.
+	if ( NETWORK_InClientMode() )
+	{
+		return ( NULL );
+	}
+
 	if (type != NULL && pr_dropitem() <= chance)
 	{
 		AActor *mo;
@@ -3079,10 +3522,20 @@ AInventory *P_DropItem (AActor *source, const PClass *type, int dropamount, int 
 			}
 		}
 		mo = Spawn (type, source->x, source->y, spawnz, ALLOW_REPLACE);
+
 		if (mo != NULL)
 		{
+			// [BC] If we're the server, tell clients to spawn the thing.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SpawnThing( mo );
+
 			mo->flags |= MF_DROPPED;
 			mo->flags &= ~MF_NOGRAVITY;	// [RH] Make sure it is affected by gravity
+
+			// [Dusk] and be sure to tell the clients about that!
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetThingFlags( mo, FLAGSET_FLAGS );
+
 			if (!(i_compatflags & COMPATF_NOTOSSDROPS))
 			{
 				P_TossItem (mo);
@@ -3092,6 +3545,12 @@ AInventory *P_DropItem (AActor *source, const PClass *type, int dropamount, int 
 				AInventory * inv = static_cast<AInventory *>(mo);
 				ModifyDropAmount(inv, dropamount);
 				inv->ItemFlags |= IF_TOSSED;
+
+				// [BB] Now that the ammo amount from weapon pickups is handled on the server
+				// this shouldn't be necessary anymore. Remove after thorough testing.
+				// [BC] If we're the server, tell clients that the thing is dropped.
+				//if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				//	SERVERCOMMANDS_SetWeaponAmmoGive( mo );
 				if (inv->SpecialDropAction (source))
 				{
 					// The special action indicates that the item should not spawn
@@ -3180,6 +3639,12 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_Die)
 {
 	ACTION_PARAM_START(1);
 	ACTION_PARAM_NAME(damagetype, 0);
+	// [BC] This is handled server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 
 	P_DamageMobj (self, NULL, NULL, self->health, damagetype, DMG_FORCED);
 }
@@ -3191,9 +3656,25 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_Die)
 
 DEFINE_ACTION_FUNCTION(AActor, A_Detonate)
 {
+	// [BC] This is handled server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	int damage = self->GetMissileDamage (0, 1);
 	P_RadiusAttack (self, self->target, damage, damage, self->DamageType, RADF_HURTSOURCE);
 	P_CheckSplash(self, damage<<FRACBITS);
+
+	// [BC] If this explosion originated from a player, and it hit something, give the player
+	// credit for it.
+	if (( self->target ) && ( self->target->player ))
+	{
+		if ( self->target->player->bStruckPlayer )
+			PLAYER_StruckPlayer( self->target->player );
+		else
+			self->target->player->ulConsecutiveHits = 0;
+	}
 }
 
 bool CheckBossDeath (AActor *actor)
@@ -3216,7 +3697,9 @@ bool CheckBossDeath (AActor *actor)
 	{
 		if (other != actor &&
 			(other->health > 0 || (other->flags & MF_ICECORPSE))
-			&& other->GetClass() == actor->GetClass())
+			&& other->GetClass() == actor->GetClass()
+			// [BB] Don't count actors hidden by HideOrDestroyIfSafe()
+			&& !( other->ulSTFlags & STFL_HIDDEN_INSTEAD_OF_DESTROYED ) )
 		{ // Found a living boss
 		  // [RH] Frozen bosses don't count as dead until they shatter
 			return false;
@@ -3233,6 +3716,12 @@ bool CheckBossDeath (AActor *actor)
 DEFINE_ACTION_FUNCTION(AActor, A_BossDeath)
 {
 	FName mytype = self->GetClass()->TypeName;
+
+	// [BC] This is handled server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
 
 	// Ugh...
 	FName type = self->GetClass()->ActorInfo->GetReplacee()->Class->TypeName;
@@ -3324,7 +3813,8 @@ DEFINE_ACTION_FUNCTION(AActor, A_BossDeath)
 	}
 
 	// [RH] If noexit, then don't end the level.
-	if ((deathmatch || alwaysapplydmflags) && (dmflags & DF_NO_EXIT))
+	// [BC] Teamgame, too.
+	if ((deathmatch || teamgame || alwaysapplydmflags) && (dmflags & DF_NO_EXIT))
 		return;
 
 	G_ExitLevel (0, false);
@@ -3349,6 +3839,12 @@ int P_Massacre ()
 	int killcount = 0;
 	AActor *actor;
 	TThinkerIterator<AActor> iterator;
+
+	// [BC] This is handled server side.
+	if ( NETWORK_InClientMode() )
+	{
+		return ( 0 );
+	}
 
 	while ( (actor = iterator.Next ()) )
 	{
@@ -3403,7 +3899,14 @@ bool A_RaiseMobj (AActor *actor, fixed_t speed)
 
 DEFINE_ACTION_FUNCTION(AActor, A_ClassBossHealth)
 {
-	if (multiplayer && !deathmatch)		// co-op only
+	// [BC] This is handled server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
+	// [BC] Teamgame, too.
+	if (( NETWORK_GetState( ) != NETSTATE_SINGLE ) && (( deathmatch || teamgame ) == false ))		// co-op only
 	{
 		if (!self->special1)
 		{

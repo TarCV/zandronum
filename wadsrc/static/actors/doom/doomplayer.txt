@@ -19,10 +19,10 @@ ACTOR DoomPlayer : PlayerPawn
 	Player.WeaponSlot 1, Fist, Chainsaw
 	Player.WeaponSlot 2, Pistol
 	Player.WeaponSlot 3, Shotgun, SuperShotgun
-	Player.WeaponSlot 4, Chaingun
-	Player.WeaponSlot 5, RocketLauncher
-	Player.WeaponSlot 6, PlasmaRifle
-	Player.WeaponSlot 7, BFG9000
+	Player.WeaponSlot 4, Chaingun, Minigun			// [BC] Create default binding for the minigun.
+	Player.WeaponSlot 5, RocketLauncher, GrenadeLauncher	// [BC] Create default binding for the grenade launcher.
+	Player.WeaponSlot 6, PlasmaRifle, Railgun		// [BC] Create default binding for the railgun.
+	Player.WeaponSlot 7, BFG9000, BFG10K			// [BC] Create default binding for the BFG10K.
 	
 	Player.ColorRange 112, 127
 	Player.Colorset 0, "Green",			0x70, 0x7F,  0x72
@@ -34,7 +34,6 @@ ACTOR DoomPlayer : PlayerPawn
 	Player.Colorset 5, "Light Brown",	0x38, 0x47,  0x3A
 	Player.Colorset 6, "Light Red",		0xB0, 0xBF,  0xB2
 	Player.Colorset 7, "Light Blue",	0xC0, 0xCF,  0xC2
-
 	States
 	{
 	Spawn:
