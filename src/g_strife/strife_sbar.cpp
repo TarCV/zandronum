@@ -17,6 +17,8 @@
 #include "g_level.h"
 #include "colormatcher.h"
 #include "v_palette.h"
+// [BB] New #includes.
+#include "deathmatch.h"
 
 // Number of tics to move the popscreen up and down.
 #define POP_TIME (TICRATE/8)
@@ -387,6 +389,10 @@ private:
 		AInventory *item;
 		int i;
 
+		// [BB] The following code relies on CPlayer->mo != NULL.
+		if( CPlayer->mo == NULL )
+			return;
+
 		// Pop screen (log, keys, and status)
 		if (CurrentPop != POP_None && PopHeight < 0)
 		{
@@ -467,6 +473,10 @@ private:
 
 	void DrawFullScreenStuff ()
 	{
+		// [BC] Got a crash here.
+		if( CPlayer->mo == NULL )
+			return;
+
 		// Draw health
 		DrINumberOuter (CPlayer->health, 4, -10, false, 7);
 		screen->DrawTexture (Images[imgMEDI], 14, -17,
@@ -572,7 +582,9 @@ private:
 		const char *label;
 		int i;
 		AInventory *item;
-		int xscale, yscale, left, top;
+		// [BC] Changed x/yscale to a float for Skulltag's way of rendering things.
+		float xscale, yscale;
+		int left, top;
 		int bars = (CurrentPop == POP_Status) ? imgINVPOP : imgINVPOP2;
 		int back = (CurrentPop == POP_Status) ? imgINVPBAK : imgINVPBAK2;
 		// Extrapolate the height of the popscreen for smoother movement

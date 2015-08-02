@@ -41,6 +41,9 @@
 #include "tarray.h"
 #include "name.h"
 
+// [BB] Collect all platform dependent things in platform.h/cpp.
+#include "platform.h"
+
 #ifdef __GNUC__
 #define PRINTFISH(x) __attribute__((format(printf, 2, x)))
 #else
