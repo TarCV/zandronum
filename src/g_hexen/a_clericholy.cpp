@@ -67,7 +67,7 @@ bool AHolySpirit::Slam (AActor *thing)
 {
 	if (thing->flags&MF_SHOOTABLE && thing != target)
 	{
-		if (multiplayer && !deathmatch && thing->player && target->player)
+		if (( NETWORK_GetState( ) != NETSTATE_SINGLE ) && !deathmatch && thing->player && target->player)
 		{ // don't attack other co-op players
 			return true;
 		}
@@ -220,11 +220,36 @@ DEFINE_ACTION_FUNCTION(AActor, A_CHolyAttack)
 		if (!weapon->DepleteAmmo (weapon->bAltFire))
 			return;
 	}
+
+	// [BC] Weapons are handled by the server.
+	if ( NETWORK_InClientMode() )
+	{
+		weapon->CHolyCount = 3;
+		S_Sound (self, CHAN_WEAPON, "HolySymbolFire", 1, ATTN_NORM);
+		return;
+	}
+
 	AActor * missile = P_SpawnPlayerMissile (self, 0,0,0, PClass::FindClass ("HolyMissile"), self->angle, &linetarget);
 	if (missile != NULL) missile->tracer = linetarget;
 
+	// [BC] Apply spread.
+	if ( player->cheats2 & CF2_SPREAD )
+	{
+		missile = P_SpawnPlayerMissile (self, 0,0,0, PClass::FindClass ("HolyMissile"), self->angle + ( ANGLE_45 / 3 ), &linetarget);
+		if ( missile != NULL )
+			missile->tracer = linetarget;
+
+		missile = P_SpawnPlayerMissile (self, 0,0,0, PClass::FindClass ("HolyMissile"), self->angle - ( ANGLE_45 / 3 ), &linetarget);
+		if ( missile != NULL )
+			missile->tracer = linetarget;
+	}
+
 	weapon->CHolyCount = 3;
 	S_Sound (self, CHAN_WEAPON, "HolySymbolFire", 1, ATTN_NORM);
+
+	// [BC] If we're the server, play this sound to clients.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_WeaponSound( ULONG( player - players ), "HolySymbolFire", ULONG( player - players ), SVCF_SKIPTHISCLIENT );
 }
 
 //============================================================================
@@ -521,10 +546,23 @@ DEFINE_ACTION_FUNCTION(AActor, A_CHolyCheckScream)
 
 DEFINE_ACTION_FUNCTION(AActor, A_ClericAttack)
 {
+	// [BB] Weapons are handled by the server.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (!self->target) return;
 
 	AActor * missile = P_SpawnMissileZ (self, self->z + 40*FRACUNIT, self->target, PClass::FindClass ("HolyMissile"));
 	if (missile != NULL) missile->tracer = NULL;	// No initial target
 	S_Sound (self, CHAN_WEAPON, "HolySymbolFire", 1, ATTN_NORM);
+
+	// [BB] Tell the clients to spawn the missile and play the sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		if ( missile ) SERVERCOMMANDS_SpawnMissile( missile );
+		SERVERCOMMANDS_SoundActor( self, CHAN_WEAPON, "HolySymbolFire", 1, ATTN_NORM );
+	}
 }
 

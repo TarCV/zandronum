@@ -98,9 +98,10 @@ class FWadLump : public FileReader
 public:
 	FWadLump ();
 	FWadLump (const FWadLump &copy);
-#ifdef _DEBUG
+// [BB] The automatically generated assignment operator doesn't work properly (reference counting of SourceData is broken).
+//#ifdef _DEBUG
 	FWadLump & operator= (const FWadLump &copy);
-#endif
+//#endif
 	~FWadLump();
 
 	long Seek (long offset, int origin);
@@ -146,8 +147,8 @@ public:
 	// The wadnum for the IWAD
 	enum { IWAD_FILENUM = 1 };
 
-	void InitMultipleFiles (TArray<FString> &filenames);
-	void AddFile (const char *filename, FileReader *wadinfo = NULL);
+	void InitMultipleFiles (/*TArray<FString> &filenames*/); // [BB] Removed argument.
+	void AddFile (const char *filename, FileReader *wadinfo = NULL, bool bLoadedAutomatically = false, bool isOptional = false);	// [BC], [TP]
 	int CheckIfWadLoaded (const char *name);
 
 	const char *GetWadName (int wadnum) const;
@@ -206,6 +207,20 @@ public:
 	int GetNumWads () const;
 
 	int AddExternalFile(const char *filename);
+
+	// [BC] Was this wad loaded automatically?
+	bool GetLoadedAutomatically( int wadnum ) const;
+
+	// [BB] Returns the number of the wad this given lump is in.
+	int GetWadnumFromLumpnum ( int lumpnum ) const;
+
+	// [BB] Returns the number of the wad with the given full name.
+	int GetWadnumFromWadFullName ( const char *FullName ) const;
+
+	// [TP]
+	int GetParentWad( int wadnum ) const;
+	bool IsWadOptional( int wadnum ) const;
+	void LumpIsMandatory( int lumpnum );
 
 protected:
 

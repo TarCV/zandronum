@@ -258,6 +258,12 @@ xx(Extreme)
 xx(MDK)
 xx(Cast) // 'damage type' for the cast call
 
+// [BB] Skulltag Damage types
+xx(Grenade)
+xx(BFG10k)
+xx(SpawnTelefrag)
+xx(Reflection)
+
 // Special names for thingdef_exp.cpp
 xx(Random)
 xx(Random2)
@@ -563,7 +569,19 @@ xx(Multiplayer)
 
 // more stuff
 xx(ColorSet)
-xx(NeverSwitchOnPickup)
+// [BB] Changed to SwitchOnPickup
+xx(SwitchOnPickup)
 xx(MoveBob)
 xx(StillBob)
 xx(PlayerClass)
+
+// [BB] Zandronum userinfo settings.
+xx(RailColor)
+xx(Handicap)
+// [BB] Let the user decide how often he wants the player positions to be updated.
+xx(CL_TicsPerUpdate)
+// [BB] Let the user specify his connection type. This way we can try to save
+// bandwidth on slow connections (possibly causing visual inaccuracies).
+xx(CL_ConnectionType)
+// [CK] Client flags for various booleans masked in a bitfield.
+xx(CL_ClientFlags)
