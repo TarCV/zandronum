@@ -278,6 +278,9 @@ class FMugShot
 		bool bDamageFaceActive;
 		bool bNormal;
 		bool bOuchActive;
+
+		// [BB] Necessary because Zandronum still uses the old Doom status bar code.
+		friend class DDoomStatusBar;
 };
 
 extern TArray<FMugShotState> MugShotStates;
@@ -321,7 +324,7 @@ public:
 		ST_NUMPAINFACES		= 5,
 		ST_NUMSTRAIGHTFACES	= 3,
 		ST_NUMTURNFACES		= 2,
-		ST_NUMSPECIALFACES	= 3,
+		ST_NUMSPECIALFACES	= 4,
 		ST_NUMEXTRAFACES	= 2,
 		ST_FACESTRIDE		= ST_NUMSTRAIGHTFACES+ST_NUMTURNFACES+ST_NUMSPECIALFACES,
 		ST_NUMFACES			= ST_FACESTRIDE*ST_NUMPAINFACES+ST_NUMEXTRAFACES,
@@ -330,6 +333,7 @@ public:
 		ST_OUCHOFFSET		= ST_TURNOFFSET + ST_NUMTURNFACES,
 		ST_EVILGRINOFFSET	= ST_OUCHOFFSET + 1,
 		ST_RAMPAGEOFFSET	= ST_EVILGRINOFFSET + 1,
+		ST_QUADOFFSET		= ST_RAMPAGEOFFSET + 1,
 		ST_GODFACE			= ST_NUMPAINFACES*ST_FACESTRIDE,
 		ST_DEADFACE			= ST_GODFACE + 1
 	};
@@ -371,6 +375,8 @@ public:
 
 protected:
 	void DrawPowerups ();
+	void DrawCornerScore ();
+	void DrawTeamScores ();
 
 	void UpdateRect (int x, int y, int width, int height) const;
 	void DrawImage (FTexture *image, int x, int y, FRemapTable *translation=NULL) const;
@@ -380,6 +386,7 @@ protected:
 
 	void DrINumber (signed int val, int x, int y, int imgBase=imgINumbers) const;
 	void DrBNumber (signed int val, int x, int y, int w=3) const;
+	void DrBDash (int x, int y) const;
 	void DrSmallNumber (int val, int x, int y) const;
 
 	void DrINumberOuter (signed int val, int x, int y, bool center=false, int w=9) const;
@@ -423,7 +430,7 @@ private:
 	DBaseStatusBar() {}
 	bool RepositionCoords (int &x, int &y, int xo, int yo, const int w, const int h) const;
 	void DrawMessages (int layer, int bottom);
-	void DrawConsistancy () const;
+	void DrawTargetName( );
 	void DrawWaiting () const;
 
 	TObjPtr<DHUDMessage> Messages[NUM_HUDMSGLAYERS];
@@ -436,6 +443,7 @@ extern DBaseStatusBar *StatusBar;
 
 DBaseStatusBar *CreateStrifeStatusBar();
 DBaseStatusBar *CreateCustomStatusBar(int script=0);
+DBaseStatusBar *CreateStatusBar ();
 
 // Crosshair stuff ----------------------------------------------------------
 

@@ -13,12 +13,26 @@ static FRandom pr_stalker ("Stalker");
 
 DEFINE_ACTION_FUNCTION(AActor, A_StalkerChaseDecide)
 {
+	// [BC] This is handled server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (!(self->flags & MF_NOGRAVITY))
 	{
+		// [BC] Set the thing's state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingFrame( self, self->FindState("SeeFloor") );
+
 		self->SetState (self->FindState("SeeFloor"));
 	}
 	else if (self->ceilingz - self->height > self->z)
 	{
+		// [BC] Set the thing's state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingFrame( self, self->FindState("Drop") );
+
 		self->SetState (self->FindState("Drop"));
 	}
 }
@@ -26,8 +40,19 @@ DEFINE_ACTION_FUNCTION(AActor, A_StalkerChaseDecide)
 DEFINE_ACTION_FUNCTION(AActor, A_StalkerLookInit)
 {
 	FState *state;
+
+	// [BC] This is handled server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (self->flags & MF_NOGRAVITY)
 	{
+		// [BC] Set the thing's state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingFrame( self, self->FindState("LookCeiling") );
+
 		state = self->FindState("LookCeiling");
 	}
 	else
@@ -36,7 +61,12 @@ DEFINE_ACTION_FUNCTION(AActor, A_StalkerLookInit)
 	}
 	if (self->state->NextState != state)
 	{
+		// [BC] Set the thing's state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingFrame( self, state );
+
 		self->SetState (state);
+
 	}
 }
 
@@ -48,8 +78,18 @@ DEFINE_ACTION_FUNCTION(AActor, A_StalkerDrop)
 
 DEFINE_ACTION_FUNCTION(AActor, A_StalkerAttack)
 {
+	// [BC] This is handled server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (self->flags & MF_NOGRAVITY)
 	{
+		// [BC] Set the thing's state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingFrame( self, self->FindState("Drop") );
+
 		self->SetState (self->FindState("Drop"));
 	}
 	else if (self->target != NULL)
@@ -70,4 +110,3 @@ DEFINE_ACTION_FUNCTION(AActor, A_StalkerWalk)
 	S_Sound (self, CHAN_BODY, "stalker/walk", 1, ATTN_NORM);
 	A_Chase (self);
 }
-
