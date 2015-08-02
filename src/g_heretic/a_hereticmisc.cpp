@@ -15,6 +15,9 @@
 #include "r_data/r_translate.h"
 #include "doomstat.h"
 #include "farchive.h"
+// [BB] New #includes.
+#include "cl_demo.h"
+#include "sv_commands.h"
 
 // Include all the other Heretic stuff here to reduce compile time
 #include "a_chicken.cpp"
@@ -75,6 +78,12 @@ DEFINE_ACTION_FUNCTION(AActor, A_RemovePod)
 {
 	AActor *mo;
 
+	// [BC] Don't do this in client mode.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if ( (mo = self->master))
 	{
 		if (mo->special1 > 0)
@@ -102,6 +111,12 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_MakePod)
 	fixed_t y;
 	fixed_t z;
 
+	// [BC] Don't do this in client mode.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (self->special1 == MAX_GEN_PODS)
 	{ // Too many generated pods
 		return;
@@ -118,6 +133,15 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_MakePod)
 	mo->SetState (mo->FindState("Grow"));
 	P_ThrustMobj (mo, pr_makepod()<<24, (fixed_t)(4.5*FRACUNIT));
 	S_Sound (mo, CHAN_BODY, self->AttackSound, 1, ATTN_IDLE);
+
+	// [BC] If we're the server, spawn the pod and play the sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		SERVERCOMMANDS_SpawnMissile( mo );
+		SERVERCOMMANDS_SetThingFrame( mo, mo->state );
+		SERVERCOMMANDS_SoundActor( mo, CHAN_BODY, "world/podgrow", 1, ATTN_IDLE );
+	}
+
 	self->special1++; // Increment generated pod count
 	mo->master = self; // Link the generator to the pod
 	return;

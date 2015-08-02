@@ -52,6 +52,10 @@
 #include "farchive.h"
 #include "p_lnspec.h"
 #include "p_acs.h"
+// [BB] New #includes.
+#include "deathmatch.h"
+#include "cl_demo.h"
+#include "network.h"
 
 static void CopyPlayer (player_t *dst, player_t *src, const char *name);
 static void ReadOnePlayer (FArchive &arc, bool skipload);
@@ -263,24 +267,7 @@ static void CopyPlayer (player_t *dst, player_t *src, const char *name)
 	*dst = *src;
 	dst->cheats |= chasecam;
 
-	if (dst->isbot)
-	{
-		botinfo_t *thebot = bglobal.botinfo;
-		while (thebot && stricmp (name, thebot->name))
-		{
-			thebot = thebot->next;
-		}
-		if (thebot)
-		{
-			thebot->inuse = true;
-		}
-		bglobal.botnum++;
-		bglobal.botingame[dst - players] = true;
-	}
-	else
-	{
-		dst->userinfo = uibackup;
-	}
+	dst->userinfo = uibackup;
 	// Validate the skin
 	dst->userinfo.SkinNumChanged(R_FindSkin(skins[dst->userinfo.GetSkin()].name, dst->CurrentPlayerClass));
 
@@ -324,6 +311,18 @@ void P_SerializeWorld (FArchive &arc)
 	sector_t *sec;
 	line_t *li;
 	zone_t *zn;
+
+	// [BC] In client mode, just archive whether or not the line's been seen.
+	if ( NETWORK_InClientMode() )
+	{
+		// do lines
+		for (i = 0, li = lines; i < numlines; i++, li++)
+		{
+			arc << li->flags;
+		}
+
+		return;
+	}
 
 	// do sectors
 	for (i = 0, sec = sectors; i < numsectors; i++, sec++)
@@ -392,6 +391,57 @@ void P_SerializeWorld (FArchive &arc)
 		// begin of GZDoom additions
 		arc << sec->reflect[sector_t::ceiling] << sec->reflect[sector_t::floor];
 		// end of GZDoom additions
+
+		// [BC]
+		arc << sec->floorOrCeiling
+			<< sec->bCeilingHeightChange
+			<< sec->bFloorHeightChange
+			<< sec->SavedCeilingPlane
+			<< sec->SavedFloorPlane
+			<< sec->SavedCeilingTexZ
+			<< sec->SavedFloorTexZ
+			<< sec->bFlatChange
+			<< sec->SavedFloorPic
+			<< sec->SavedCeilingPic
+			<< sec->bLightChange
+			<< sec->SavedLightLevel;
+		if (arc.IsStoring ())
+		{
+			arc << sec->SavedColorMap->Color
+				<< sec->SavedColorMap->Fade;
+			BYTE sat = sec->SavedColorMap->Desaturate;
+			arc << sat;
+		}
+		else
+		{
+			PalEntry color, fade;
+			BYTE desaturate;
+			arc << color << fade
+				<< desaturate;
+			sec->SavedColorMap = GetSpecialLights (color, fade, desaturate);
+		}
+		arc << sec->SavedGravity
+			<< sec->SavedFloorXOffset
+			<< sec->SavedFloorYOffset
+			<< sec->SavedCeilingXOffset
+			<< sec->SavedCeilingYOffset
+			<< sec->SavedFloorXScale
+			<< sec->SavedFloorYScale
+			<< sec->SavedCeilingXScale
+			<< sec->SavedCeilingYScale
+			<< sec->SavedFloorAngle
+			<< sec->SavedCeilingAngle
+			<< sec->SavedBaseFloorAngle
+			<< sec->SavedBaseFloorYOffset
+			<< sec->SavedBaseCeilingAngle
+			<< sec->SavedBaseCeilingYOffset
+			<< sec->SavedFriction
+			<< sec->SavedMoveFactor
+			<< sec->SavedSpecial
+			<< sec->SavedDamage
+			<< sec->SavedMOD
+			<< sec->SavedCeilingReflect
+			<< sec->SavedFloorReflect;
 	}
 
 	// do lines
@@ -411,6 +461,12 @@ void P_SerializeWorld (FArchive &arc)
 			arc << li->args[0];
 		}
 		arc << li->args[1] << li->args[2] << li->args[3] << li->args[4];
+		// [BC]
+		arc << li->ulTexChangeFlags
+			<< li->SavedSpecial
+			<< li->SavedArgs[0] << li->SavedArgs[1] << li->SavedArgs[2] << li->SavedArgs[3] << li->SavedArgs[4]
+			<< li->SavedFlags
+			<< li->SavedAlpha;
 
 		for (j = 0; j < 2; j++)
 		{
@@ -427,6 +483,11 @@ void P_SerializeWorld (FArchive &arc)
 				<< si->RightSide
 				<< si->Index;
 			DBaseDecal::SerializeChain (arc, &si->AttachedDecals);
+			// [BC]
+			arc << si->SavedFlags
+				<< si->SavedTopTexture
+				<< si->SavedMidTexture
+				<< si->SavedBottomTexture;
 		}
 	}
 
@@ -456,7 +517,11 @@ void extsector_t::Serialize(FArchive &arc)
 		<< Midtex.Ceiling.AttachedLines
 		<< Midtex.Ceiling.AttachedSectors
 		<< Linked.Floor.Sectors
-		<< Linked.Ceiling.Sectors;
+		<< Linked.Ceiling.Sectors
+
+		// [Dusk] Store the move distance too
+		<< Midtex.Floor.MoveDistance
+		<< Midtex.Ceiling.MoveDistance;
 }
 
 FArchive &operator<< (FArchive &arc, side_t::part &p)

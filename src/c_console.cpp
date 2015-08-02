@@ -38,6 +38,7 @@
 #include <string.h>
 #include <math.h>
 #include <stdlib.h>
+#include <time.h>
 
 #include "version.h"
 #include "g_game.h"
@@ -64,8 +65,16 @@
 #include "g_level.h"
 #include "d_event.h"
 #include "d_player.h"
-
+// [BC] New #includes.
+#include "chat.h"
+#include "cl_demo.h"
+#include "cl_main.h"
+#include "cl_commands.h"
+#include "deathmatch.h"
+#include "network.h"
+#include "win32/g15/g15.h"
 #include "gi.h"
+#include "sv_rcon.h"
 
 #define CONSOLESIZE	16384	// Number of characters to store in console
 #define CONSOLELINES 256	// Max number of lines of console text
@@ -98,6 +107,12 @@ bool		cursoron = false;
 int			ConBottom, ConScroll, RowAdjust;
 int			CursorTicker;
 constate_e	ConsoleState = c_up;
+
+// [TP] Some functions print result directly to console.. when we need it to a string
+// instead. To keep as much ZDoom code unchanged, here's a hack to capture the result
+// into a string instead.
+static bool g_IsCapturing = false;
+static FString g_CaptureBuffer;
 
 static char ConsoleBuffer[CONSOLESIZE];
 static char *Lines[CONSOLELINES];
@@ -154,11 +169,8 @@ static int HistSize;
 
 CVAR (Float, con_notifytime, 3.f, CVAR_ARCHIVE)
 CVAR (Bool, con_centernotify, false, CVAR_ARCHIVE)
-CUSTOM_CVAR (Int, con_scaletext, 0, CVAR_ARCHIVE)		// Scale notify text at high resolutions?
-{
-	if (self < 0) self = 0;
-	if (self > 2) self = 2;
-}
+// [BC] con_scaletext is back to being a bool.
+CVAR (Bool, con_scaletext, 0, CVAR_ARCHIVE)		// Scale text at high resolutions?
 
 CUSTOM_CVAR(Float, con_alpha, 0.75f, CVAR_ARCHIVE)
 {
@@ -169,24 +181,81 @@ CUSTOM_CVAR(Float, con_alpha, 0.75f, CVAR_ARCHIVE)
 // Command to run when Ctrl-D is pressed at start of line
 CVAR (String, con_ctrl_d, "", CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 
-#define NUMNOTIFIES 4
+// [BC] Allow users to specify a virtual width and height when text scaling is enabled.
+CUSTOM_CVAR( Int, con_virtualwidth, 0, CVAR_ARCHIVE )
+{
+	// [RC] Less than 4 crashes in the menu, less than 8 in game. Set to 32 to be safe.
+	if ( self < 32 )
+		self = 32;
+}
+
+CUSTOM_CVAR( Int, con_virtualheight, 0, CVAR_ARCHIVE )
+{
+	// [RC] Less than 4 crashes in the menu, less than 8 in game. Set to 32 to be safe.
+	if ( self < 32 )
+		self = 32;
+}
+
+// [BC] Allow text colors?
+// [RC] Now a three-level setting. No/Yes/Not in chat.
+CVAR( Int, con_colorinmessages, 1, CVAR_ARCHIVE )
+
+// [BB] Add a timestamp to every string printed to the logfile.
+CVAR (Bool, sv_logfiletimestamp, true, CVAR_ARCHIVE)
+
+// [BB] Prepend the current date to the per-line timestamp.
+CVAR (Bool, sv_logfiletimestamp_usedate, false, CVAR_ARCHIVE)
+
+// [Dusk] This now refers to con_notifylines instead of hardcoded 4.
+#define NUMNOTIFIES ( static_cast<signed>( NotifyStrings.Size() )) // 4
 #define NOTIFYFADETIME 6
 
-static struct NotifyText
+// [Dusk] Changed from C-style array to TArray, typedefing the
+// struct type in the process.
+/*static*/ typedef struct NotifyText
 {
 	int TimeOut;
 	int PrintLevel;
 	FString Text;
-} NotifyStrings[NUMNOTIFIES];
+} NotifyText_t; // NotifyStrings[NUMNOTIFIES];
+static TArray<NotifyText_t> NotifyStrings;
+
+// [Dusk] Make the amount of notify lines user configurable.
+CUSTOM_CVAR (Int, con_notifylines, 4, CVAR_ARCHIVE)
+{
+	// This must not be negative!
+	if ( self <= 0 )
+		self = 1;
+	// [BB] Also don't allow this to be too big.
+	else if ( self > 50 )
+		self = 50;
+
+	// Whenever this is changed, the array needs to be resized to fit.
+	NotifyStrings.Resize( self );
+}
 
 static int NotifyTop, NotifyTopGoal;
 
-#define PRINTLEVELS 5
-int PrintColors[PRINTLEVELS+2] = { CR_RED, CR_GOLD, CR_GRAY, CR_GREEN, CR_GREEN, CR_GOLD };
+// [BC] Should we allow color codes?
+static	bool	g_bAllowColorCodes = true;
+
+// [BC] Is there a player executing a remote control command? If so, display messages that
+// are printed in the console as a result of his actions to him as well.
+static	ULONG	g_ulRCONPlayer = MAXPLAYERS;
+
+// [BC] Add a new print level for OpenGL messages.
+#define PRINTLEVELS 6
+int PrintColors[PRINTLEVELS+2] = { CR_RED, CR_GOLD, CR_GRAY, CR_GREEN, CR_BRICK, CR_GOLD, CR_ORANGE };
 
 static void setmsgcolor (int index, int color);
 
 FILE *Logfile = NULL;
+
+// [BC] The user's desired name of the logfile.
+char g_szDesiredLogFilename[256];
+
+// [RC] The actual name of the logfile (most likely g_szLogFilename with a timestamp).
+char g_szActualLogFilename[256];
 
 void C_AddNotifyString (int printlevel, const char *source);
 
@@ -213,7 +282,7 @@ CUSTOM_CVAR (Int, msg3color, 3, CVAR_ARCHIVE)
 	setmsgcolor (3, self);
 }
 
-CUSTOM_CVAR (Int, msg4color, 3, CVAR_ARCHIVE)
+CUSTOM_CVAR (Int, msg4color, 0, CVAR_ARCHIVE)
 {
 	setmsgcolor (4, self);
 }
@@ -298,6 +367,14 @@ void DequeueConsoleText ()
 
 void C_InitConback()
 {
+	// [BC] Initialize the name of the logfile.
+	g_szDesiredLogFilename[0] = 0;
+	g_szActualLogFilename[0] = 0;
+
+	// [BC] The server has no use for a console.
+	if ( Args->CheckParm( "-host" ))
+		return;
+
 	conback = TexMan.CheckForTexture ("CONBACK", FTexture::TEX_MiscPatch);
 
 	if (!conback.isValid())
@@ -399,6 +476,9 @@ void C_InitConsole (int width, int height, bool ingame)
 		if (fmtLines)
 			free (fmtLines);
 	}
+
+	// [Dusk] Initialize NotifyStrings
+	NotifyStrings.Resize( con_notifylines );
 }
 
 //==========================================================================
@@ -510,6 +590,10 @@ void C_DeinitConsole ()
 
 static void ClearConsole ()
 {
+	// [BC] The server has no need for this.
+	if ( Args->CheckParm( "-host" ))
+		return;
+
 	RowAdjust = 0;
 	TopLine = InsertLine = 0;
 	BufferRover = ConsoleBuffer;
@@ -536,6 +620,10 @@ void C_AddNotifyString (int printlevel, const char *source)
 		REPLACELINE
 	} addtype = NEWLINE;
 
+	// [BC] The server has no need for this.
+	if ( Args->CheckParm( "-host" ))
+		return;
+
 	FBrokenLines *lines;
 	int i, len, width;
 
@@ -551,7 +639,11 @@ void C_AddNotifyString (int printlevel, const char *source)
 		return;
 	}
 
-	width = con_scaletext > 1 ? DisplayWidth/2 : con_scaletext == 1 ? DisplayWidth / CleanXfac : DisplayWidth;
+	// [BC] If text scaling is enabled, allow users to specify a virtual screen width/height.
+	if ( con_scaletext )
+		width = con_virtualwidth;
+	else
+		width = DisplayWidth;
 
 	if (addtype == APPENDLINE && NotifyStrings[NUMNOTIFIES-1].PrintLevel == printlevel)
 	{
@@ -593,6 +685,20 @@ void C_AddNotifyString (int printlevel, const char *source)
 	}
 
 	NotifyTopGoal = 0;
+}
+
+//*****************************************************************************
+//
+void CONSOLE_SetAllowColorCodes( bool bAllow )
+{
+	g_bAllowColorCodes = bAllow;
+}
+
+//*****************************************************************************
+//
+void CONSOLE_SetRCONPlayer( ULONG ulPlayer )
+{
+	g_ulRCONPlayer = ulPlayer;
 }
 
 static int FlushLines (const char *start, const char *stop)
@@ -699,6 +805,8 @@ void AddToConsole (int printlevel, const char *text)
 		{
 			strcpy (work, Lines[InsertLine]);
 			strcat (work, text);
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				cc = CR_TAN;
 		}
 		else if (printlevel >= 0)
 		{
@@ -713,6 +821,8 @@ void AddToConsole (int printlevel, const char *text)
 		else
 		{
 			strcpy (work, text);
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				cc = CR_TAN;
 		}
 	}
 
@@ -816,6 +926,8 @@ void AddToConsole (int printlevel, const char *text)
 	}
 }
 
+void	SERVERCONSOLE_Print( char *pszString );
+
 /* Adds a string to the console and also to the notify buffer */
 int PrintString (int printlevel, const char *outline)
 {
@@ -824,11 +936,25 @@ int PrintString (int printlevel, const char *outline)
 		return 0;
 	}
 
+	// [TP] Possibly capture it instead
+	if ( C_IsCapturing() )
+	{
+		g_CaptureBuffer += outline;
+		return 0;
+	}
+
+	// [BB]: outline is const, it may NOT be altered! Since some of the functions below 
+	// alter the output string, we have to make a copy of it and only alter this.
+
+	char *outlinecopy = new char[strlen(outline)+1];
+	strcpy (outlinecopy,outline);
+
 	if (Logfile)
 	{
 		// Strip out any color escape sequences before writing to the log file
-		char * copy = new char[strlen(outline)+1];
-		const char * srcp = outline;
+		char * copy = new char[strlen(outlinecopy)+1];
+/* [BB] ST handles color codes a little differently (not all of them are converted to TEXTCOLOR_ESCAPE yet), so we strip them differently.
+		const char * srcp = outlinecopy;
 		char * dstp = copy;
 
 		while (*srcp != 0)
@@ -844,6 +970,25 @@ int PrintString (int printlevel, const char *outline)
 			}
 		}
 		*dstp=0;
+*/
+		strcpy (copy,outlinecopy);
+		V_ColorizeString( copy );
+		V_RemoveColorCodes( copy );
+
+		if( sv_logfiletimestamp )
+		{
+			// [BB] Generate time string "[YY:MM:DD;HH:MM:SS] " or "[HH:MM:SS] " and write it to the logfile.
+			time_t clock;
+			struct tm *lt;
+			time (&clock);
+			lt = localtime (&clock);
+			char time[26];
+			if ( sv_logfiletimestamp_usedate )
+				sprintf( time, "[%02d:%02d:%02d;%02d:%02d:%02d] ", lt->tm_year - 100, lt->tm_mon + 1, lt->tm_mday, lt->tm_hour, lt->tm_min, lt->tm_sec);
+			else
+				sprintf( time, "[%02d:%02d:%02d] ", lt->tm_hour, lt->tm_min, lt->tm_sec);
+			fputs (time, Logfile);
+		}
 
 		fputs (copy, Logfile);
 		delete [] copy;
@@ -852,18 +997,52 @@ int PrintString (int printlevel, const char *outline)
 //#endif
 	}
 
+	// For servers, dump message to console window.
+	if ( Args->CheckParm( "-host" ))
+	{
+		if ( printlevel != PRINT_LOW )
+		{			
+			// [RC] Send this to any connected RCON clients.
+			SERVER_RCON_Print( outlinecopy );
+			if ( g_ulRCONPlayer != MAXPLAYERS )
+				SERVER_PrintfPlayer( printlevel, g_ulRCONPlayer, "%s", outlinecopy );
+
+			SERVERCONSOLE_Print( outlinecopy );
+		}
+		
+		const int length = static_cast<int>(strlen (outlinecopy));
+		delete [] outlinecopy;
+		return length;
+	}
+	
+	// [RC] Send this to the G15 LCD, if enabled.
+	if ( G15_IsReady() )
+		G15_Printf( outlinecopy );
+
+	if ( g_bAllowColorCodes )
+		V_ColorizeString( outlinecopy );
+
+	// User wishes to remove color from all messages.
+	if ( con_colorinmessages == 0 )
+		V_RemoveColorCodes( outlinecopy );
+
 	if (printlevel != PRINT_LOG)
 	{
-		I_PrintStr (outline);
+		I_PrintStr (outlinecopy);
 
-		AddToConsole (printlevel, outline);
-		if (vidactive && screen && SmallFont)
+		AddToConsole (printlevel, outlinecopy);
+		if ( NETWORK_GetState( ) != NETSTATE_SERVER )
 		{
-			C_AddNotifyString (printlevel, outline);
-			maybedrawnow (false, false);
+			if (vidactive && screen && SmallFont)
+			{
+				C_AddNotifyString (printlevel, outlinecopy);
+				maybedrawnow (false, false);
+			}
 		}
 	}
-	return (int)strlen (outline);
+	const int length = static_cast<int>(strlen (outlinecopy));
+	delete [] outlinecopy;
+	return length;
 }
 
 extern bool gameisdead;
@@ -930,7 +1109,12 @@ void C_FlushDisplay ()
 
 void C_AdjustBottom ()
 {
-	if (gamestate == GS_FULLCONSOLE || gamestate == GS_STARTUP)
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
+
+	// [Leo] Keep the fullconsole if we are requesting/receiving a snapshot.
+	if ( gamestate == GS_FULLCONSOLE || gamestate == GS_STARTUP || 
+		( NETWORK_InClientMode() && ( CLIENT_GetConnectionState() != CTS_ACTIVE )) )
 		ConBottom = SCREENHEIGHT;
 	else if (ConBottom > SCREENHEIGHT / 2 || ConsoleState == c_down)
 		ConBottom = SCREENHEIGHT / 2;
@@ -938,6 +1122,9 @@ void C_AdjustBottom ()
 
 void C_NewModeAdjust ()
 {
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
+
 	C_InitConsole (SCREENWIDTH, SCREENHEIGHT, true);
 	C_FlushDisplay ();
 	C_AdjustBottom ();
@@ -945,6 +1132,9 @@ void C_NewModeAdjust ()
 
 void C_Ticker ()
 {
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
+
 	static int lasttic = 0;
 
 	if (lasttic == 0)
@@ -992,6 +1182,23 @@ void C_Ticker ()
 
 static void C_DrawNotifyText ()
 {
+	// [BC] Some variables for text scaling.
+	bool		bScale;
+	UCVarValue	ValWidth;
+	UCVarValue	ValHeight;
+
+	// [BC] Initialization.
+	ValWidth = con_virtualwidth.GetGenericRep( CVAR_Int );
+	ValHeight = con_virtualheight.GetGenericRep( CVAR_Int );
+	if (( con_scaletext ) && ( con_virtualwidth > 0 ) && ( con_virtualheight > 0 ))
+		bScale = true;
+	else
+		bScale = false;
+
+	// [BC] We have no need to do this in server mode.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
+
 	bool center = (con_centernotify != 0.f);
 	int i, line, lineadv, color, j, skip;
 	bool canskip;
@@ -1004,10 +1211,13 @@ static void C_DrawNotifyText ()
 	canskip = true;
 
 	lineadv = SmallFont->GetHeight ();
+	// [BC] We no longer need to scale lineadv since we specify virtual screen coordinates.
+/*
 	if (con_scaletext == 1)
 	{
 		lineadv *= CleanYfac;
 	}
+*/
 
 	BorderTopRefresh = screen->GetPageCount ();
 
@@ -1038,45 +1248,18 @@ static void C_DrawNotifyText ()
 			else
 				color = PrintColors[NotifyStrings[i].PrintLevel];
 
-			if (con_scaletext == 1)
-			{
-				if (!center)
-					screen->DrawText (SmallFont, color, 0, line, NotifyStrings[i].Text,
-						DTA_CleanNoMove, true, DTA_Alpha, alpha, TAG_DONE);
-				else
-					screen->DrawText (SmallFont, color, (SCREENWIDTH -
-						SmallFont->StringWidth (NotifyStrings[i].Text)*CleanXfac)/2,
-						line, NotifyStrings[i].Text, DTA_CleanNoMove, true,
-						DTA_Alpha, alpha, TAG_DONE);
-			}
-			else if (con_scaletext == 0)
-			{
-				if (!center)
-					screen->DrawText (SmallFont, color, 0, line, NotifyStrings[i].Text,
-						DTA_Alpha, alpha, TAG_DONE);
-				else
-					screen->DrawText (SmallFont, color, (SCREENWIDTH -
-						SmallFont->StringWidth (NotifyStrings[i].Text))/2,
-						line, NotifyStrings[i].Text,
-						DTA_Alpha, alpha, TAG_DONE);
-			}
+			// [BC] If we want scaling, handle that here.
+			if (!center)
+				screen->DrawText (SmallFont, color, 0, line, NotifyStrings[i].Text,
+					DTA_UseVirtualScreen, bScale, // [BB]
+					DTA_Alpha, alpha, TAG_DONE);
 			else
-			{
-				if (!center)
-					screen->DrawText (SmallFont, color, 0, line, NotifyStrings[i].Text,
-						DTA_VirtualWidth, screen->GetWidth() / 2, 
-						DTA_VirtualHeight, screen->GetHeight() / 2,
-						DTA_KeepRatio, true,
-						DTA_Alpha, alpha, TAG_DONE);
-				else
-					screen->DrawText (SmallFont, color, (screen->GetWidth() / 2 -
-						SmallFont->StringWidth (NotifyStrings[i].Text))/2,
-						line, NotifyStrings[i].Text,
-						DTA_VirtualWidth, screen->GetWidth() / 2, 
-						DTA_VirtualHeight, screen->GetHeight() / 2,
-						DTA_KeepRatio, true,
-						DTA_Alpha, alpha, TAG_DONE);
-			}
+				screen->DrawText (SmallFont, color, ( ( bScale ? ValWidth.Int : SCREENWIDTH ) -
+					SmallFont->StringWidth (NotifyStrings[i].Text))/2,
+					line, NotifyStrings[i].Text,
+					DTA_UseVirtualScreen, bScale, // [BB]
+					DTA_Alpha, alpha, TAG_DONE);
+
 			line += lineadv;
 			canskip = false;
 		}
@@ -1099,6 +1282,9 @@ static void C_DrawNotifyText ()
 
 void C_InitTicker (const char *label, unsigned int max, bool showpercent)
 {
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
+
 	TickerPercent = showpercent;
 	TickerMax = max;
 	TickerLabel = label;
@@ -1108,6 +1294,9 @@ void C_InitTicker (const char *label, unsigned int max, bool showpercent)
 
 void C_SetTicker (unsigned int at, bool forceUpdate)
 {
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
+
 	TickerAt = at > TickerMax ? TickerMax : at;
 	maybedrawnow (true, TickerVisible ? forceUpdate : false);
 }
@@ -1116,6 +1305,12 @@ void C_DrawConsole (bool hw2d)
 {
 	static int oldbottom = 0;
 	int lines, left, offset;
+	// [BC] String for drawing the version.
+	char	szString[64];
+
+	// [BC] No need to draw the console in server mode.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
 
 	left = LEFTMARGIN;
 	lines = (ConBottom-ConFont->GetHeight()*2)/ConFont->GetHeight();
@@ -1166,10 +1361,16 @@ void C_DrawConsole (bool hw2d)
 
 		if (ConBottom >= 12)
 		{
+			// [BC] In addition to drawing the program version, draw the ZDoom version as well.
+			// [RC] Also draw revision number, but break these up so it's legible.
+			sprintf( szString, "\\cIv%s (\\cD%s\\cI) \\ch%s", GetVersionString(), ZDOOMVERSIONSTR, GetGitTime() );
+			V_ColorizeString( szString );
+
 			screen->DrawText (ConFont, CR_ORANGE, SCREENWIDTH - 8 -
-				ConFont->StringWidth (GetVersionString()),
-				ConBottom - ConFont->GetHeight() - 4,
-				GetVersionString(), TAG_DONE);
+				ConFont->StringWidth( szString ),
+				ConBottom - ConFont->GetHeight( ) - 4,
+				szString, TAG_DONE );
+
 			if (TickerMax)
 			{
 				char tickstr[256];
@@ -1302,6 +1503,10 @@ void C_DrawConsole (bool hw2d)
 
 void C_FullConsole ()
 {
+	// [BC] The server doesn't have a console.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
+
 	if (demoplayback)
 		G_CheckDemoStatus ();
 	D_QuitNetGame ();
@@ -1326,36 +1531,78 @@ void C_FullConsole ()
 
 void C_ToggleConsole ()
 {
+	// [Leo] Don't let the console close while requesting/receiving a snapshot.
+	if (( NETWORK_GetState( ) == NETSTATE_SERVER ) ||
+		( NETWORK_InClientMode() && ( CLIENT_GetConnectionState() != CTS_ACTIVE )))
+		return;
+
 	if (gamestate == GS_DEMOSCREEN || demoplayback)
 	{
 		gameaction = ga_fullconsole;
 	}
-	else if (!chatmodeon && (ConsoleState == c_up || ConsoleState == c_rising) && menuactive == MENU_Off)
+	else if (( CHAT_GetChatMode( ) == 0 && (ConsoleState == c_up || ConsoleState == c_rising)) && menuactive == MENU_Off)
 	{
 		ConsoleState = c_falling;
 		HistPos = NULL;
 		TabbedLast = false;
 		TabbedList = false;
+
+		// [BB] Don't change the displayed console status when a demo is played.
+		if ( CLIENTDEMO_IsPlaying( ) == false )
+			players[consoleplayer].bInConsole = true;
+
+		// [RC] Tell the server so we get an "in console" icon.
+		if ( NETWORK_GetState( ) == NETSTATE_CLIENT )
+			CLIENTCOMMANDS_EnterConsole( );
 	}
 	else if (gamestate != GS_FULLCONSOLE && gamestate != GS_STARTUP)
 	{
 		ConsoleState = c_rising;
 		C_FlushDisplay ();
+
+		// [BB] Don't change the displayed console status when a demo is played.
+		if ( CLIENTDEMO_IsPlaying( ) == false )
+			players[consoleplayer].bInConsole = false;
+
+		// [RC] Tell the server so our "in console" icon is removed.
+		if ( NETWORK_GetState( ) == NETSTATE_CLIENT )
+			CLIENTCOMMANDS_ExitConsole( );
+
 	}
 }
 
 void C_HideConsole ()
 {
+	// [Leo] Don't let the console close while requesting/receiving a snapshot.
+	if (( NETWORK_GetState( ) == NETSTATE_SERVER ) ||
+		( NETWORK_InClientMode() && ( CLIENT_GetConnectionState() != CTS_ACTIVE )))
+		return;
+
 	if (gamestate != GS_FULLCONSOLE)
 	{
 		ConsoleState = c_up;
 		ConBottom = 0;
 		HistPos = NULL;
+
+		// [BB] We are not in console anymore, so set bInConsole if necessary.
+		if ( players[consoleplayer].bInConsole )
+		{
+			// [BB] Don't change the displayed console status when a demo is played.
+			if ( CLIENTDEMO_IsPlaying( ) == false )
+				players[consoleplayer].bInConsole = false;
+
+			// [RC] Tell the server so our "in console" icon is removed.
+			if ( NETWORK_GetState( ) == NETSTATE_CLIENT )
+				CLIENTCOMMANDS_ExitConsole( );
+		}
 	}
 }
 
 static void makestartposgood ()
 {
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
+
 	int n;
 	int pos = CmdLine[259];
 	int curs = CmdLine[1];
@@ -1382,6 +1629,9 @@ static void makestartposgood ()
 
 static bool C_HandleKey (event_t *ev, BYTE *buffer, int len)
 {
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return ( true );
+
 	int i;
 	int data1 = ev->data1;
 
@@ -1706,7 +1956,9 @@ static bool C_HandleKey (event_t *ev, BYTE *buffer, int len)
 			{
 				return false;
 			}
-			else if (gamestate == GS_FULLCONSOLE)
+			else if ((gamestate == GS_FULLCONSOLE) ||
+				( NETWORK_InClientMode() &&
+				( CLIENT_GetConnectionState( ) != CTS_ACTIVE )))
 			{
 				C_DoCommand ("menu_main");
 			}
@@ -1786,6 +2038,9 @@ static void C_PasteText(FString clip, BYTE *buffer, int len)
 
 bool C_Responder (event_t *ev)
 {
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return ( false );
+
 	if (ev->type != EV_GUI_Event ||
 		ConsoleState == c_up ||
 		ConsoleState == c_rising ||
@@ -1810,6 +2065,9 @@ CCMD (history)
 
 CCMD (clear)
 {
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
+
 	C_FlushDisplay ();
 	ClearConsole ();
 }
@@ -1865,6 +2123,9 @@ void C_MidPrint (FFont *font, const char *msg)
 
 void C_MidPrintBold (FFont *font, const char *msg)
 {
+	if (StatusBar == NULL)
+		return;
+
 	if (msg)
 	{
 		AddToConsole (-1, bar2);
@@ -2020,7 +2281,19 @@ static void C_TabComplete (bool goForward)
 		TabSize = CmdLine[0] - TabStart + 2;
 
 		if (!FindTabCommand ((char *)(CmdLine + TabStart), &TabPos, TabSize))
-			return;		// No initial matches
+		{
+			// [RC] Hack to auto-complete RCON commands.
+			if ( ( TabSize > 5 ) && ( strstr((char *)(CmdLine + TabStart), "rcon") != NULL ) )
+			{
+				TabStart += 5;
+				TabSize -=5;
+
+				if (!FindTabCommand ((char *)(CmdLine + TabStart), &TabPos, TabSize))
+					return;		// No matches even without "RCON".
+			}
+			else
+				return;		// No initial matches
+		}
 
 		// Show a list of possible completions, if more than one.
 		if (TabbedList || con_notablist)
@@ -2144,4 +2417,46 @@ static bool C_TabCompleteList ()
 		return false;
 	}
 	return true;
+}
+
+//
+// [TP]
+//
+TArray<FString> C_GetTabCompletes (const FString& part)
+{
+	TArray<FString> result;
+
+	for ( unsigned int i = 0; i < TabCommands.Size(); ++i )
+	{
+		if ( FindDiffPoint( TabCommands[i].TabName, part ) >= int( part.Len() ))
+			result.Push( FString( TabCommands[i].TabName.GetChars() ));
+	}
+
+	return result;
+}
+
+//
+// [TP] Begins capture mode
+//
+void C_StartCapture()
+{
+	g_IsCapturing = true;
+	g_CaptureBuffer = "";
+}
+
+//
+// [TP] Ends capture mode and returns the result
+//
+FString C_EndCapture()
+{
+	g_IsCapturing = false;
+	return g_CaptureBuffer;
+}
+
+//
+// [TP] Are we currently capturing console output?
+//
+bool C_IsCapturing()
+{
+	return g_IsCapturing;
 }
