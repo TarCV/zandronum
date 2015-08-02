@@ -60,6 +60,8 @@
 #include "gl/shaders/gl_shader.h"
 #include "gl/textures/gl_material.h"
 #include "gl/utility/gl_clock.h"
+// [BB] New #includes.
+#include "gamemode.h"
 
 CVAR(Bool, gl_usecolorblending, true, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 CVAR(Bool, gl_spritebrightfog, false, CVAR_ARCHIVE|CVAR_GLOBALCONFIG);
@@ -464,6 +466,10 @@ void GLSprite::Process(AActor* thing,sector_t * sector)
 	// If this thing is in a map section that's not in view it can't possibly be visible
 	if (!(currentmapsection[thing->subsector->mapsection>>3] & (1 << (thing->subsector->mapsection & 7)))) return;
 
+	// [BB] If the actor is supposed to be invisible to the player, skip it here.
+	if ( !thing->IsVisibleToPlayer() )
+		return;
+
 	// [RH] Interpolate the sprite's position to make it look smooth
 	fixed_t thingx = thing->PrevX + FixedMul (r_TicFrac, thing->x - thing->PrevX);
 	fixed_t thingy = thing->PrevY + FixedMul (r_TicFrac, thing->y - thing->PrevY);
@@ -744,6 +750,12 @@ void GLSprite::Process(AActor* thing,sector_t * sector)
 			Colormap.LightColor.r=
 			Colormap.LightColor.g=
 			Colormap.LightColor.b=(255+v+v)/3;
+		}
+		// [BB] This makes sure that actors, which have lFixedColormap set, are renderes accordingly.
+		// For example a player using a doom sphere is rendered red for the other players.
+		if ( thing->lFixedColormap != NOFIXEDCOLORMAP )
+		{
+			Colormap.colormap = CM_FIRSTSPECIALCOLORMAP + thing->lFixedColormap;
 		}
 	}
 

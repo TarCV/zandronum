@@ -57,6 +57,11 @@
 #include "p_acs.h"
 #include "gstrings.h"
 #include "version.h"
+// [BB] New #includes.
+#include "deathmatch.h"
+#include "cooperative.h"
+#include "gamemode.h"
+#include "team.h"
 
 #define ARTIFLASH_OFFSET (statusBar->invBarOffset+6)
 enum
@@ -999,6 +1004,10 @@ public:
 
 	void Draw (EHudState state)
 	{
+		// [BB] When joining a server in ST CPlayer->mo is NULL.
+		if ( CPlayer->mo == NULL )
+			return;
+
 		DBaseStatusBar::Draw(state);
 		if (script->cleanX <= 0)
 		{ // Calculate cleanX and cleanY
@@ -1542,6 +1551,58 @@ void SBarInfoMainBlock::DrawAux(const SBarInfoMainBlock *block, DSBarInfo *statu
 		else
 			statusBar->SetScaled(false);
 	}
+}
+
+// [BB] For the time being, Skulltag still needs CreateDoomStatusBar from doom_sbar.cpp.
+DBaseStatusBar *CreateDoomStatusBar();
+
+// [BB] Zandronum collects the sbar generation code in this function.
+DBaseStatusBar *CreateStatusBar ()
+{
+	DBaseStatusBar *sbar = NULL;
+
+	if (SBarInfoScript[SCRIPT_CUSTOM] != NULL)
+	{
+		int cstype = SBarInfoScript[SCRIPT_CUSTOM]->GetGameType();
+
+		// [BB] Skulltag doesn't use the SBARINFO version of the Doom status bar yet.
+		if( ( cstype & GAME_DoomChex ) )
+		{
+			sbar = CreateDoomStatusBar ();
+		}
+		else
+		//Did the user specify a "base"
+		if(cstype == GAME_Strife)
+		{
+			sbar = CreateStrifeStatusBar();
+		}
+		else if(cstype == GAME_Any) //Use the default, empty or custom.
+		{
+			sbar = CreateCustomStatusBar(SCRIPT_CUSTOM);
+		}
+		else
+		{
+			sbar = CreateCustomStatusBar(SCRIPT_DEFAULT);
+		}
+	}
+	if (sbar == NULL)
+	{
+		if (gameinfo.gametype & GAME_DoomChex)
+		{
+			sbar = CreateCustomStatusBar (SCRIPT_DEFAULT);
+		}
+		else if (gameinfo.gametype == GAME_Strife)
+		{
+			sbar = CreateStrifeStatusBar ();
+		}
+		else
+		{
+			sbar = new DBaseStatusBar (0);
+		}
+	}
+	GC::WriteBarrier(sbar);
+
+	return sbar;
 }
 
 #include "sbarinfo_commands.cpp"

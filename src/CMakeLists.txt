@@ -9,6 +9,8 @@ include( CheckFunctionExists )
 include( CheckCXXCompilerFlag )
 include( FindPkgConfig )
 include( FindOpenGL )
+# [BL] I can't seem to find where ZDoom gets this
+include( CheckLibraryExists )
 
 if( NOT APPLE )
 	option( NO_ASM "Disable assembly code" OFF )
@@ -23,6 +25,10 @@ if( "${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" OR "${CMAKE_CXX_COMPILER_ID}" STRE
 	if( APPLE )
 		set( NO_STRIP ON )
 	endif( APPLE )
+	# [EP]
+	if( RELEASE_WITH_DEBUG_FILE )
+		set( NO_STRIP ON )
+	endif( RELEASE_WITH_DEBUG_FILE )
 endif( "${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" )
 
 option( DYN_FLUIDSYNTH "Dynamically load fluidsynth" ON )
@@ -144,15 +150,35 @@ if( WIN32 )
 		ws2_32
 		setupapi
 		oleaut32 )
+
+	# [TP] We need DelayImp too. ZDoom added this later on but the fix cannot be easily backported.
+	set( ZDOOM_LIBS ${ZDOOM_LIBS} DelayImp )
 else( WIN32 )
 	if( APPLE )
 		set( FMOD_SEARCH_PATHS "/Developer/FMOD Programmers API Mac/api" )
 		set( FMOD_INC_PATH_SUFFIXES PATH_SUFFIXES inc )
 		set( FMOD_LIB_PATH_SUFFIXES PATH_SUFFIXES lib )
 		set( NO_GTK ON )
+
+		# [BL] We need to compile without ASM code for now.
+		# [AL] OpenGL on OS X is enabled by default
+		set( NO_ASM ON )
 	else( APPLE )
 		option( NO_GTK "Disable GTK+ dialogs (Not applicable to Windows)" )
 		option( VALGRIND "Add special Valgrind sequences to self-modifying code" )
+		# [BB] Added SERVERONLY, NO_SOUND and NO_GL.
+		option( SERVERONLY "Build a server only binary" )
+		option( NO_SOUND "Turn of sound support" )
+		option( NO_GL "Turn of OpenGL support" )
+
+		# [BB] The server doesn't need sound, GTK or OpenGL.
+		if( SERVERONLY )
+			set( NO_SOUND ON )
+			set( NO_GTK ON )
+			set( NO_GL ON )
+			add_definitions ( -DSERVER_ONLY=1 )
+			set( ZDOOM_EXE_NAME ${ZDOOM_EXE_NAME}-server )
+		endif( SERVERONLY )
 
 		set( FMOD_SEARCH_PATHS
 			/usr/local/include
@@ -201,13 +227,28 @@ else( WIN32 )
 		message( SEND_ERROR "SDL is required for building." )
 	endif( NOT SDL_FOUND )
 	set( ZDOOM_LIBS ${ZDOOM_LIBS} "${SDL_LIBRARY}" )
-	include_directories( "${SDL_INCLUDE_DIR}" )
+	# [BB] Don't put the SDL path in inverted commas. At least on FreeBSD 8.1 this
+	# variable contains two directories.
+	include_directories( ${SDL_INCLUDE_DIR} )
 
 	find_path( FPU_CONTROL_DIR fpu_control.h )
 	if( FPU_CONTROL_DIR )
 		include_directories( ${FPU_CONTROL_DIR} )
 		add_definitions( -DHAVE_FPU_CONTROL )
 	endif( FPU_CONTROL_DIR )
+
+	# [BB] Only the Windows version has the server console GUI.
+	add_definitions( -DNO_SERVER_GUI=1 )
+
+	# [BB] Turning off sound needs special handling in the code, activated with the define NO_SOUND.
+	if( NO_SOUND )
+		add_definitions( -DNO_SOUND=1 )
+	endif( NO_SOUND )
+
+	# [BB] Turning off OpenGL needs special handling in the code, activated with the define NO_GL.
+	if( NO_GL )
+		add_definitions( -DNO_GL=1 )
+	endif( NO_GL )
 endif( WIN32 )
 
 if( X64 )
@@ -215,16 +256,18 @@ if( X64 )
 endif( X64 )
 
 # Check if we have OpenGL
-
-if( NOT OPENGL_FOUND )
-	message( FATAL_ERROR "OpenGL is required for building." )
-endif( NOT OPENGL_FOUND )
-if( NOT OPENGL_GLU_FOUND )
-	message( FATAL_ERROR "OpenGL GLU is required for building." )
-endif( NOT OPENGL_GLU_FOUND )
-
-set( ZDOOM_LIBS ${ZDOOM_LIBS} ${OPENGL_LIBRARIES} )
-include_directories( ${OPENGL_INCLUDE_DIR} )
+# [BB] Only if necessary
+if( NOT NO_GL )
+	if( NOT OPENGL_FOUND )
+		message( FATAL_ERROR "OpenGL is required for building." )
+	endif( NOT OPENGL_FOUND )
+	if( NOT OPENGL_GLU_FOUND )
+		message( FATAL_ERROR "OpenGL GLU is required for building." )
+	endif( NOT OPENGL_GLU_FOUND )
+	
+	set( ZDOOM_LIBS ${ZDOOM_LIBS} ${OPENGL_LIBRARIES} )
+	include_directories( ${OPENGL_INCLUDE_DIR} )
+endif( NOT NO_GL )
 
 # Decide on the name of the FMOD library we want to use.
 
@@ -257,7 +300,10 @@ endif( NOT FMOD_INCLUDE_DIR )
 if( FMOD_INCLUDE_DIR )
 	message( STATUS "FMOD include files found at ${FMOD_INCLUDE_DIR}" )
 else( FMOD_INCLUDE_DIR )
-	message( SEND_ERROR "Could not find FMOD include files" )
+	# [BB] Without sound, we don't need FMOD.
+	if ( NOT NO_SOUND )
+		message( SEND_ERROR "Could not find FMOD include files" )
+	endif ( NOT NO_SOUND )
 endif( FMOD_INCLUDE_DIR )
 
 
@@ -276,7 +322,10 @@ endif( WIN32 OR APPLE )
 if( FMOD_LIBRARY )
 	message( STATUS "FMOD library found at ${FMOD_LIBRARY}" )
 else( FMOD_LIBRARY )
-	message( SEND_ERROR "Could not find FMOD library" )
+	# [BB] Without sound, we don't need FMOD.
+	if ( NOT NO_SOUND )
+		message( SEND_ERROR "Could not find FMOD library" )
+	endif ( NOT NO_SOUND )
 endif( FMOD_LIBRARY )
 
 
@@ -461,6 +510,12 @@ if( "${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" OR "${CMAKE_CXX_COMPILER_ID}" STRE
 	endif( NOT NO_STRIP )
 endif( "${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" )
 
+# MSVC Flags
+
+if( MSVC )
+	set( CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /DELAYLOAD:\"fmodex${X64}.dll\"" )
+endif( MSVC )
+
 # Check for functions that may or may not exist.
 
 CHECK_FUNCTION_EXISTS( filelength FILELENGTH_EXISTS )
@@ -534,8 +589,19 @@ add_custom_target( revision_check ALL
 # Libraries ZDoom needs
 
 message( STATUS "Fluid synth libs: ${FLUIDSYNTH_LIBRARIES}" )
-set( ZDOOM_LIBS ${ZDOOM_LIBS} "${ZLIB_LIBRARIES}" "${JPEG_LIBRARIES}" "${BZIP2_LIBRARIES}" "${GME_LIBRARIES}" "${FMOD_LIBRARY}" )
-include_directories( "${ZLIB_INCLUDE_DIR}" "${FMOD_INCLUDE_DIR}" "${BZIP2_INCLUDE_DIR}" "${LZMA_INCLUDE_DIR}" "${JPEG_INCLUDE_DIR}" "${GME_INCLUDE_DIR}" )
+set( ZDOOM_LIBS ${ZDOOM_LIBS} "${ZLIB_LIBRARIES}" "${JPEG_LIBRARIES}" "${BZIP2_LIBRARIES}" "${GME_LIBRARIES}" )
+# [BB] Without sound, we don't need FMOD.
+if ( NOT NO_SOUND )
+	set( ZDOOM_LIBS ${ZDOOM_LIBS} "${FMOD_LIBRARY}" )
+	include_directories( "${ZLIB_INCLUDE_DIR}" "${FMOD_INCLUDE_DIR}" "${BZIP2_INCLUDE_DIR}" "${LZMA_INCLUDE_DIR}" "${JPEG_INCLUDE_DIR}" "${GME_INCLUDE_DIR}" )
+else ( NOT NO_SOUND )
+	include_directories( "${ZLIB_INCLUDE_DIR}" "${BZIP2_INCLUDE_DIR}" "${LZMA_INCLUDE_DIR}" "${JPEG_INCLUDE_DIR}" "${GME_INCLUDE_DIR}" )
+endif ( NOT NO_SOUND )
+
+# [BB] We need OpenSSL for csrp.
+FIND_PACKAGE ( OpenSSL REQUIRED )
+include_directories( ${OPENSSL_INCLUDE_DIR} )
+set ( ZDOOM_LIBS ${ZDOOM_LIBS} ${OPENSSL_LIBRARIES} )
 
 if( FLUIDSYNTH_FOUND )
   if( NOT DYN_FLUIDSYNTH)
@@ -572,6 +638,24 @@ set( PLAT_WIN32_SOURCES
 	win32/st_start.cpp
 	win32/win32gliface.cpp
 	win32/win32video.cpp )
+# [BB] Add files for G15 support and the Windows server console.
+set( PLAT_WIN32_SOURCES ${PLAT_WIN32_SOURCES}
+	win32/g15/include/EZ_LCD.cpp
+	win32/g15/include/LCDAnimatedBitmap.cpp
+	win32/g15/include/LCDBase.cpp
+	win32/g15/include/LCDBitmap.cpp
+	win32/g15/include/LCDCollection.cpp
+	win32/g15/include/LCDGfx.cpp
+	win32/g15/include/LCDIcon.cpp
+	win32/g15/include/LCDManager.cpp
+	win32/g15/include/LCDOutput.cpp
+	win32/g15/include/LCDProgressBar.cpp
+	win32/g15/include/LCDScrollingText.cpp
+	win32/g15/include/LCDStreamingText.cpp
+	win32/g15/include/LCDText.cpp
+	win32/serverconsole/serverconsole.cpp
+	win32/serverconsole/serverconsole_dmflags.cpp
+	win32/serverconsole/serverconsole_settings.cpp )
 set( PLAT_SDL_SOURCES
 	sdl/crashcatcher.c
 	sdl/hardware.cpp
@@ -601,17 +685,22 @@ if( WIN32 )
 		set( SYSTEM_SOURCES ${SYSTEM_SOURCES} zdoom-rc.o )
 	else( "${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" )
 		set( SYSTEM_SOURCES ${SYSTEM_SOURCES} win32/zdoom.rc )
+		# [BB] Added RC file for the Windows server console.
+		set( SYSTEM_SOURCES ${SYSTEM_SOURCES} win32/serverconsole/serverconsole.rc )
 	endif( "${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" )
 
 	# [BB] Maxim Stepin's hq2x/3x/4x pixel upsampling algorithm as library. Currently only used with VC++.
 	if( MSVC )
-	set( SYSTEM_SOURCES
-		${SYSTEM_SOURCES}
-		gl/hqnx/Image.cpp
-		gl/hqnx/hq2x.cpp
-		gl/hqnx/hq3x.cpp
-		gl/hqnx/hq4x.cpp
-	)
+		# [BB] Only if necessary
+		if( NOT NO_GL )
+			set( SYSTEM_SOURCES
+				${SYSTEM_SOURCES}
+				gl/hqnx/Image.cpp
+				gl/hqnx/hq2x.cpp
+				gl/hqnx/hq3x.cpp
+				gl/hqnx/hq4x.cpp
+		)
+		ENDIF ( NOT NO_GL )
 	endif( MSVC )
 else( WIN32 )
 	set( SYSTEM_SOURCES_DIR sdl )
@@ -670,6 +759,77 @@ if( DYN_FLUIDSYNTH )
 elseif( FLUIDSYNTH_FOUND )
 	add_definitions( -DHAVE_FLUIDSYNTH )
 endif( DYN_FLUIDSYNTH )
+
+# [BB] Only complile the gl sources, if we want GL support.
+if( NOT NO_GL )
+	set( GL_SOURCES
+		gl/api/gl_api.cpp
+		gl/data/gl_sections.cpp
+		gl/data/gl_data.cpp
+		gl/data/gl_portaldata.cpp
+		gl/data/gl_setup.cpp
+		gl/data/gl_vertexbuffer.cpp
+		gl/dynlights/a_dynlight.cpp
+		gl/utility/gl_clock.cpp
+		gl/utility/gl_cycler.cpp
+		gl/utility/gl_geometric.cpp
+		gl/renderer/gl_renderer.cpp
+		gl/renderer/gl_renderstate.cpp
+		gl/renderer/gl_lightdata.cpp
+		gl/textures/gl_hwtexture.cpp
+		gl/textures/gl_texture.cpp
+		gl/textures/gl_material.cpp
+		gl/textures/gl_hirestex.cpp
+		gl/textures/gl_bitmap.cpp
+		gl/textures/gl_translate.cpp
+		gl/textures/gl_hqresize.cpp
+		gl/textures/gl_skyboxtexture.cpp
+		gl/scene/gl_bsp.cpp
+		gl/scene/gl_fakeflat.cpp
+		gl/scene/gl_clipper.cpp
+		gl/scene/gl_decal.cpp
+		gl/scene/gl_drawinfo.cpp
+		gl/scene/gl_flats.cpp
+		gl/scene/gl_walls.cpp
+		gl/scene/gl_sprite.cpp
+		gl/scene/gl_skydome.cpp
+		gl/scene/gl_renderhacks.cpp
+		gl/scene/gl_weapon.cpp
+		gl/scene/gl_scene.cpp
+		gl/scene/gl_sky.cpp
+		gl/scene/gl_portal.cpp
+		gl/scene/gl_walls_draw.cpp
+		gl/scene/gl_vertex.cpp
+		gl/scene/gl_spritelight.cpp
+		gl/dynlights/gl_dynlight.cpp
+		gl/dynlights/gl_glow.cpp
+		gl/dynlights/gl_dynlight1.cpp
+		gl/dynlights/gl_lightbuffer.cpp
+		gl/shaders/gl_shader.cpp
+		gl/shaders/gl_texshader.cpp
+		gl/system/gl_interface.cpp
+		gl/system/gl_framebuffer.cpp
+		gl/system/gl_menu.cpp
+		gl/system/gl_wipe.cpp
+		gl/models/gl_models_md3.cpp
+		gl/models/gl_models_md2.cpp
+		gl/models/gl_models.cpp
+		gl/models/gl_voxels.cpp
+	)
+        # [BB] Maxim Stepin's hq2x/3x/4x pixel upsampling algorithm as library. Currently only used with VC++.
+        if( MSVC )
+	set( GL_SOURCES
+                ${GL_SOURCES}
+		gl/hqnx/Image.cpp
+		gl/hqnx/hq2x.cpp
+		gl/hqnx/hq3x.cpp
+		gl/hqnx/hq4x.cpp
+        )
+        endif( MSVC )
+else( NOT NO_GL )
+	set( GL_SOURCES sdl/glstubs.cpp )
+endif( NOT NO_GL )
+
 
 # Project files should be aware of the header files. We can GLOB these since
 # there's generally a new cpp for every header so this file will get changed
@@ -818,37 +978,59 @@ add_executable( zdoom WIN32
 	x86.cpp
 	actorptrselect.cpp
 	am_map.cpp
-	b_bot.cpp
-	b_func.cpp
-	b_game.cpp
-	b_move.cpp
-	b_think.cpp
-	bbannouncer.cpp
+	announcer.cpp #ST
+	astar.cpp #ST
+	#b_bot.cpp
+	#b_func.cpp
+	#b_game.cpp
+	#b_move.cpp
+	#b_think.cpp
+	#bbannouncer.cpp
+	botcommands.cpp #ST
+	botpath.cpp #ST
+	bots.cpp #ST
+	browser.cpp #ST
+	callvote.cpp #ST
+	campaign.cpp #ST
 	c_bind.cpp
 	c_cmds.cpp
 	c_console.cpp
 	c_cvars.cpp
 	c_dispatch.cpp
 	c_expr.cpp
+	chat.cpp #ST
+	cl_commands.cpp #ST
+	cl_demo.cpp #ST
+	cl_main.cpp  #ST
+	cl_pred.cpp #ST
+	cl_statistics.cpp #ST
 	cmdlib.cpp
 	colormatcher.cpp
 	compatibility.cpp
 	configfile.cpp
-	ct_chat.cpp
+	#ct_chat.cpp
+	# [BB] Unforunately Skulltag's system that ensures that only one of the cvars cooperative, deathmatch and teamgame
+	# is true at any time makes it important in which order the object files are linked. Otherwise using "+deathmatch 1" as
+	# argument will not work properly. This definitely is absolutely awful and should ne made independent of the linking order.
+	# For the time being, the linking order is changed to fix the problems.
+	#cooperative.cpp #ST
 	d_dehacked.cpp
 	d_iwad.cpp
 	d_main.cpp
 	d_net.cpp
 	d_netinfo.cpp
 	d_protocol.cpp
+	deathmatch.cpp #ST
 	decallib.cpp
 	dobject.cpp
 	dobjgc.cpp
 	dobjtype.cpp
+	domination.cpp #ST
 	doomdef.cpp
 	doomstat.cpp
 	dsectoreffect.cpp
 	dthinker.cpp
+	duel.cpp #ST
 	f_wipe.cpp
 	farchive.cpp
 	files.cpp
@@ -858,12 +1040,16 @@ add_executable( zdoom WIN32
 	g_mapinfo.cpp
 	g_skill.cpp
 	gameconfigfile.cpp
+	gamemode.cpp #ST
 	gi.cpp
 	gitinfo.cpp
-	hu_scores.cpp
+	#hu_scores.cpp
 	i_net.cpp
 	info.cpp
+	invasion.cpp #ST
+	joinqueue.cpp #ST
 	keysections.cpp
+	lastmanstanding.cpp #ST
 	lumpconfigfile.cpp
 	m_alloc.cpp
 	m_argv.cpp
@@ -871,12 +1057,21 @@ add_executable( zdoom WIN32
 	m_cheat.cpp
 	m_joy.cpp
 	m_misc.cpp
+	m_oldrandom.cpp #ST
 	m_png.cpp
 	m_random.cpp
 	m_specialpaths.cpp
+	maprotation.cpp #ST
 	memarena.cpp
 	md5.cpp
+	medal.cpp #ST
 	name.cpp
+	network.cpp #ST
+	networkshared.cpp #ST
+	network/cl_auth.cpp #ZA
+	network/nettraffic.cpp #ST
+	network/srp.cpp #ZA
+	network/sv_auth.cpp #ZA
 	nodebuild.cpp
 	nodebuild_classify_nosse2.cpp
 	nodebuild_events.cpp
@@ -923,7 +1118,9 @@ add_executable( zdoom WIN32
 	p_writemap.cpp
 	p_xlat.cpp
 	parsecontext.cpp
+	platform.cpp #ST
 	po_man.cpp
+	possession.cpp #ST
 	r_swrenderer.cpp
 	r_utility.cpp
 	r_3dfloors.cpp
@@ -942,14 +1139,25 @@ add_executable( zdoom WIN32
 	s_sndseq.cpp
 	s_sound.cpp
 	sc_man.cpp
+	scoreboard.cpp #ST
+	sectinfo.cpp #ST
 	st_stuff.cpp
 	statistics.cpp
 	stats.cpp
 	stringtable.cpp
 	strnatcmp.c
+	survival.cpp #ST
+	sv_ban.cpp #ST
+	sv_commands.cpp #ST
+	sv_main.cpp #ST
+	sv_master.cpp #ST
+	sv_rcon.cpp #ST
+	sv_save.cpp #ST
 	tables.cpp
+	team.cpp #ST
 	teaminfo.cpp
 	tempfiles.cpp
+	unlagged.cpp #ST
 	v_blend.cpp
 	v_collection.cpp
 	v_draw.cpp
@@ -960,9 +1168,18 @@ add_executable( zdoom WIN32
 	v_video.cpp
 	w_wad.cpp
 	wi_stuff.cpp
+	za_database.cpp #ZA
 	zstrformat.cpp
 	zstring.cpp
+	cooperative.cpp #ST [BB] This needs to be linked after deathmatch.cpp and team.cpp (see above).
+	# [BL] Huffman is ZAN
+	huffman/bitreader.cpp
+	huffman/bitwriter.cpp
+	huffman/huffcodec.cpp
+	huffman/huffman.cpp
+	g_doom/a_doomartifacts.cpp #ST
 	g_doom/a_doommisc.cpp
+	g_doom/doom_sbar.cpp #ST doesn't use the SBARINFO version of the Doom status bar yet.
 	g_heretic/a_hereticmisc.cpp
 	g_hexen/a_hexenmisc.cpp
 	g_raven/a_artitele.cpp
@@ -977,9 +1194,11 @@ add_executable( zdoom WIN32
 	g_shared/a_debris.cpp
 	g_shared/a_decals.cpp
 	g_shared/a_fastprojectile.cpp
+	g_shared/a_flags.cpp #ST
 	g_shared/a_flashfader.cpp
 	g_shared/a_fountain.cpp
 	g_shared/a_hatetarget.cpp
+	g_shared/a_icon.cpp #ST
 	g_shared/a_keys.cpp
 	g_shared/a_lightning.cpp
 	g_shared/a_mapmarker.cpp
@@ -989,6 +1208,7 @@ add_executable( zdoom WIN32
 	g_shared/a_puzzleitems.cpp
 	g_shared/a_quake.cpp
 	g_shared/a_randomspawner.cpp
+	g_shared/a_returnzone.cpp #ST
 	g_shared/a_secrettrigger.cpp
 	g_shared/a_sectoraction.cpp
 	g_shared/a_setcolor.cpp
@@ -997,14 +1217,17 @@ add_executable( zdoom WIN32
 	g_shared/a_soundsequence.cpp
 	g_shared/a_spark.cpp
 	g_shared/a_specialspot.cpp
+	g_shared/a_springpad.cpp #ST
 	g_shared/a_waterzone.cpp
 	g_shared/a_weaponpiece.cpp
 	g_shared/a_weapons.cpp
 	g_shared/hudmessages.cpp
+	g_shared/pwo.cpp #ST
 	g_shared/sbarinfo.cpp
 	g_shared/sbar_mugshot.cpp
 	g_shared/shared_hud.cpp
 	g_shared/shared_sbar.cpp
+	g_shared/st_hud.cpp #ST
 	intermission/intermission.cpp
 	intermission/intermission_parse.cpp
 	menu/colorpickermenu.cpp
@@ -1015,63 +1238,14 @@ add_executable( zdoom WIN32
 	menu/menudef.cpp
 	menu/menuinput.cpp
 	menu/messagebox.cpp
+	menu/multiplayermenu.cpp #ZA
 	menu/optionmenu.cpp
 	menu/playerdisplay.cpp
 	menu/playermenu.cpp
 	menu/readthis.cpp
 	menu/videomenu.cpp
-	gl/api/gl_api.cpp
-	gl/data/gl_sections.cpp
-	gl/data/gl_data.cpp
-	gl/data/gl_portaldata.cpp
-	gl/data/gl_setup.cpp
-	gl/data/gl_vertexbuffer.cpp
-	gl/dynlights/a_dynlight.cpp
-	gl/utility/gl_clock.cpp
-	gl/utility/gl_cycler.cpp
-	gl/utility/gl_geometric.cpp
-	gl/renderer/gl_renderer.cpp
-	gl/renderer/gl_renderstate.cpp
-	gl/renderer/gl_lightdata.cpp
-	gl/textures/gl_hwtexture.cpp
-	gl/textures/gl_texture.cpp
-	gl/textures/gl_material.cpp
-	gl/textures/gl_hirestex.cpp
-	gl/textures/gl_bitmap.cpp
-	gl/textures/gl_translate.cpp
-	gl/textures/gl_hqresize.cpp
-	gl/textures/gl_skyboxtexture.cpp
-	gl/scene/gl_bsp.cpp
-	gl/scene/gl_fakeflat.cpp
-	gl/scene/gl_clipper.cpp
-	gl/scene/gl_decal.cpp
-	gl/scene/gl_drawinfo.cpp
-	gl/scene/gl_flats.cpp
-	gl/scene/gl_walls.cpp
-	gl/scene/gl_sprite.cpp
-	gl/scene/gl_skydome.cpp
-	gl/scene/gl_renderhacks.cpp
-	gl/scene/gl_weapon.cpp
-	gl/scene/gl_scene.cpp
-	gl/scene/gl_sky.cpp
-	gl/scene/gl_portal.cpp
-	gl/scene/gl_walls_draw.cpp
-	gl/scene/gl_vertex.cpp
-	gl/scene/gl_spritelight.cpp
-	gl/dynlights/gl_dynlight.cpp
-	gl/dynlights/gl_glow.cpp
-	gl/dynlights/gl_dynlight1.cpp
-	gl/dynlights/gl_lightbuffer.cpp
-	gl/shaders/gl_shader.cpp
-	gl/shaders/gl_texshader.cpp
-	gl/system/gl_interface.cpp
-	gl/system/gl_framebuffer.cpp
-	gl/system/gl_menu.cpp
-	gl/system/gl_wipe.cpp
-	gl/models/gl_models_md3.cpp
-	gl/models/gl_models_md2.cpp
-	gl/models/gl_models.cpp
-	gl/models/gl_voxels.cpp
+	${GL_SOURCES}
+
 	oplsynth/fmopl.cpp
 	oplsynth/mlopl.cpp
 	oplsynth/mlopl_io.cpp
@@ -1150,17 +1324,20 @@ add_executable( zdoom WIN32
 	timidity/playmidi.cpp
 	timidity/resample.cpp
 	timidity/timidity.cpp
+	win32/g15/g15.cpp #ST
 	xlat/parse_xlat.cpp
-	fragglescript/t_fspic.cpp
-	fragglescript/t_func.cpp
-	fragglescript/t_load.cpp
-	fragglescript/t_oper.cpp
-	fragglescript/t_parse.cpp
-	fragglescript/t_prepro.cpp
-	fragglescript/t_script.cpp
-	fragglescript/t_spec.cpp
-	fragglescript/t_variable.cpp
-	fragglescript/t_cmd.cpp
+	../upnpnat/upnpnat.cpp #ST
+	../upnpnat/xmlParser.cpp #ST
+	#fragglescript/t_fspic.cpp
+	#fragglescript/t_func.cpp
+	#fragglescript/t_load.cpp
+	#fragglescript/t_oper.cpp
+	#fragglescript/t_parse.cpp
+	#fragglescript/t_prepro.cpp
+	#fragglescript/t_script.cpp
+	#fragglescript/t_spec.cpp
+	#fragglescript/t_variable.cpp
+	#fragglescript/t_cmd.cpp
 	r_data/colormaps.cpp
 	r_data/sprites.cpp
 	r_data/voxels.cpp
@@ -1179,7 +1356,8 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "SunOS")
 	set( ZDOOM_LIBS ${ZDOOM_LIBS} nsl socket)
 endif(${CMAKE_SYSTEM_NAME} STREQUAL "SunOS")
 
-target_link_libraries( zdoom ${ZDOOM_LIBS} gdtoa dumb lzma )
+# [BB] Added GeoIP, huffman & sqlite
+target_link_libraries( zdoom ${ZDOOM_LIBS} gdtoa dumb lzma GeoIP sqlite3 )
 include_directories( .
 	g_doom
 	g_heretic
@@ -1187,6 +1365,8 @@ include_directories( .
 	g_raven
 	g_strife
 	g_shared
+	huffman #ZAN
+	Linux
 	oplsynth
 	sound
 	textures
@@ -1195,6 +1375,8 @@ include_directories( .
 	xlat
 	../gdtoa
 	../dumb/include
+        ../sqlite/ #ZA
+	../upnpnat/ #ST
 	${CMAKE_BINARY_DIR}/gdtoa
 	${SYSTEM_SOURCES_DIR} )
 
@@ -1259,6 +1441,16 @@ if( "${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" OR "${CMAKE_CXX_COMPILER_ID}" STRE
 		set_source_files_properties( x86.cpp PROPERTIES COMPILE_FLAGS "-msse2 -mmmx" )
 	endif( SSE_MATTERS )
 endif( "${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" )
+
+# [EP]
+if ( RELEASE_WITH_DEBUG_FILE )
+	add_custom_command(TARGET zdoom POST_BUILD
+		COMMAND ${CMAKE_OBJCOPY} --only-keep-debug ${ZDOOM_OUTPUT_DIR}/${ZDOOM_EXE_NAME} ${ZDOOM_OUTPUT_DIR}/${ZDOOM_EXE_NAME}.debug
+		COMMAND ${CMAKE_STRIP} --strip-debug --strip-unneeded ${ZDOOM_OUTPUT_DIR}/${ZDOOM_EXE_NAME}
+		COMMAND ${CMAKE_OBJCOPY} --add-gnu-debuglink ${ZDOOM_OUTPUT_DIR}/${ZDOOM_EXE_NAME}.debug ${ZDOOM_OUTPUT_DIR}/${ZDOOM_EXE_NAME}
+		COMMENT "Creating '${ZDOOM_EXE_NAME}.debug' ..."
+	)
+endif ( RELEASE_WITH_DEBUG_FILE )
 
 source_group("Assembly Files\\ia32" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/asm_ia32/.+")
 source_group("Assembly Files\\x86_64" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/asm_x86_64/.+")

@@ -38,6 +38,8 @@
 #include "g_level.h"
 #include "w_wad.h"
 #include "gi.h"
+// [BB] New #includes.
+#include "network.h"
 
 
 static void ReplaceIntermission(FName intname,FIntermissionDescriptor *desc)
@@ -726,6 +728,10 @@ FName FMapInfoParser::ParseEndGame()
 
 FName FMapInfoParser::CheckEndSequence()
 {
+	// [BB] In multiplayer games end sequences are not supported. So just ignore them.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return NAME_None;
+
 	const char *seqname = NULL;
 
 	if (sc.Compare("endgame"))

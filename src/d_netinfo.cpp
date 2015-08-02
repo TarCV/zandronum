@@ -57,6 +57,15 @@
 #include "templates.h"
 #include "cmdlib.h"
 #include "farchive.h"
+// [BC] New #includes.
+#include "network.h"
+#include "cl_commands.h"
+#include "cl_demo.h"
+#include "cl_main.h"
+#include "deathmatch.h"
+#include "gamemode.h"
+#include "team.h"
+#include "menu/menu.h"
 
 static FRandom pr_pickteam ("PickRandomTeam");
 
@@ -66,14 +75,139 @@ EXTERN_CVAR (Bool, teamplay)
 CVAR (Float,	autoaim,				5000.f,		CVAR_USERINFO | CVAR_ARCHIVE);
 CVAR (String,	name,					"Player",	CVAR_USERINFO | CVAR_ARCHIVE);
 CVAR (Color,	color,					0x40cf00,	CVAR_USERINFO | CVAR_ARCHIVE);
-CVAR (Int,		colorset,				0,			CVAR_USERINFO | CVAR_ARCHIVE);
+// [BB] For now Zandronum doesn't let the player use the color sets.
+const int colorset = -1;
+//CVAR (Int,		colorset,				0,			CVAR_USERINFO | CVAR_ARCHIVE);
 CVAR (String,	skin,					"base",		CVAR_USERINFO | CVAR_ARCHIVE);
-CVAR (Int,		team,					TEAM_NONE,	CVAR_USERINFO | CVAR_ARCHIVE);
+// [BC] "team" is no longer a cvar.
+//CVAR (Int,		team,					TEAM_NONE,	CVAR_USERINFO | CVAR_ARCHIVE);
 CVAR (String,	gender,					"male",		CVAR_USERINFO | CVAR_ARCHIVE);
-CVAR (Bool,		neverswitchonpickup,	false,		CVAR_USERINFO | CVAR_ARCHIVE);
+// [BC] Changed "neverswitchonpickup" to allow it to be set 3 different ways, instead of "on/off".
+CVAR (Int,		switchonpickup,			1,			CVAR_USERINFO | CVAR_ARCHIVE);
 CVAR (Float,	movebob,				0.25f,		CVAR_USERINFO | CVAR_ARCHIVE);
 CVAR (Float,	stillbob,				0.f,		CVAR_USERINFO | CVAR_ARCHIVE);
 CVAR (String,	playerclass,			"Fighter",	CVAR_USERINFO | CVAR_ARCHIVE);
+// [BC] New userinfo entries for Skulltag.
+CVAR (Int,		railcolor,				0,			CVAR_USERINFO | CVAR_ARCHIVE);
+CVAR (Int,		handicap,				0,			CVAR_USERINFO | CVAR_ARCHIVE);
+// [Spleen] Let the user enable or disable unlagged shots for themselves. [CK] Now a bitfield.
+CVAR (Flag,		cl_unlagged,				cl_clientflags, CLIENTFLAGS_UNLAGGED );
+// [BB] Let the user decide whether he wants to respawn when pressing fire. [CK] Now a bitfield.
+CVAR (Flag, 	cl_respawnonfire, 			cl_clientflags, CLIENTFLAGS_RESPAWNONFIRE );
+// [CK] Unlagged settings where we can choose ping unlagged.
+CVAR (Flag,		cl_ping_unlagged,			cl_clientflags, CLIENTFLAGS_PING_UNLAGGED );
+// [BB] Let the user control how often the server sends updated player positions to him.
+CVAR (Int,		cl_ticsperupdate,			3,		CVAR_USERINFO | CVAR_ARCHIVE);
+// [BB] Let the user control specify his connection speed (higher is faster).
+CVAR (Int,		cl_connectiontype,			1,		CVAR_USERINFO | CVAR_ARCHIVE);
+// [CK] Let the user control if they want clientside puffs or not.
+CVAR (Flag,		cl_clientsidepuffs,			cl_clientflags, CLIENTFLAGS_CLIENTSIDEPUFFS );
+
+// [TP] Userinfo changes yet to be sent.
+static DWORD PendingUserinfoChanges = 0;
+
+// [CK] CVARs that affect cl_clientflags
+CUSTOM_CVAR ( Int, cl_clientflags, CLIENTFLAGS_DEFAULT, CVAR_USERINFO | CVAR_ARCHIVE )
+{
+	// Predicted puffs will look really bad if unlagged is off, therefore anyone
+	// who turns off unlagged will also turn off clientside puffs.
+	// We will invert the clientside puff flag, then AND it to turn off the
+	// clientside puff flag since unlagged is off.
+	if ( ( ( self & CLIENTFLAGS_UNLAGGED ) == 0 ) && ( self & CLIENTFLAGS_CLIENTSIDEPUFFS ) )
+	{
+		self = ( self & ( ~CLIENTFLAGS_CLIENTSIDEPUFFS ) );
+		Printf( "Clientside puffs have been disabled as unlagged has been turned off.\n" );
+	}
+}
+
+// ============================================================================
+//
+// [TP] cl_overrideplayercolors
+//
+// Lets the user force custom ally/enemy colors.
+//
+enum OverridePlayerColorsValue
+{
+	CL_OPC_Never, // never override
+	CL_OPC_NoTeams, // only in non-team gamemodes
+	CL_OPC_Max2Teams, // not with more than 2 teams
+	CL_OPC_Always, // always
+
+	CL_OPC_NumValues
+};
+
+// ============================================================================
+//
+CUSTOM_CVAR( Color, cl_allycolor, 0xFFFFFF, CVAR_ARCHIVE )
+{
+	D_UpdatePlayerColors();
+}
+
+CUSTOM_CVAR( Color, cl_enemycolor, 0x707070, CVAR_ARCHIVE )
+{
+	D_UpdatePlayerColors();
+}
+
+CUSTOM_CVAR( Int, cl_overrideplayercolors, CL_OPC_Never, CVAR_ARCHIVE )
+{
+	if ( self < 0 )
+		self = 0;
+	else if ( self > CL_OPC_NumValues - 1 )
+		self = CL_OPC_NumValues - 1;
+	else
+		D_UpdatePlayerColors();
+}
+
+// ============================================================================
+//
+// [TP] Should we be overriding player colors?
+//
+bool D_ShouldOverridePlayerColors()
+{
+	// Sure as heck not overriding any colors as the server.
+	if ( NETWORK_GetState() == NETSTATE_SERVER )
+		return false;
+
+	bool withteams = GAMEMODE_GetCurrentFlags() & GMF_PLAYERSONTEAMS;
+
+	switch ( OverridePlayerColorsValue ( (int) cl_overrideplayercolors ))
+	{
+		case CL_OPC_NumValues:
+		case CL_OPC_Never:
+			return false;
+
+		case CL_OPC_NoTeams:
+			return withteams == false;
+
+		case CL_OPC_Max2Teams:
+			return ( withteams == false ) || ( TEAM_GetNumAvailableTeams() <= 2 );
+
+		case CL_OPC_Always:
+			return true;
+	}
+
+	return false;
+}
+
+// ============================================================================
+//
+// [TP] Update player colors now
+//
+void D_UpdatePlayerColors( ULONG ulPlayer )
+{
+	if ( ulPlayer == MAXPLAYERS )
+		R_BuildAllPlayerTranslations();
+	else
+		R_BuildPlayerTranslation( ulPlayer );
+
+	// [TP] Reattach the status bar to refresh the mugshot.
+	if ( StatusBar != NULL )
+		StatusBar->AttachToPlayer( StatusBar->CPlayer );
+}
+
+// [BB] Two variables to keep track of client side name changes.
+static	ULONG	g_ulLastNameChangeTime = 0;
+static	FString g_oldPlayerName;
 
 enum
 {
@@ -81,13 +215,22 @@ enum
 	INFO_Autoaim,
 	INFO_Color,
 	INFO_Skin,
-	INFO_Team,
+	//INFO_Team,
 	INFO_Gender,
-	INFO_NeverSwitchOnPickup,
+	INFO_SwitchOnPickup,
+	INFO_Railcolor,
+	INFO_Handicap,
 	INFO_MoveBob,
 	INFO_StillBob,
 	INFO_PlayerClass,
 	INFO_ColorSet,
+
+	// [BB]
+	INFO_Ticsperupdate,
+	// [BB]
+	INFO_ConnectionType,
+	// [CK}
+	INFO_ClientFlags
 };
 
 const char *GenderNames[3] = { "male", "female", "other" };
@@ -143,6 +286,13 @@ FString D_UnescapeUserInfo (const char *str, size_t len)
 
 int D_GenderToInt (const char *gender)
 {
+	if ( !stricmp( gender, "0" ))
+		return ( GENDER_MALE );
+	if ( !stricmp( gender, "1" ))
+		return ( GENDER_FEMALE );
+	if ( !stricmp( gender, "2" ))
+		return ( GENDER_NEUTER );
+
 	if (!stricmp (gender, "female"))
 		return GENDER_FEMALE;
 	else if (!stricmp (gender, "other") || !stricmp (gender, "cyborg"))
@@ -195,6 +345,7 @@ void D_GetPlayerColor (int player, float *h, float *s, float *v, FPlayerColorSet
 	RGBtoHSV (RPART(color)/255.f, GPART(color)/255.f, BPART(color)/255.f,
 		h, s, v);
 
+/* [BB] New team code by Karate Chris. Currently not used in ST.
 	if (teamplay && TeamLibrary.IsValidTeam((team = info->GetTeam())) && !Teams[team].GetAllowCustomPlayerColor())
 	{
 		// In team play, force the player to use the team's hue
@@ -212,12 +363,42 @@ void D_GetPlayerColor (int player, float *h, float *s, float *v, FPlayerColorSet
 		// Make sure not to pass back any colorset in teamplay.
 		colorset = NULL;
 	}
+*/
 	if (set != NULL)
 	{
 		*set = colorset;
 	}
+
+	if ( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode( )) & GMF_PLAYERSONTEAMS )
+	{
+		if ( players[player].bOnTeam && ( TEAM_IsCustomPlayerColorAllowed ( players[player].ulTeam ) == false ) )
+		{
+			int			nColor;
+
+			// Get the color string from the team object.
+			nColor = TEAM_GetColor( players[player].ulTeam );
+
+			// Convert.
+			RGBtoHSV( RPART( nColor ) / 255.f, GPART( nColor ) / 255.f, BPART( nColor ) / 255.f,
+				h, s, v );
+		}
+	}
+
+	// [Dusk] The user can override these colors.
+	int cameraplayer;
+	if (( D_ShouldOverridePlayerColors() )
+		&& ( players[consoleplayer].camera != NULL )
+		&& ( PLAYER_IsValidPlayerWithMo( cameraplayer = players[consoleplayer].camera->player - players ))
+		&& ( PLAYER_IsValidPlayerWithMo( player ))
+		&& ( players[cameraplayer].bSpectating == false ))
+	{
+		bool isally = players[cameraplayer].mo->IsTeammate( players[player].mo );
+		int color = isally ? cl_allycolor : cl_enemycolor;
+		RGBtoHSV( RPART( color ) / 255.f, GPART( color ) / 255.f, BPART( color ) / 255.f, h, s, v );
+	}
 }
 
+/* [BB] New team code by Karate Chris. Currently not used in ST.
 // Find out which teams are present. If there is only one,
 // then another team should be chosen at random.
 //
@@ -339,9 +520,10 @@ static void UpdateTeam (int pnum, int team, bool update)
 		*static_cast<FIntCVar *>((*info)[NAME_Team]) = TEAM_NONE;
 	}
 }
-
+*/
 int D_GetFragCount (player_t *player)
 {
+/* [BB] New team code by Karate Chris. Currently not used in ST.
 	const int team = player->userinfo.GetTeam();
 	if (!teamplay || !TeamLibrary.IsValidTeam(team))
 	{
@@ -361,6 +543,15 @@ int D_GetFragCount (player_t *player)
 		}
 		return count;
 	}
+*/
+	if (( teamplay == false ) || player->bOnTeam == false )
+	{
+		return player->fragcount;
+	}
+	else
+	{
+		return ( TEAM_GetFragCount( player->ulTeam ));
+	}
 }
 
 void D_SetupUserInfo ()
@@ -368,11 +559,26 @@ void D_SetupUserInfo ()
 	int i;
 	userinfo_t *coninfo;
 
-	// Reset everybody's userinfo to a default state.
-	for (i = 0; i < MAXPLAYERS; i++)
+	// [BC] Servers and client demos don't do this.
+	if (( NETWORK_GetState( ) == NETSTATE_SERVER ) ||
+		( CLIENTDEMO_IsPlaying( )))
 	{
-		players[i].userinfo.Reset();
+		return;
 	}
+
+	// Reset everybody's userinfo to a default state.
+	// [BC] Don't reset everyone's userinfo in multiplayer games, since we don't want to
+	// erase EVERYONE'S userinfo if we change ours.
+	if ( NETWORK_GetState( ) == NETSTATE_SINGLE )
+	{
+		for (i = 0; i < MAXPLAYERS; i++)
+		{
+			players[i].userinfo.Reset();
+		}
+	}
+	// [BB] We rebuild coninfo, so better reset it first.
+	else
+		players[consoleplayer].userinfo.Reset();
 	// Initialize the console player's user info
 	coninfo = &players[consoleplayer].userinfo;
 
@@ -386,10 +592,18 @@ void D_SetupUserInfo ()
 			switch (cvarname.GetIndex())
 			{
 			// Some cvars don't copy their original value directly.
-			case NAME_Team:			coninfo->TeamChanged(team); break;
+			// [BB] Zandronum still uses its own team code.
+			//case NAME_Team:			coninfo->TeamChanged(team); break;
 			case NAME_Skin:			coninfo->SkinChanged(skin); break;
 			case NAME_Gender:		coninfo->GenderChanged(gender); break;
 			case NAME_PlayerClass:	coninfo->PlayerClassChanged(playerclass); break;
+			// [BB]
+			case NAME_RailColor:			coninfo->RailColorChanged(railcolor); break;
+			case NAME_Handicap:				coninfo->HandicapChanged(handicap); break;
+			case NAME_CL_TicsPerUpdate:		coninfo->TicsPerUpdateChanged(cl_ticsperupdate); break;
+			case NAME_CL_ConnectionType:	coninfo->ConnectionTypeChanged(cl_connectiontype); break;
+			case NAME_CL_ClientFlags:		coninfo->ClientFlagsChanged(cl_clientflags); break;
+
 			// The rest do.
 			default:
 				newcvar = coninfo->CheckKey(cvarname);
@@ -437,6 +651,7 @@ void userinfo_t::Reset()
 	}
 }
 
+/* [BB] Zandronum still uses its own team code.
 int userinfo_t::TeamChanged(int team)
 {
 	if (teamplay && !TeamLibrary.IsValidTeam(team))
@@ -446,10 +661,12 @@ int userinfo_t::TeamChanged(int team)
 	*static_cast<FIntCVar *>((*this)[NAME_Team]) = team;
 	return team;
 }
+*/
 
 int userinfo_t::SkinChanged(const char *skinname)
 {
-	int skinnum = R_FindSkin(skinname, 0);
+	// [BB] We need to take into account CurrentPlayerClass when determining the skin.
+	int skinnum = R_FindSkin(skinname, players[consoleplayer].CurrentPlayerClass);
 	*static_cast<FIntCVar *>((*this)[NAME_Skin]) = skinnum;
 	return skinnum;
 }
@@ -493,7 +710,8 @@ uint32 userinfo_t::ColorChanged(const char *colorname)
 	UCVarValue val;
 	val.String = const_cast<char *>(colorname);
 	color->SetGenericRep(val, CVAR_String);
-	*static_cast<FIntCVar *>((*this)[NAME_ColorSet]) = -1;
+	// [BB] For now Zandronum doesn't let the player use the color sets.
+	//*static_cast<FIntCVar *>((*this)[NAME_ColorSet]) = -1;
 	return *color;
 }
 
@@ -508,12 +726,109 @@ uint32 userinfo_t::ColorChanged(uint32 colorval)
 	return colorval;
 }
 
+// [BB]
+void userinfo_t::NameChanged(const char *name)
+{
+	FString cleanedName = name;
+	// [BB] Don't allow the CVAR to be longer than MAXPLAYERNAME, userinfo_t::netname
+	// can't be longer anyway. Note: The length limit needs to be applied in colorized form.
+	cleanedName = cleanedName.Left(MAXPLAYERNAME);
+	V_CleanPlayerName ( cleanedName );
+	*static_cast<FStringCVar *>((*this)[NAME_Name]) = cleanedName;
+}
+
+// [BB]
+int userinfo_t::SwitchOnPickupChanged(int switchonpickup)
+{
+	switchonpickup = clamp ( switchonpickup, 0, 2 );
+	*static_cast<FIntCVar *>((*this)[NAME_SwitchOnPickup]) = switchonpickup;
+	return switchonpickup;
+}
+
+// [BB]
+int userinfo_t::GenderNumChanged(int gendernum)
+{
+	// [BB] Make sure that the gender is valid.
+	gendernum = clamp ( gendernum, 0, 2 );
+	*static_cast<FIntCVar *>((*this)[NAME_Gender]) = gendernum;
+	return gendernum;
+}
+
+// [BB]
+int userinfo_t::RailColorChanged(int railcolor)
+{
+	if ( (*this)[NAME_RailColor] == NULL )
+	{
+		Printf ( "Error: No RailColor key found!\n" );
+		return 0;
+	}
+	*static_cast<FIntCVar *>((*this)[NAME_RailColor]) = railcolor;
+	return railcolor;
+}
+
+// [BB]
+int userinfo_t::HandicapChanged(int handicap)
+{
+	if ( (*this)[NAME_Handicap] == NULL )
+	{
+		Printf ( "Error: No Handicap key found!\n" );
+		return 0;
+	}
+	handicap = clamp ( handicap, 0, deh.MaxSoulsphere );
+	*static_cast<FIntCVar *>((*this)[NAME_Handicap]) = handicap;
+	return handicap;
+}
+
+// [BB]
+int userinfo_t::TicsPerUpdateChanged(int ticsperupdate)
+{
+	if ( (*this)[NAME_CL_TicsPerUpdate] == NULL )
+	{
+		Printf ( "Error: No TicsPerUpdate key found!\n" );
+		return 0;
+	}
+	ticsperupdate = clamp ( ticsperupdate, 1, 3 );
+	*static_cast<FIntCVar *>((*this)[NAME_CL_TicsPerUpdate]) = ticsperupdate;
+	return ticsperupdate;
+}
+
+// [BB]
+int userinfo_t::ConnectionTypeChanged(int connectiontype)
+{
+	if ( (*this)[NAME_CL_ConnectionType] == NULL )
+	{
+		Printf ( "Error: No ConnectionType key found!\n" );
+		return 0;
+	}
+	connectiontype = clamp ( connectiontype, 0, 1 );
+	*static_cast<FIntCVar *>((*this)[NAME_CL_ConnectionType]) = connectiontype;
+	return connectiontype;
+}
+
+// [BB]
+int userinfo_t::ClientFlagsChanged(int flags)
+{
+	if ( (*this)[NAME_CL_ClientFlags] == NULL )
+	{
+		Printf ( "Error: No ClientFlags key found!\n" );
+		return 0;
+	}
+	*static_cast<FIntCVar *>((*this)[NAME_CL_ClientFlags]) = flags;
+	return flags;
+}
+
 void D_UserInfoChanged (FBaseCVar *cvar)
 {
 	UCVarValue val;
 	FString escaped_val;
 	char foo[256];
+	ULONG	ulUpdateFlags;
 
+	// Server doesn't do this.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
+
+	ulUpdateFlags = 0;
 	if (cvar == &autoaim)
 	{
 		if (autoaim < 0.0f)
@@ -526,6 +841,141 @@ void D_UserInfoChanged (FBaseCVar *cvar)
 			autoaim = 5000.f;
 			return;
 		}
+
+		ulUpdateFlags |= USERINFO_AIMDISTANCE;
+	}
+	// Allow users to colorize their name.
+	else if ( cvar == &name )
+	{
+		val = cvar->GetGenericRep( CVAR_String );
+		FString cleanedName = val.String;
+		// [BB] V_CleanPlayerName removes all backslashes, including those from '\c'.
+		// To clean the name, we first convert the color codes, clean the name and
+		// then restore the color codes again.
+		V_ColorizeString ( cleanedName );
+		// [BB] Don't allow the CVAR to be longer than MAXPLAYERNAME, userinfo_t::netname
+		// can't be longer anyway. Note: The length limit needs to be applied in colorized form.
+		cleanedName = cleanedName.Left(MAXPLAYERNAME);
+		V_CleanPlayerName ( cleanedName );
+		V_UnColorizeString ( cleanedName );
+		// [BB] The name needed to be cleaned. Update the CVAR name with the cleaned
+		// string and return (updating the name calls D_UserInfoChanged again).
+		if ( strcmp ( cleanedName.GetChars(), val.String ) != 0 )
+		{
+			name = cleanedName;
+			return;
+		}
+		// [BB] Get rid of this cast.
+		V_ColorizeString( const_cast<char *> ( val.String ) );
+
+		ulUpdateFlags |= USERINFO_NAME;
+
+		// [BB] We don't want clients to change their name too often.
+		if ( NETWORK_GetState( ) == NETSTATE_CLIENT )
+		{
+			// [BB] The name was not actually changed, so no need to do anything.
+			if ( strcmp ( g_oldPlayerName.GetChars(), val.String ) == 0 )
+				ulUpdateFlags &= ~USERINFO_NAME;
+			// [BB] The client recently changed its name, don't allow to change it again yet.
+			// [TP] Made conditional with sv_limitcommands
+			else if (( sv_limitcommands ) && ( g_ulLastNameChangeTime > 0 ) && ( (ULONG)gametic < ( g_ulLastNameChangeTime + ( TICRATE * 30 ))))
+			{
+				Printf( "You must wait at least 30 seconds before changing your name again.\n" );
+				name = g_oldPlayerName;
+				return;
+			}
+			// [BB] The client made a valid name change, keep track of this.
+			else
+			{
+				g_ulLastNameChangeTime = gametic;
+				g_oldPlayerName = val.String;
+			}
+		}
+	}
+	else if ( cvar == &gender )
+		ulUpdateFlags |= USERINFO_GENDER;
+	else if ( cvar == &color )
+		ulUpdateFlags |= USERINFO_COLOR;
+	else if ( cvar == &skin )
+		ulUpdateFlags |= USERINFO_SKIN;
+	else if ( cvar == &railcolor )
+		ulUpdateFlags |= USERINFO_RAILCOLOR;
+	else if ( cvar == &handicap )
+	{
+		if ( handicap < 0 )
+		{
+			handicap = 0;
+			return;
+		}
+		if ( handicap > 200 )
+		{
+			handicap = 200;
+			return;
+		}
+
+		ulUpdateFlags |= USERINFO_HANDICAP;
+	}
+	else if (( cvar == &playerclass ) && ( (gameinfo.gametype == GAME_Hexen) || (PlayerClasses.Size() > 1) ))
+		ulUpdateFlags |= USERINFO_PLAYERCLASS;
+	// [BB] Negative movebob values cause graphic glitches.
+	else if ( cvar == &movebob )
+	{
+		if ( movebob < 0 )
+		{
+			movebob = 0;
+			return;
+		}
+	}
+	// [WS] We need to handle the values for stillbob to prevent cheating.
+	else if ( cvar == &stillbob )
+	{
+		if ( stillbob < -16 )
+		{
+			stillbob = -16;
+			return;
+		}
+		if ( stillbob > 16 )
+		{
+			stillbob = 16;
+			return;
+		}
+	}
+	// [CK] Multiple CVARs are controlled by this now.
+	else if ( cvar == &cl_clientflags )
+	{
+		ulUpdateFlags |= USERINFO_CLIENTFLAGS;
+	}
+	// [BB]
+	else if ( cvar == &cl_ticsperupdate )
+	{
+		if ( cl_ticsperupdate < 1 )
+		{
+			cl_ticsperupdate = 1;
+			return;
+		}
+		if ( cl_ticsperupdate > 3 )
+		{
+			cl_ticsperupdate = 3;
+			return;
+		}
+
+		ulUpdateFlags |= USERINFO_TICSPERUPDATE;
+	}
+	// [BB]
+	else if ( cvar == &cl_connectiontype )
+	{
+		if ( cl_connectiontype < 0 )
+		{
+			cl_connectiontype = 0;
+			return;
+		}
+		if ( cl_connectiontype > 1 )
+		{
+			cl_connectiontype = 1;
+			return;
+		}
+
+		ulUpdateFlags |= USERINFO_CONNECTIONTYPE;
 	}
 
 	val = cvar->GetGenericRep (CVAR_String);
@@ -535,8 +985,48 @@ void D_UserInfoChanged (FBaseCVar *cvar)
 
 	mysnprintf (foo, countof(foo), "\\%s\\%s", cvar->GetName(), escaped_val.GetChars());
 
-	Net_WriteByte (DEM_UINFCHANGED);
-	Net_WriteString (foo);
+	// [BC] In client mode, we don't execute DEM_* commands, so we need to execute it
+	// here.
+	if ( NETWORK_InClientMode() )
+	{
+		BYTE	*pStream;
+
+		// This is a lot of work just to convert foo from (char *) to a (BYTE **) :(
+		pStream = (BYTE *)M_Malloc( strlen( foo ) + 1 );
+		WriteString( foo, &pStream );
+		pStream -= ( strlen( foo ) + 1 );
+		D_ReadUserInfoStrings( consoleplayer, &pStream, false );
+		pStream -= ( strlen( foo ) + 1 );
+		M_Free( pStream );
+	}
+	// Is the demo stuff necessary at all for ST?
+	else
+	{
+		Net_WriteByte (DEM_UINFCHANGED);
+		Net_WriteString (foo);
+	}
+
+	PendingUserinfoChanges |= ulUpdateFlags;
+
+	// [TP] Send pending changes but only if we're not in a menu
+	if ( DMenu::CurrentMenu == NULL )
+		D_SendPendingUserinfoChanges();
+}
+
+void D_SendPendingUserinfoChanges()
+{
+	// Send updated userinfo to the server.
+	if (( NETWORK_GetState() == NETSTATE_CLIENT )
+		&& ( CLIENT_GetConnectionState() >= CTS_REQUESTINGSNAPSHOT )
+		&& ( PendingUserinfoChanges != 0 ))
+	{
+		CLIENTCOMMANDS_UserInfo( PendingUserinfoChanges );
+
+		if ( CLIENTDEMO_IsRecording( ))
+			CLIENTDEMO_WriteUserInfo( );
+
+		PendingUserinfoChanges = 0;
+	}
 }
 
 static const char *SetServerVar (char *name, ECVarType type, BYTE **stream, bool singlebit)
@@ -589,7 +1079,7 @@ static const char *SetServerVar (char *name, ECVarType type, BYTE **stream, bool
 	{
 		delete[] value.String;
 	}
-
+/* [BB] New team code by Karate Chris. Currently not used in ST.
 	if (var == &teamplay)
 	{
 		// Put players on teams if teamplay turned on
@@ -601,7 +1091,7 @@ static const char *SetServerVar (char *name, ECVarType type, BYTE **stream, bool
 			}
 		}
 	}
-
+*/
 	if (var)
 	{
 		value = var->GetGenericRep (CVAR_String);
@@ -616,6 +1106,10 @@ EXTERN_CVAR (Float, sv_gravity)
 void D_SendServerInfoChange (const FBaseCVar *cvar, UCVarValue value, ECVarType type)
 {
 	size_t namelen;
+
+	// Server doesn't do this.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
 
 	namelen = strlen (cvar->GetName ());
 
@@ -651,6 +1145,10 @@ void D_DoServerInfoChange (BYTE **stream, bool singlebit)
 	int len;
 	int type;
 
+	// Server doesn't do this.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
+
 	len = ReadByte (stream);
 	type = len >> 6;
 	len &= 0x3f;
@@ -660,7 +1158,7 @@ void D_DoServerInfoChange (BYTE **stream, bool singlebit)
 	*stream += len;
 	name[len] = 0;
 
-	if ( (value = SetServerVar (name, (ECVarType)type, stream, singlebit)) && netgame)
+	if ( (value = SetServerVar (name, (ECVarType)type, stream, singlebit)) && ( NETWORK_GetState( ) != NETSTATE_SINGLE ))
 	{
 		Printf ("%s changed to %s\n", name, value);
 	}
@@ -822,6 +1320,14 @@ void D_ReadUserInfoStrings (int pnum, BYTE **stream, bool update)
 
 			case NAME_Skin:
 				info->SkinChanged(value);
+
+				// [BC] If the skin was hidden, reveal it!
+				if ( skins[info->GetSkin()].bRevealed == false )
+				{
+					Printf( "Hidden skin \"%s\\c-\" has now been revealed!\n", skins[info->GetSkin()].name );
+					skins[info->GetSkin()].bRevealed = true;
+				}
+
 				if (players[pnum].mo != NULL)
 				{
 					if (players[pnum].cls != NULL &&
@@ -837,12 +1343,55 @@ void D_ReadUserInfoStrings (int pnum, BYTE **stream, bool update)
 				R_BuildPlayerTranslation(pnum);
 				break;
 
+			/* [BB] Zandronum still uses its own team code.
 			case NAME_Team:
 				UpdateTeam(pnum, atoi(value), update);
 				break;
+			*/
 
 			case NAME_Color:
 				info->ColorChanged(value);
+				break;
+
+			// [BB]
+			case NAME_SwitchOnPickup:
+				if (value[0] >= '0' && value[0] <= '9')
+				{
+					info->SwitchOnPickupChanged ( atoi (value) );
+				}
+				else if (stricmp (value, "true") == 0)
+				{
+					info->SwitchOnPickupChanged ( 2 );
+				}
+				else
+				{
+					info->SwitchOnPickupChanged ( 0 );
+				}
+				break;
+
+			// [BB]
+			case NAME_RailColor:
+				info->RailColorChanged ( atoi( value ) );
+				break;
+
+			// [BB]
+			case NAME_Handicap:
+				info->HandicapChanged ( atoi( value ) );
+				break;
+
+			// [BB]
+			case NAME_CL_TicsPerUpdate:
+				info->TicsPerUpdateChanged ( atoi (value) );
+				break;
+
+			// [BB]
+			case NAME_CL_ConnectionType:
+				info->ConnectionTypeChanged ( atoi (value) );
+				break;
+
+			// [CK]
+			case NAME_CL_ClientFlags:
+				info->ClientFlagsChanged ( atoi( value ) );
 				break;
 
 			default:
@@ -863,7 +1412,8 @@ void D_ReadUserInfoStrings (int pnum, BYTE **stream, bool update)
 					value.UnlockBuffer();
 					if (keyname == NAME_Name && update && oldname != value)
 					{
-						Printf("%s is now known as %s\n", oldname.GetChars(), value.GetChars());
+						// [BB] Added "\\c-"
+						Printf("%s \\c-is now known as %s\n", oldname.GetChars(), value.GetChars());
 					}
 				}
 				break;
@@ -900,8 +1450,10 @@ void ReadCompatibleUserInfo(FArchive &arc, userinfo_t &info)
 	*static_cast<FFloatCVar *>(info[NAME_Autoaim]) = (float)aimdist / ANGLE_1;
 	*static_cast<FIntCVar *>(info[NAME_Skin]) = skin;
 	*static_cast<FIntCVar *>(info[NAME_Gender]) = gender;
-	*static_cast<FBoolCVar *>(info[NAME_NeverSwitchOnPickup]) = neverswitch;
-	*static_cast<FIntCVar *>(info[NAME_ColorSet]) = colorset;
+	// [BB]
+	*static_cast<FIntCVar *>(info[NAME_SwitchOnPickup]) = switchonpickup;
+	// [BB] For now Zandronum doesn't let the player use the color sets.
+	//*static_cast<FIntCVar *>(info[NAME_ColorSet]) = colorset;
 
 	UCVarValue val;
 	val.Int = color;
@@ -957,7 +1509,8 @@ void ReadUserInfo(FArchive &arc, userinfo_t &info)
 		{
 			switch (name)
 			{
-			case NAME_Team:			info.TeamChanged(atoi(str)); break;
+			// [BB] Zandronum still uses its own team code.
+			//case NAME_Team:			info.TeamChanged(atoi(str)); break;
 			case NAME_Skin:			info.SkinChanged(str); break;
 			case NAME_PlayerClass:	info.PlayerClassChanged(str); break;
 			default:
@@ -1000,7 +1553,27 @@ CCMD (playerinfo)
 		{
 			if (playeringame[i])
 			{
-				Printf("%d. %s\n", i, players[i].userinfo.GetName());
+				// [BB] Only call Printf once to prevent problems with sv_logfiletimestamp.
+				FString infoString;
+				infoString.AppendFormat("\\c%c%d. %s", PLAYER_IsTrueSpectator( &players[i] ) ? 'k' : 'j', i, players[i].userinfo.GetName());
+
+				// [RC] Are we the server? Draw their IPs as well.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				{
+					infoString.AppendFormat("\\c%c - IP %s", PLAYER_IsTrueSpectator( &players[i] ) ? 'k' : 'j', NETWORK_AddressToString ( SERVER_GetClient( i )->Address ) );
+					// [BB] If we detected suspicious behavior of this client, print this now.
+					if ( SERVER_GetClient( i )->bSuspicious )
+						infoString.AppendFormat ( " * %lu", SERVER_GetClient( i )->ulNumConsistencyWarnings );
+
+					// [K6/BB] Show the player's country, if the GeoIP db is available.
+					if ( NETWORK_IsGeoIPAvailable() )
+						infoString.AppendFormat ( "\\ce - FROM %s", NETWORK_GetCountryCodeFromAddress ( SERVER_GetClient( i )->Address ).GetChars() );
+				}
+
+				if ( PLAYER_IsTrueSpectator( &players[i] ))
+					infoString.AppendFormat("\\ck (SPEC)");
+
+				Printf("%s\n", infoString.GetChars());
 			}
 		}
 	}
@@ -1022,7 +1595,8 @@ CCMD (playerinfo)
 
 		// Print special info
 		Printf("%20s: %s\n",      "Name", ui->GetName());
-		Printf("%20s: %s (%d)\n", "Team", ui->GetTeam() == TEAM_NONE ? "None" : Teams[ui->GetTeam()].GetName(), ui->GetTeam());
+		// [BB] Zandronum still uses its own team code.
+		Printf("%20s: %s (%d)\n", "Team", players[i].bOnTeam ? TEAM_GetName( players[i].ulTeam ) : "NONE", static_cast<unsigned int> (players[i].ulTeam) );
 		Printf("%20s: %s (%d)\n", "Skin", skins[ui->GetSkin()].name, ui->GetSkin());
 		Printf("%20s: %s (%d)\n", "Gender", GenderNames[ui->GetGender()], ui->GetGender());
 		Printf("%20s: %s (%d)\n", "PlayerClass",
@@ -1060,3 +1634,21 @@ userinfo_t::~userinfo_t()
 	}
 	this->Clear();
 }
+
+#ifdef _DEBUG
+// [BC] Debugging function.
+CCMD( listinventory )
+{
+	AInventory	*pInventory;
+
+	if ( players[consoleplayer].mo == NULL )
+		return;
+
+	pInventory = players[consoleplayer].mo->Inventory;
+	while ( pInventory )
+	{
+		Printf( "%s\n", pInventory->GetClass( )->TypeName.GetChars( ));
+		pInventory = pInventory->Inventory;
+	}
+}
+#endif
