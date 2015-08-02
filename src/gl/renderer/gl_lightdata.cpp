@@ -52,6 +52,9 @@
 #include "g_level.h"
 #include "r_sky.h"
 
+// [BB] New #includes.
+#include "gl/gl_functions.h"
+
 // externally settable lighting properties
 static float distfogtable[2][256];	// light to fog conversion table for black fog
 static PalEntry outsidefogcolor;
@@ -134,7 +137,12 @@ CUSTOM_CVAR(Int, gl_lightmode, 3 ,CVAR_ARCHIVE|CVAR_NOINITCALL)
 	if (newself < 0) newself=0;
 	if ((newself == 2 || newself == 8) && gl.shadermodel < 4) newself = 3;
 	if (self != newself) self = newself;
-	glset.lightmode = newself;
+
+	// [BB] Enforce Doom lighting if requested by the dmflags.
+	if ( zadmflags & ZADF_FORCE_GL_DEFAULTS )
+		glset.lightmode = 3;
+	else
+		glset.lightmode = newself;
 }
 
 
@@ -212,6 +220,9 @@ void gl_SetFogParams(int _fogdensity, PalEntry _outsidefogcolor, int _outsidefog
 
 int gl_CalcLightLevel(int lightlevel, int rellight, bool weapon)
 {
+	// [BB/EP] Take care of gl_light_ambient and ZADF_FORCE_GL_DEFAULTS.
+	OVERRIDE_INT_GL_CVAR_IF_NECESSARY( gl_light_ambient );
+
 	int light;
 
 	if (lightlevel == 0) return 0;
@@ -554,6 +565,9 @@ void gl_SetShaderLight(float level, float olight)
 
 void gl_SetFog(int lightlevel, int rellight, const FColormap *cmap, bool isadditive)
 {
+	// [BB/EP] Take care of gl_fogmode and ZADF_FORCE_GL_DEFAULTS.
+	OVERRIDE_FOGMODE_IF_NECESSARY
+
 	PalEntry fogcolor;
 	float fogdensity;
 

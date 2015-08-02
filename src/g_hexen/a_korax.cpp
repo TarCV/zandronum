@@ -91,6 +91,16 @@ DEFINE_ACTION_FUNCTION(AActor, A_KoraxChase)
 {
 	AActor *spot;
 
+	// [BC] Let the server do this.
+	if ( NETWORK_InClientMode() )
+	{
+		if (pr_koraxchase()<30)
+		{
+			S_Sound (self, CHAN_VOICE, "KoraxActive", 1, ATTN_NONE);
+		}
+		return;
+	}
+
 	if ((!self->special2) && (self->health <= (self->SpawnHealth()/2)))
 	{
 		FActorIterator iterator (KORAX_FIRST_TELEPORT_TID);
@@ -109,6 +119,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_KoraxChase)
 	if (!self->target) return;
 	if (pr_koraxchase()<30)
 	{
+		// [BC] Set the thing's state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingState( self, STATE_MISSILE );
+
 		self->SetState (self->MissileState);
 	}
 	else if (pr_koraxchase()<30)
@@ -153,11 +167,24 @@ DEFINE_ACTION_FUNCTION(AActor, A_KoraxBonePop)
 	AActor *mo;
 	int i;
 
+	// [BC] Let the server do this.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	// Spawn 6 spirits equalangularly
 	for (i = 0; i < 6; ++i)
 	{
 		mo = P_SpawnMissileAngle (self, PClass::FindClass("KoraxSpirit"), ANGLE_60*i, 5*FRACUNIT);
-		if (mo) KSpiritInit (mo, self);
+		if (mo)
+		{
+			KSpiritInit (mo, self);
+
+			// [BC] Spawn the thing to clients.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SpawnMissile( mo );
+		}
 	}
 
 	P_StartScript (self, NULL, 255, NULL, NULL, 0, 0);		// Death script
@@ -171,6 +198,12 @@ DEFINE_ACTION_FUNCTION(AActor, A_KoraxBonePop)
 
 void KSpiritInit (AActor *spirit, AActor *korax)
 {
+	// [BC] Let the server do this.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	spirit->health = KORAX_SPIRIT_LIFETIME;
 
 	spirit->tracer = korax;						// Swarm around korax
@@ -190,12 +223,26 @@ void KSpiritInit (AActor *spirit, AActor *korax)
 
 DEFINE_ACTION_FUNCTION(AActor, A_KoraxDecide)
 {
+	// [BC] Let the server do this.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (pr_koraxdecide()<220)
 	{
+		// [BC] Set the thing's frame.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingFrame( self, self->FindState("Attack") );
+
 		self->SetState (self->FindState("Attack"));
 	}
 	else
 	{
+		// [BC] Set the thing's frame.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingFrame( self, self->FindState("Command") );
+
 		self->SetState (self->FindState("Command"));
 	}
 }
@@ -224,6 +271,13 @@ DEFINE_ACTION_FUNCTION(AActor, A_KoraxMissile)
 
 	S_Sound (self, CHAN_VOICE, "KoraxAttack", 1, ATTN_NORM);
 
+	// [BC] Let the server do this.
+	if ( NETWORK_InClientMode() )
+	{
+		S_Sound (self, CHAN_WEAPON, choices[type].sound, 1, ATTN_NONE);
+		return;
+	}
+
 	info = PClass::FindClass (choices[type].type);
 	if (info == NULL)
 	{
@@ -251,15 +305,30 @@ DEFINE_ACTION_FUNCTION(AActor, A_KoraxCommand)
 	fixed_t x,y,z;
 	angle_t ang;
 	int numcommands;
+	// [BC]
+	AActor	*pBolt;
 
 	S_Sound (self, CHAN_VOICE, "KoraxCommand", 1, ATTN_NORM);
+
+	// [BC] Let the server do this.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
 
 	// Shoot stream of lightning to ceiling
 	ang = (self->angle - ANGLE_90) >> ANGLETOFINESHIFT;
 	x = self->x + KORAX_COMMAND_OFFSET * finecosine[ang];
 	y = self->y + KORAX_COMMAND_OFFSET * finesine[ang];
 	z = self->z + KORAX_COMMAND_HEIGHT*FRACUNIT;
-	Spawn("KoraxBolt", x, y, z, ALLOW_REPLACE);
+	pBolt = Spawn("KoraxBolt", x, y, z, ALLOW_REPLACE);
+
+	// [BC] Spawn the bolt to clients.
+	if (( NETWORK_GetState( ) == NETSTATE_SERVER ) &&
+		( pBolt ))
+	{
+		SERVERCOMMANDS_SpawnThing( pBolt );
+	}
 
 	if (self->health <= (self->SpawnHealth() >> 1))
 	{
@@ -312,6 +381,12 @@ void KoraxFire (AActor *actor, const PClass *type, int arm)
 	angle_t ang;
 	fixed_t x,y,z;
 
+	// [BC] Let the server do this.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	ang = (actor->angle + (arm < 3 ? -KORAX_DELTAANGLE : KORAX_DELTAANGLE))
 		>> ANGLETOFINESHIFT;
 	x = actor->x + extension[arm] * finecosine[ang];
@@ -344,6 +419,12 @@ void A_KSpiritSeeker (AActor *actor, angle_t thresh, angle_t turnMax)
 	AActor *target;
 	fixed_t newZ;
 	fixed_t deltaZ;
+
+	// [BC] Let the server do this.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
 
 	target = actor->tracer;
 	if (target == NULL)
@@ -396,6 +477,11 @@ void A_KSpiritSeeker (AActor *actor, angle_t thresh, angle_t turnMax)
 		}
 		actor->velz = deltaZ/dist;
 	}
+
+	// [BC] Move the thing.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_MoveThingExact( actor, CM_X|CM_Y|CM_Z|CM_ANGLE|CM_MOMX|CM_MOMY|CM_MOMZ );
+
 	return;
 }
 
@@ -407,8 +493,26 @@ void A_KSpiritSeeker (AActor *actor, angle_t thresh, angle_t turnMax)
 
 DEFINE_ACTION_FUNCTION(AActor, A_KSpiritRoam)
 {
+	// [BC] Let the server do this.
+	if ( NETWORK_InClientMode() )
+	{
+		if (pr_kspiritroam()<50)
+		{
+			S_Sound (self, CHAN_VOICE, "SpiritActive", 1, ATTN_NONE);
+		}
+
+		return;
+	}
+
 	if (self->health-- <= 0)
 	{
+		// [BC] Play the sound and set the thing's state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			SERVERCOMMANDS_SoundActor( self, CHAN_VOICE, "SpiritDie", 1, ATTN_NORM );
+			SERVERCOMMANDS_SetThingFrame( self, self->FindState("Death") );
+		}
+
 		S_Sound (self, CHAN_VOICE, "SpiritDie", 1, ATTN_NORM);
 		self->SetState (self->FindState("Death"));
 	}
@@ -435,9 +539,19 @@ DEFINE_ACTION_FUNCTION(AActor, A_KSpiritRoam)
 
 DEFINE_ACTION_FUNCTION(AActor, A_KBolt)
 {
+	// [BC] Let the server do this.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	// Countdown lifetime
 	if (self->special1-- <= 0)
 	{
+		// [BC] Destroy the thing.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_DestroyThing( self );
+
 		self->Destroy ();
 	}
 }
@@ -453,6 +567,12 @@ DEFINE_ACTION_FUNCTION(AActor, A_KBoltRaise)
 	AActor *mo;
 	fixed_t z;
 
+	// [BC] Let the server do this.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	// Spawn a child upward
 	z = self->z + KORAX_BOLT_HEIGHT;
 
@@ -462,6 +582,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_KBoltRaise)
 		if (mo)
 		{
 			mo->special1 = KORAX_BOLT_LIFETIME;
+
+			// [BC] Spawn it to clients.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SpawnThing( mo );
 		}
 	}
 	else
@@ -483,6 +607,12 @@ AActor *P_SpawnKoraxMissile (fixed_t x, fixed_t y, fixed_t z,
 	angle_t an;
 	int dist;
 
+	// [BC] Let the server do this.
+	if ( NETWORK_InClientMode() )
+	{
+		return ( NULL );
+	}
+
 	z -= source->floorclip;
 	th = Spawn (type, x, y, z, ALLOW_REPLACE);
 	th->target = source; // Originator
@@ -502,5 +632,10 @@ AActor *P_SpawnKoraxMissile (fixed_t x, fixed_t y, fixed_t z,
 		dist = 1;
 	}
 	th->velz = (dest->z-z+(30*FRACUNIT))/dist;
+
+	// [BC] Spawn this missile to clients.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SpawnMissile( th );
+
 	return (P_CheckMissileSpawn(th, source->radius) ? th : NULL);
 }

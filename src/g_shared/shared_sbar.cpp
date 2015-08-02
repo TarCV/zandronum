@@ -56,6 +56,17 @@
 #include "gstrings.h"
 
 #include "../version.h"
+// [BC] New #includes.
+#include "cl_demo.h"
+#include "cl_main.h"
+#include "deathmatch.h"
+#include "team.h"
+#include "stats.h"
+#include "chat.h"
+#include "lastmanstanding.h"
+#include "network.h"
+#include "gamemode.h"
+#include "st_hud.h"
 
 #define XHAIRSHRINKSIZE		(FRACUNIT/18)
 #define XHAIRPICKUPSIZE		(FRACUNIT*2+XHAIRSHRINKSIZE)
@@ -73,7 +84,7 @@ EXTERN_CVAR (Bool, am_showitems)
 EXTERN_CVAR (Bool, am_showtime)
 EXTERN_CVAR (Bool, am_showtotaltime)
 EXTERN_CVAR (Bool, noisedebug)
-EXTERN_CVAR (Int, con_scaletext)
+EXTERN_CVAR (Bool, con_scaletext)
 
 DBaseStatusBar *StatusBar;
 
@@ -148,6 +159,10 @@ void ST_LoadCrosshair(bool alwaysload)
 	char name[16], size;
 	int lump;
 
+	// [BC] Server has no use for a crosshair.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
+
 	if (!crosshairforce &&
 		players[consoleplayer].camera != NULL &&
 		players[consoleplayer].camera->player != NULL &&
@@ -193,6 +208,8 @@ void ST_LoadCrosshair(bool alwaysload)
 	CrosshairImage = TexMan[TexMan.CheckForTexture(name, FTexture::TEX_MiscPatch)];
 }
 
+CVAR( Bool, cl_identifytarget, true, CVAR_ARCHIVE );
+EXTERN_CVAR( Bool, cl_stfullscreenhud );
 //---------------------------------------------------------------------------
 //
 // ST_Clear
@@ -648,6 +665,15 @@ void DBaseStatusBar::DrINumber (signed int val, int x, int y, int imgBase) const
 	val = val % 10;
 	DrawImage (Images[imgBase+val], x+18, y);
 }
+
+void DBaseStatusBar::DrBDash(int x, int y) const
+{
+		FTexture *pic;
+		pic = Images[imgBNEGATIVE];
+		if (pic != NULL)
+			DrawImage (pic, x - 14, y);
+}
+
 
 //---------------------------------------------------------------------------
 //
@@ -1127,6 +1153,10 @@ void DBaseStatusBar::DrawCrosshair ()
 		return;
 	}
 
+	// [BB] Don't draw the crosshair if the compatflags forbid it.
+	if ( zacompatflags & ZACOMPATF_NO_CROSSHAIR )
+		return;
+
 	if (crosshairscale)
 	{
 		size = SCREENHEIGHT * FRACUNIT / 200;
@@ -1171,6 +1201,10 @@ void DBaseStatusBar::DrawCrosshair ()
 			}
 			color = (red<<16) | (green<<8);
 		}
+
+		// [RC] If we're following somebody and we shouldn't know their health, use a neutral color.
+		if ( NETWORK_InClientMode() && ( SERVER_IsPlayerAllowedToKnowHealth( consoleplayer, ULONG( CPlayer - players )) == false ))
+			color = 0xcccccc;
 	}
 	else
 	{
@@ -1250,7 +1284,8 @@ void DBaseStatusBar::Draw (EHudState state)
 		RefreshBackground ();
 	}
 
-	if (idmypos)
+	// [BB] The following code relies on CPlayer->mo != NULL.
+	if (idmypos && CPlayer->mo)
 	{ // Draw current coordinates
 		int height = SmallFont->GetHeight();
 		char labels[3] = { 'X', 'Y', 'Z' };
@@ -1478,6 +1513,71 @@ void DBaseStatusBar::SetMugShotState(const char *stateName, bool waitTillDone, b
 {
 }
 
+void DBaseStatusBar::DrawTeamScores ()
+{
+	// [BC] Draw skulls and flags in team game.
+	char	szPatchName[16];
+	int BigHeight =  Images[imgBNumbers]->GetHeight();
+	LONG lY;
+
+	if ( ctf || oneflagctf)
+	{
+		lY = -( BigHeight * 3 ) - 18;
+
+		for ( LONG i = teams.Size( ) - 1; i >= 0; i-- )
+		{
+			if ( TEAM_ShouldUseTeam( i ) == false )
+				continue;
+
+			sprintf( szPatchName, "%s", TEAM_GetLargeHUDIcon( i ));
+			screen->DrawTexture (TexMan[szPatchName], 18, lY,
+				DTA_HUDRules, HUD_Normal,
+				DTA_CenterBottomOffset, true,
+				TAG_DONE);
+
+			DrBNumberOuter( MIN( (int)TEAM_GetScore( i ), 99 ), 28, lY - 29 );
+
+			lY -= 51;
+		}
+	}
+	else if ( skulltag )
+	{
+		lY = -( BigHeight * 3 ) - 18 - 24;
+
+		for ( LONG i = teams.Size( ) - 1; i >= 0; i-- )
+		{
+			if ( TEAM_ShouldUseTeam( i ) == false )
+				continue;
+
+			sprintf( szPatchName, "%s", TEAM_GetLargeHUDIcon( i ));
+			screen->DrawTexture (TexMan[szPatchName], 12, lY,
+				DTA_HUDRules, HUD_Normal,
+				DTA_CenterBottomOffset, true,
+				TAG_DONE);
+
+			DrBNumberOuter( MIN( (int)TEAM_GetScore( i ), 99 ), 16, lY - 16 );
+
+			lY -= 24;
+		}
+	}
+}
+
+
+void DBaseStatusBar::DrawCornerScore ()
+{
+	// Draw Skulltag's old style HUD elements in Doom, Heretic, and Hexen (assuming we aren't using the new HUD).
+	if( !(cl_stfullscreenhud && gameinfo.gametype == GAME_Doom) && (gameinfo.gametype != GAME_Strife)  )
+	{
+		// Draw the player's counter (points, frags, wins).
+		if ( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode() ) & GMF_PLAYERSEARNPOINTS )
+			DrBNumberOuter (CPlayer->lPointCount, -44, 1);
+		else if ( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode() ) & GMF_PLAYERSEARNFRAGS )
+			DrBNumberOuter (CPlayer->fragcount, -44, 1);
+		else if ( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode() ) & GMF_PLAYERSEARNWINS )
+			DrBNumberOuter (CPlayer->ulWins, -44, 1);
+	}
+}
+
 //---------------------------------------------------------------------------
 //
 // DrawBottomStuff
@@ -1511,9 +1611,16 @@ void DBaseStatusBar::DrawTopStuff (EHudState state)
 		DrawMessages (HUDMSGLayer_OverMap, (state == HUD_StatusBar) ? ::ST_Y : SCREENHEIGHT);
 	}
 	DrawMessages (HUDMSGLayer_OverHUD, (state == HUD_StatusBar) ? ::ST_Y : SCREENHEIGHT);
-	DrawConsistancy ();
-	DrawWaiting ();
+	// [BB] Zandronum doesn't do this.
+	//DrawConsistancy ();
+	//DrawWaiting ();
 	if (ShowLog && MustDrawLog(state)) DrawLog ();
+
+	// [BC] Draw the name of the player that's in our crosshair.
+	DrawTargetName( );
+
+	// [BB] Possibly draw info of the other players (health, armor, ...)
+	DrawHUD_CoopInfo();
 
 	if (noisedebug)
 	{
@@ -1533,8 +1640,23 @@ void DBaseStatusBar::DrawPowerups ()
 	int x, y;
 	AInventory *item;
 
+	// [BC] The player may not have a body between intermission-less maps.
+	if ( CPlayer->mo == NULL )
+		return;
+
 	x = -20;
 	y = 17;
+
+	// [BB] Account for the space in the top right corner occupied by Skulltag's fullscreen HUD.
+	if ( cl_stfullscreenhud && gameinfo.gametype == GAME_Doom )
+	{
+		const float fYScale = ( ( con_scaletext ) && ( con_virtualwidth > 0 ) && ( con_virtualheight > 0 ) ) ? ( SCREENHEIGHT / static_cast<float>(con_virtualheight) ) : 1;
+		y += ConFont ? static_cast<int> ( fYScale * 1.5 * ConFont->GetHeight( ) ) : 0;
+	}
+	// [BB] In this case we have to account for DrawCornerScore.
+	else if ( (gameinfo.gametype != GAME_Strife) && !( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode() ) & GMF_PLAYERSEARNKILLS ) )
+		y += BigFont ? static_cast<int> ( 1.5 * BigFont->GetHeight( ) ) : 0;
+
 	for (item = CPlayer->mo->Inventory; item != NULL; item = item->Inventory)
 	{
 		if (item->DrawPowerup (x, y))
@@ -1569,7 +1691,7 @@ void DBaseStatusBar::BlendView (float blend[4])
 	V_SetBlend ((int)(blend[0] * 255.0f), (int)(blend[1] * 255.0f),
 				(int)(blend[2] * 255.0f), (int)(blend[3] * 256.0f));
 }
-
+/*
 void DBaseStatusBar::DrawConsistancy () const
 {
 	static bool firsttime = true;
@@ -1644,6 +1766,89 @@ void DBaseStatusBar::DrawWaiting () const
 			(screen->GetWidth() - SmallFont->StringWidth (conbuff)*CleanXfac) / 2,
 			SmallFont->GetHeight()*CleanYfac, conbuff, DTA_CleanNoMove, true, TAG_DONE);
 		BorderTopRefresh = screen->GetPageCount ();
+	}
+}
+*/
+player_t	*P_PlayerScan( AActor *mo );
+void DBaseStatusBar::DrawTargetName ()
+{
+	// [BC] The player may not have a body between intermission-less maps.
+	if (( CPlayer->camera == NULL ) ||
+		( viewactive == false ))
+	{
+		return;
+	}
+
+	// Break out if we don't want to identify the target, or
+	// a medal has just been awarded and is being displayed.
+	if (( cl_identifytarget == false ) || ( zadmflags & ZADF_NO_IDENTIFY_TARGET ) || ( MEDAL_GetDisplayedMedal( CPlayer->camera->player - players ) != NUM_MEDALS ))
+		return;
+
+	// Don't do any of this while still receiving a snapshot.
+	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) && ( CLIENT_GetConnectionState( ) == CTS_RECEIVINGSNAPSHOT ))
+		return;
+
+	if (( CPlayer->bSpectating ) && ( lastmanstanding || teamlms ) && ( LASTMANSTANDING_GetState( ) == LMSS_INPROGRESS ))
+		return;
+
+	// Look for players directly in front of the player.
+	if ( camera )
+	{
+		player_t			*pTargetPlayer;
+		ULONG				ulTextColor;
+		char				szString[64];
+		DHUDMessageFadeOut	*pMsg;
+
+		// Search for a player directly in front of the camera. If none are found, exit.
+		pTargetPlayer = P_PlayerScan( camera );
+		if ( pTargetPlayer == NULL )
+			return;
+
+		// [CK] If the player shouldn't be identified from decorate flags, ignore them
+		if ( pTargetPlayer->mo != NULL && ( pTargetPlayer->mo->ulSTFlags & STFL_DONTIDENTIFYTARGET ) != 0 ) 
+			return;
+
+		// Build the string and text color;
+		ulTextColor = CR_GRAY;
+
+		// [RC] Assume everyone's your enemy to create consistency, even in deathmatch when you have no allies.
+		char	szDiplomacyStatus[9];
+		strcpy(szDiplomacyStatus,  "\\crEnemy");
+
+		// Attempt to use the team color.
+		if ( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode( )) & GMF_PLAYERSONTEAMS )
+		{
+			if( pTargetPlayer->mo->IsTeammate( players[consoleplayer].mo) )
+				strcpy(szDiplomacyStatus, "\\cqAlly");
+				
+			if ( pTargetPlayer->bOnTeam )
+				ulTextColor = TEAM_GetTextColor( pTargetPlayer->ulTeam );
+		}
+		else
+		{
+			// If this player is carrying the terminator artifact, display his name in red.
+			if ( (terminator) && (pTargetPlayer->cheats2 & CF2_TERMINATORARTIFACT) )
+				ulTextColor = CR_RED;
+		}
+
+		// In cooperative modes, all players are allies.
+		if(GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode( )) & GMF_COOPERATIVE)
+			strcpy(szDiplomacyStatus, "\\cqAlly");
+
+		// [BB] Be sure not to use szString as destination and as part of the argument!
+		sprintf(szString, "%s\\n%s", pTargetPlayer->userinfo.GetName(), szDiplomacyStatus);
+		V_ColorizeString(szString);
+
+		pMsg = new DHUDMessageFadeOut( SmallFont, szString,
+			1.5f,
+			gameinfo.gametype == GAME_Doom ? 0.96f : 0.95f,
+			0,
+			0,
+			(EColorRange)ulTextColor,
+			2.f,
+			0.35f );
+
+		AttachMessage( pMsg, MAKE_ID('P','N','A','M') );
 	}
 }
 

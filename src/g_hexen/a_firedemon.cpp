@@ -111,10 +111,26 @@ DEFINE_ACTION_FUNCTION(AActor, A_SmBounce)
 
 DEFINE_ACTION_FUNCTION(AActor, A_FiredAttack)
 {
+	// [BC] Let the server do this.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (self->target == NULL)
 		return;
 	AActor *mo = P_SpawnMissile (self, self->target, PClass::FindClass ("FireDemonMissile"));
-	if (mo) S_Sound (self, CHAN_BODY, "FireDemonAttack", 1, ATTN_NORM);
+	if (mo)
+	{
+		S_Sound (self, CHAN_BODY, "FireDemonAttack", 1, ATTN_NORM);
+
+		// [BC] If we're the server, spawn this and make the sound for clients.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			SERVERCOMMANDS_SpawnMissile( mo );
+			SERVERCOMMANDS_SoundActor( self, CHAN_BODY, "FireDemonAttack", 1, ATTN_NORM );
+		}
+	}
 }
 
 //============================================================================
@@ -130,6 +146,22 @@ DEFINE_ACTION_FUNCTION(AActor, A_FiredChase)
 	angle_t ang;
 	fixed_t dist;
 
+	// [BC] Let the server do this.
+	if ( NETWORK_InClientMode() )
+	{
+		// make active sound
+		if (pr_firedemonchase() < 3)
+		{
+			self->PlayActiveSound ();
+		}
+
+		// Normal movement
+		if ( self->special2 == 0 )
+			P_Move( self );
+
+		return;
+	}
+
 	if (self->reactiontime) self->reactiontime--;
 	if (self->threshold) self->threshold--;
 
@@ -142,6 +174,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_FiredChase)
 	{
 		self->z += 2*FRACUNIT;
 	}
+
+	// [BC] If we're the server, update the thing's z position.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_MoveThing( self, CM_Z );
 
 	if(!self->target || !(self->target->flags&MF_SHOOTABLE))
 	{	// Invalid target
@@ -174,6 +210,13 @@ DEFINE_ACTION_FUNCTION(AActor, A_FiredChase)
 				self->special2 = 3;		// strafe time
 			}
 		}
+
+		// [BC] If we're the server, update the thing's z position.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			SERVERCOMMANDS_MoveThingExact( self, CM_MOMX|CM_MOMY );
+			SERVERCOMMANDS_SetThingSpecial2( self );
+		}
 	}
 
 	FaceMovementDirection (self);
@@ -192,6 +235,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_FiredChase)
 	{
 		if (P_CheckMissileRange (self) && (pr_firedemonchase() < 20))
 		{
+			// [BC] If we're the server, tell clients to change this monster's state.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetThingState( self, STATE_MISSILE );
+
 			self->SetState (self->MissileState);
 			self->flags |= MF_JUSTATTACKED;
 			return;

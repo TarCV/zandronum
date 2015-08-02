@@ -58,7 +58,7 @@
 
 #include "dobject.h"
 #include "templates.h"
-#include "b_bot.h"
+//#include "b_bot.h"
 #include "p_local.h"
 #include "g_game.h"
 #include "a_sharedglobal.h"
@@ -336,9 +336,11 @@ static void MarkRoot()
 	}
 	Mark(SectorMarker);
 	// Mark bot stuff.
+	/* [BB] ST doesn't have these.
 	Mark(bglobal.firstthing);
 	Mark(bglobal.body1);
 	Mark(bglobal.body2);
+	*/
 	// NextToThink must not be freed while thinkers are ticking.
 	Mark(NextToThink);
 	// Mark soft roots.

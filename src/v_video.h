@@ -41,6 +41,9 @@
 #include "r_data/renderstyle.h"
 #include "c_cvars.h"
 
+// [BB] New #includes
+#include "network.h"
+
 extern int CleanWidth, CleanHeight, CleanXfac, CleanYfac;
 extern int CleanWidth_1, CleanHeight_1, CleanXfac_1, CleanYfac_1;
 extern int DisplayWidth, DisplayHeight, DisplayBits;
@@ -122,6 +125,9 @@ enum
 	DTA_TextLen,		// stop after this many characters, even if \0 not hit
 	DTA_CellX,			// horizontal size of character cell
 	DTA_CellY,			// vertical size of character cell
+
+	// [BB] bool: Set DTA_VirtualWidth and DTA_VirtualHeight to con_virtualwidth and con_virtualheight respectively (not limited to text).
+	DTA_UseVirtualScreen,
 };
 
 enum
@@ -342,6 +348,8 @@ public:
 	// gamma changing. (Always true for now, since palettes can always be
 	// gamma adjusted.)
 	virtual bool SetGamma (float gamma) = 0;
+	virtual bool SetBrightness (float bright) { return false; }
+	virtual bool SetContrast (float contrast) { return false; }
 
 	// Sets a color flash. RGB is the color, and amount is 0-256, with 256
 	// being all flash and 0 being no flash. Returns false if the hardware
@@ -424,11 +432,14 @@ private:
 // This is the screen updated by I_FinishUpdate.
 extern DFrameBuffer *screen;
 
-#define SCREENWIDTH (screen->GetWidth ())
-#define SCREENHEIGHT (screen->GetHeight ())
-#define SCREENPITCH (screen->GetPitch ())
+// [BB] The server doesn't have a screen.
+#define SCREENWIDTH (( NETWORK_GetState( ) != NETSTATE_SERVER ) ? screen->GetWidth () : 0)
+#define SCREENHEIGHT (( NETWORK_GetState( ) != NETSTATE_SERVER ) ? screen->GetHeight () : 0)
+#define SCREENPITCH (( NETWORK_GetState( ) != NETSTATE_SERVER ) ? screen->GetPitch () : 0)
 
 EXTERN_CVAR (Float, Gamma)
+EXTERN_CVAR (Float, vid_brightness)
+EXTERN_CVAR (Float, vid_contrast)
 
 // Translucency tables
 
@@ -495,6 +506,7 @@ int CheckRatio (int width, int height, int *trueratio=NULL);
 static inline int CheckRatio (double width, double height) { return CheckRatio(int(width), int(height)); }
 extern const int BaseRatioSizes[5][4];
 
+extern int currentrenderer;
 
 
 #endif // __V_VIDEO_H__

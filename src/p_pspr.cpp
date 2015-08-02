@@ -29,12 +29,25 @@
 #include "g_level.h"
 #include "farchive.h"
 #include "d_player.h"
+// [BB] New #includes.
+#include "deathmatch.h"
+#include "network.h"
+#include "cl_demo.h"
+#include "p_effect.h"
+#include "sv_commands.h"
+#include "unlagged.h"
 
 
 // MACROS ------------------------------------------------------------------
 
 #define LOWERSPEED				FRACUNIT*6
 #define RAISESPEED				FRACUNIT*6
+
+// [CK] The minimum binary angle for autoaim to trigger against other players.
+// This was determined by making a triangle from the max autoaim range (1024) by
+// player radius (16) to get an angle of ~0.89 degrees. This below value is the
+// binary value of this angle.
+#define AUTOAIM_MINANGLE		0xA20500
 
 // TYPES -------------------------------------------------------------------
 
@@ -50,7 +63,19 @@
 
 // [SO] 1=Weapons states are all 1 tick
 //		2=states with a function 1 tick, others 0 ticks.
-CVAR(Int, sv_fastweapons, false, CVAR_SERVERINFO);
+CUSTOM_CVAR( Int, sv_fastweapons, 0, CVAR_SERVERINFO )
+{
+	if ( self >= 3 )
+		self = 2;
+	if ( self < 0 )
+		self = 0;
+
+	if (( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( gamestate != GS_STARTUP ))
+	{
+		SERVER_Printf( PRINT_HIGH, "%s changed to: %d\n", self.GetName( ), (int)self );
+		SERVERCOMMANDS_SetGameModeLimits( );
+	}
+}
 
 // PRIVATE DATA DEFINITIONS ------------------------------------------------
 
@@ -139,7 +164,8 @@ void P_SetPsprite (player_t *player, int position, FState *state, bool nofunctio
 			psp->sy = state->GetMisc2()<<FRACBITS;
 		}
 
-		if (!nofunction && player->mo != NULL)
+		// [BB] Some action functions rely on the fact that ReadyWeapon is not NULL.
+		if (!nofunction && player->mo != NULL && player->ReadyWeapon)
 		{
 			if (state->CallAction(player->mo, player->ReadyWeapon))
 			{
@@ -223,18 +249,34 @@ void P_FireWeapon (player_t *player, FState *state)
 
 	// [SO] 9/2/02: People were able to do an awful lot of damage
 	// when they were observers...
+/* [BB] Zandronum doesn't use ZDoom's bot code.
 	if (!player->isbot && bot_observer)
 	{
 		return;
 	}
+*/
 
 	weapon = player->ReadyWeapon;
 	if (weapon == NULL || !weapon->CheckAmmo (AWeapon::PrimaryFire, true))
 	{
+		// [BC] We need to do this, otherwise with the BFG10K, you can fire,
+		// run out of ammo, find new ammo, switch back, and fire without
+		// charging back up.
+		player->refire = false;
 		return;
 	}
 
-	player->mo->PlayAttacking ();
+	// [BC] If we're the server, tell clients to update this player's state.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SetPlayerState( ULONG( player - players ), STATE_PLAYER_ATTACK, ULONG( player - players ), SVCF_SKIPTHISCLIENT );
+
+	// [BB] Except for the consoleplayer, the server handles this.
+	if (( NETWORK_InClientMode() == false ) ||
+		(( player - players ) == consoleplayer ))
+	{
+		player->mo->PlayAttacking ();
+	}
+
 	weapon->bAltFire = false;
 	if (state == NULL)
 	{
@@ -257,12 +299,14 @@ void P_FireWeaponAlt (player_t *player, FState *state)
 {
 	AWeapon *weapon;
 
+/* [BB] Zandronum doesn't use ZDoom's bot code.
 	// [SO] 9/2/02: People were able to do an awful lot of damage
 	// when they were observers...
 	if (!player->isbot && bot_observer)
 	{
 		return;
 	}
+*/
 
 	weapon = player->ReadyWeapon;
 	if (weapon == NULL || weapon->FindState(NAME_AltFire) == NULL || !weapon->CheckAmmo (AWeapon::AltFire, true))
@@ -270,7 +314,16 @@ void P_FireWeaponAlt (player_t *player, FState *state)
 		return;
 	}
 
-	player->mo->PlayAttacking ();
+	// [BB] If we're the server, tell clients to update this player's state.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SetPlayerState( ULONG( player - players ), STATE_PLAYER_ATTACK_ALTFIRE, ULONG( player - players ), SVCF_SKIPTHISCLIENT );
+
+	// [BB] Except for the consoleplayer, the server handles this.
+	if (( NETWORK_InClientMode() == false ) ||
+		(( player - players ) == consoleplayer ))
+	{
+		player->mo->PlayAttacking ();
+	}
 	weapon->bAltFire = true;
 
 	if (state == NULL)
@@ -294,10 +347,12 @@ void P_FireWeaponAlt (player_t *player, FState *state)
 void P_ReloadWeapon (player_t *player, FState *state)
 {
 	AWeapon *weapon;
+	/* [BB] Zandronum doesn't use ZDoom's bot code.
 	if (!player->isbot && bot_observer)
 	{
 		return;
 	}
+	*/
 
 	weapon = player->ReadyWeapon;
 	if (weapon == NULL)
@@ -325,10 +380,12 @@ void P_ReloadWeapon (player_t *player, FState *state)
 void P_ZoomWeapon (player_t *player, FState *state)
 {
 	AWeapon *weapon;
+	/* [BB] Zandronum doesn't use ZDoom's bot code.
 	if (!player->isbot && bot_observer)
 	{
 		return;
 	}
+	*/
 
 	weapon = player->ReadyWeapon;
 	if (weapon == NULL)
@@ -385,6 +442,10 @@ void P_BobWeapon (player_t *player, pspdef_t *psp, fixed_t *x, fixed_t *y)
 
 	AWeapon *weapon;
 	fixed_t bobtarget;
+
+	// [BC] Don't bob weapon if the player is spectating.
+	if ( player->bSpectating )
+		return;
 
 	weapon = player->ReadyWeapon;
 
@@ -539,6 +600,10 @@ void DoReadyWeaponToFire (AActor *self, bool prim, bool alt)
 		if (!(weapon->WeaponFlags & WIF_READYSNDHALF) || pr_wpnreadysnd() < 128)
 		{
 			S_Sound (self, CHAN_WEAPON, weapon->ReadySound, 1, ATTN_NORM);
+
+			// [BC] If we're the server, tell other clients to play the sound.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SoundActor( self, CHAN_WEAPON, S_GetName( weapon->ReadySound ), 1, ATTN_NORM, ULONG( player - players ), SVCF_SKIPTHISCLIENT );
 		}
 	}
 
@@ -820,6 +885,14 @@ DEFINE_ACTION_FUNCTION(AInventory, A_Lower)
 		return;
 	}
 	psp = &player->psprites[ps_weapon];
+
+	// [BC] If we're a spectator, lower weapon completely and do not raise it.
+	if ( player->bSpectating )
+	{
+		psp->sy = WEAPONBOTTOM;
+		return;
+	}
+
 	if (player->morphTics || player->cheats & CF_INSTANTWEAPSWITCH)
 	{
 		psp->sy = WEAPONBOTTOM;
@@ -864,7 +937,9 @@ DEFINE_ACTION_FUNCTION(AInventory, A_Raise)
 	{
 		return;
 	}
-	if (player->PendingWeapon != WP_NOCHANGE)
+	// [BB] ZACOMPATF_OLD_WEAPON_SWITCH also restores the original weapon switch cancellation behavior.
+	// [CK] Changed to now be separate from ZACOMPATF_OLD_WEAPON_SWITCH
+	if (player->PendingWeapon != WP_NOCHANGE && !( zacompatflags & ZACOMPATF_FULL_WEAPON_LOWER ))
 	{
 		P_DropWeapon(player);
 		return;
@@ -883,6 +958,27 @@ DEFINE_ACTION_FUNCTION(AInventory, A_Raise)
 	else
 	{
 		player->psprites[ps_weapon].state = NULL;
+	}
+
+	// [BC] If this player has respawn invulnerability, disable it if they're done raising
+	// a weapon that isn't the pistol or their fist.
+	if (( player->mo ) &&
+		( NETWORK_InClientMode() == false ))
+	{
+		APowerInvulnerable	*pInvulnerability;
+
+		pInvulnerability = static_cast<APowerInvulnerable *>( player->mo->FindInventory( RUNTIME_CLASS( APowerInvulnerable )));
+		if (( pInvulnerability ) &&
+			( player->ReadyWeapon ) &&
+			(( player->ReadyWeapon->WeaponFlags & WIF_ALLOW_WITH_RESPAWN_INVUL ) == false ) &&
+			(( player->mo->effects & FX_VISIBILITYFLICKER ) || ( player->mo->effects & FX_RESPAWNINVUL )))
+		{
+			pInvulnerability->Destroy( );
+
+			// If we're the server, tell clients to take this player's powerup away.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_TakeInventory( ULONG( player - players ), "PowerInvulnerable", 0 );
+		}
 	}
 }
 
@@ -903,13 +999,34 @@ DEFINE_ACTION_FUNCTION_PARAMS(AInventory, A_GunFlash)
 	ACTION_PARAM_STATE(flash, 0);
 	ACTION_PARAM_INT(Flags, 1);
 
+	// [BB] Zandronum needs A_GunFlash in a_doomweaps, so I moved the code into a function.
+	A_GunFlash(self, flash, Flags);
+}
+
+void A_GunFlash(AActor *self, FState *flash, const int Flags)
+{
 	player_t *player = self->player;
 
 	if (NULL == player)
 	{
 		return;
 	}
-	if(!(Flags & GFF_NOEXTCHANGE)) player->mo->PlayAttacking2 ();
+	if(!(Flags & GFF_NOEXTCHANGE))
+	{
+		// [BC] Since the player can be dead at this point as a result of shooting a player with
+		// the reflection rune, we need to make sure the player is alive before playing the
+		// attacking animation.
+		if ( player->mo->health > 0 )
+		{
+			// [BB] If we're the server, tell clients to update this player's state.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetPlayerState( ULONG( player - players ), STATE_PLAYER_ATTACK2, ULONG( player - players ), SVCF_SKIPTHISCLIENT );
+
+			// [BB] Clients only do this for "their" player.
+			if ( NETWORK_IsConsolePlayerOrNotInClientMode( player ) )
+				player->mo->PlayAttacking2 ();
+		}
+	}
 
 	if (flash == NULL)
 	{
@@ -933,14 +1050,23 @@ DEFINE_ACTION_FUNCTION_PARAMS(AInventory, A_GunFlash)
 
 angle_t P_BulletSlope (AActor *mo, AActor **pLineTarget)
 {
-	static const int angdiff[3] = { -1<<26, 1<<26, 0 };
+	static const int angdiff[15] = {
+		AUTOAIM_MINANGLE * -1, AUTOAIM_MINANGLE * 1, AUTOAIM_MINANGLE * -2, AUTOAIM_MINANGLE * 2,
+		AUTOAIM_MINANGLE * -3, AUTOAIM_MINANGLE * 3, AUTOAIM_MINANGLE * -4, AUTOAIM_MINANGLE * 4,
+		AUTOAIM_MINANGLE * -5, AUTOAIM_MINANGLE * 5, AUTOAIM_MINANGLE * -6, AUTOAIM_MINANGLE * 6,
+		-1<<26, 1<<26, 0 }; // [CK] New angles
 	int i;
 	angle_t an;
 	angle_t pitch;
 	AActor *linetarget;
+	int endIndex = zacompatflags & ZACOMPATF_AUTOAIM ? 12 : 0; // [CK/TP] Our ending index depends on compatflags.
+
+	// [Spleen]
+	UNLAGGED_Reconcile( mo );
+	UNLAGGED_AddReconciliationBlocker( );
 
 	// see which target is to be aimed at
-	i = 2;
+	i = 14; // [TP/CK] Now 14
 	do
 	{
 		an = mo->angle + angdiff[i];
@@ -952,11 +1078,16 @@ angle_t P_BulletSlope (AActor *mo, AActor **pLineTarget)
 		{
 			break;
 		}
-	} while (linetarget == NULL && --i >= 0);
+	} while (linetarget == NULL && --i >= endIndex); // [TP] 0 changed to endIndex
 	if (pLineTarget != NULL)
 	{
 		*pLineTarget = linetarget;
 	}
+
+	// [Spleen]
+	UNLAGGED_RemoveReconciliationBlocker( );
+	UNLAGGED_Restore( mo );
+
 	return pitch;
 }
 
