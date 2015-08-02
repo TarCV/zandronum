@@ -101,6 +101,12 @@ bool AArtiTeleportOther::Use (bool pickup)
 {
 	AActor *mo;
 
+	// [BC] Weapons are handled by the server.
+	if ( NETWORK_InClientMode() )
+	{
+		return ( true );
+	}
+
 	mo = P_SpawnPlayerMissile (Owner, RUNTIME_CLASS(ATelOtherFX1));
 	if (mo)
 	{
