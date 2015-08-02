@@ -36,6 +36,8 @@
 
 #include <stdarg.h>
 #include "basictypes.h"
+#include "tarray.h" // [TP]
+#include "zstring.h" // [TP]
 
 struct event_t;
 
@@ -71,6 +73,10 @@ void C_HideConsole (void);
 void C_AdjustBottom (void);
 void C_FlushDisplay (void);
 
+// [BC] New function prototypes.
+void CONSOLE_SetAllowColorCodes( bool bAllow );
+void CONSOLE_SetRCONPlayer( ULONG ulPlayer );
+
 void C_InitTicker (const char *label, unsigned int max, bool showpercent=true);
 void C_SetTicker (unsigned int at, bool forceUpdate=false);
 
@@ -83,5 +89,14 @@ bool C_Responder (event_t *ev);
 void C_AddTabCommand (const char *name);
 void C_RemoveTabCommand (const char *name);
 void C_ClearTabCommands();		// Removes all tab commands
+
+// [TP] For RCON clients
+class FString;
+TArray<FString> C_GetTabCompletes (const FString& part);
+
+// [TP]
+void C_StartCapture();
+FString C_EndCapture();
+bool C_IsCapturing();
 
 #endif

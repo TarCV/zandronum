@@ -1,6 +1,9 @@
 #ifndef __RES_SPRITES_H
 #define __RES_SPRITES_H
 
+// [BC] This is the maximum length a skin name can be.
+#define	MAX_SKIN_NAME					24
+
 #define MAX_SPRITE_FRAMES	29		// [RH] Macro-ized as in BOOM.
 
 //
@@ -45,7 +48,8 @@ extern TArray<spriteframe_t> SpriteFrames;
 class FPlayerSkin
 {
 public:
-	char		name[17];	// 16 chars + NULL
+	// [BC] Changed to MAX_SKIN_NAME.
+	char		name[MAX_SKIN_NAME+1];	// MAX_SKIN_NAME chars + NULL
 	char		face[4];	// 3 chars ([MH] + NULL so can use as a C string)
 	BYTE		gender;		// This skin's gender (not really used)
 	BYTE		range0start;
@@ -56,10 +60,23 @@ public:
 	int			sprite;
 	int			crouchsprite;
 	int			namespc;	// namespace for this skin
+
+	// [BC] New skin properties for Skulltag.
+	// Default color used for this skin.
+	char		szColor[16];
+	// Can this skin be selected from the menu?
+	bool		bRevealed;
+
+	// Is this skin hidden by default?
+	bool		bRevealedByDefault;
+
+	// Is this skin a cheat skin?
+	bool		bCheat;
+	// [BC] End of new skin properties.
 };
 
-extern size_t			numskins;	// [RH]
-extern FPlayerSkin	*	skins;		// [RH]
+// [BL] Use a TArray instead of trying to manage this manually
+extern TArray<FPlayerSkin> skins;		// [RH]
 
 extern BYTE				OtherGameSkinRemap[256];
 extern PalEntry			OtherGameSkinPalette[256];

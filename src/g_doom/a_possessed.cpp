@@ -24,6 +24,13 @@ DEFINE_ACTION_FUNCTION(AActor, A_PosAttack)
 	int damage;
 	int slope;
 		
+	// [BC] Server takes care of the rest of this.
+	if ( NETWORK_InClientMode() )
+	{
+		S_Sound( self, CHAN_WEAPON, "grunt/attack", 1, ATTN_NORM );
+		return;
+	}
+
 	if (!self->target)
 		return;
 				
@@ -57,6 +64,13 @@ static void A_SPosAttack2 (AActor *self)
 
 DEFINE_ACTION_FUNCTION(AActor, A_SPosAttackUseAtkSound)
 {
+	// [BC] Server takes care of the rest of this.
+	if ( NETWORK_InClientMode() )
+	{
+		S_Sound ( self, CHAN_WEAPON, self->AttackSound, 1, ATTN_NORM );
+		return;
+	}
+
 	if (!self->target)
 		return;
 
@@ -68,6 +82,13 @@ DEFINE_ACTION_FUNCTION(AActor, A_SPosAttackUseAtkSound)
 // meant for Dehacked only.
 DEFINE_ACTION_FUNCTION(AActor, A_SPosAttack)
 {
+	// [BC] Server takes care of the rest of this.
+	if ( NETWORK_InClientMode() )
+	{
+		S_Sound ( self, CHAN_WEAPON, "shotguy/attack", 1, ATTN_NORM );
+		return;
+	}
+
 	if (!self->target)
 		return;
 
@@ -82,6 +103,19 @@ DEFINE_ACTION_FUNCTION(AActor, A_CPosAttack)
 	int damage;
 	int slope;
 		
+	// [BC] Server takes care of the rest of this.
+	if ( NETWORK_InClientMode() )
+	{
+		// [RH] Andy Baker's stealth monsters
+		if (self->flags & MF_STEALTH)
+		{
+			self->visdir = 1;
+		}
+
+		S_Sound ( self, CHAN_WEAPON, self->AttackSound, 1, ATTN_NORM );
+		return;
+	}
+
 	if (!self->target)
 		return;
 
@@ -106,6 +140,12 @@ DEFINE_ACTION_FUNCTION(AActor, A_CPosRefire)
 	// keep firing unless target got out of sight
 	A_FaceTarget (self);
 
+	// [BC] Client chaingunners continue to fire until told by the server to stop.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (pr_cposrefire() < 40)
 		return;
 
@@ -114,6 +154,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_CPosRefire)
 		|| self->target->health <= 0
 		|| !P_CheckSight (self, self->target, SF_SEEPASTBLOCKEVERYTHING|SF_SEEPASTSHOOTABLELINES))
 	{
+		// [BC] If we're the server, tell clients to update this thing's state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingState( self, STATE_SEE );
+
 		self->SetState (self->SeeState);
 	}
 }

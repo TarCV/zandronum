@@ -75,6 +75,9 @@
 
 #include "gameconfigfile.h"
 
+// [BB] New #includes.
+#include "p_acs.h"
+
 FGameConfigFile *GameConfig;
 
 CVAR(Bool, screenshot_quiet, false, CVAR_ARCHIVE|CVAR_GLOBALCONFIG);
@@ -135,6 +138,27 @@ int M_ReadFile (char const *name, BYTE **buffer)
 
 	*buffer = buf;
 	return length;
+}
+
+//=============================================================================
+//
+// [BC] M_DoesFileExist
+//
+// Returns true if the file exists. Largely the same as the above function.
+//
+//=============================================================================
+bool M_DoesFileExist( const char *pszFileName )
+{
+	int handle;
+	struct stat fileinfo;
+
+	handle = open (pszFileName, O_RDONLY | O_BINARY, 0666);
+	if (handle == -1)
+		return ( false );
+	if (fstat (handle,&fileinfo) == -1)
+		return ( false );
+
+	return ( true );
 }
 
 //---------------------------------------------------------------------------
@@ -721,6 +745,10 @@ void M_ScreenShot (const char *filename)
 
 CCMD (screenshot)
 {
+	// [BB] This function can overwrite arbitrary files and thus may not be used by ConsoleCommand.
+	if ( ACS_IsCalledFromConsoleCommand( ))
+		return;
+
 	if (argv.argc() == 1)
 		G_ScreenShot (NULL);
 	else

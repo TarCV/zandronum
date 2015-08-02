@@ -9,6 +9,9 @@
 #include "a_sharedglobal.h"
 #include "statnums.h"
 #include "farchive.h"
+// [BB] New #includes.
+#include "network.h"
+#include "sv_commands.h"
 
 static FRandom pr_quake ("Quake");
 
@@ -37,6 +40,11 @@ DEarthquake::DEarthquake (AActor *center, int intensity, int duration,
 						  int damrad, int tremrad, FSoundID quakesound)
 						  : DThinker(STAT_EARTHQUAKE)
 {
+
+	// [BC] If we're the server, tell clients to do the earthquake.
+	if (( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( center ))
+		SERVERCOMMANDS_Earthquake( center, intensity, duration, tremrad, quakesound );
+
 	m_QuakeSFX = quakesound;
 	m_Spot = center;
 	// Radii are specified in tile units (64 pixels)

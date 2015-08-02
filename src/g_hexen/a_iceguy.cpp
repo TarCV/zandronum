@@ -84,21 +84,37 @@ DEFINE_ACTION_FUNCTION(AActor, A_IceGuyAttack)
 {
 	fixed_t an;
 
+	// [BB] This is server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if(!self->target) 
 	{
 		return;
 	}
 	an = (self->angle+ANG90)>>ANGLETOFINESHIFT;
-	P_SpawnMissileXYZ(self->x+FixedMul(self->radius>>1,
+	AActor *missile1 = P_SpawnMissileXYZ(self->x+FixedMul(self->radius>>1,
 		finecosine[an]), self->y+FixedMul(self->radius>>1,
 		finesine[an]), self->z+40*FRACUNIT, self, self->target,
 		PClass::FindClass ("IceGuyFX"));
 	an = (self->angle-ANG90)>>ANGLETOFINESHIFT;
-	P_SpawnMissileXYZ(self->x+FixedMul(self->radius>>1,
+	AActor *missile2 = P_SpawnMissileXYZ(self->x+FixedMul(self->radius>>1,
 		finecosine[an]), self->y+FixedMul(self->radius>>1,
 		finesine[an]), self->z+40*FRACUNIT, self, self->target,
 		PClass::FindClass ("IceGuyFX"));
 	S_Sound (self, CHAN_WEAPON, self->AttackSound, 1, ATTN_NORM);
+
+	// [BB] If we're the server, tell the clients to spawn the missiles and play the sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		SERVERCOMMANDS_SoundActor( self, CHAN_WEAPON, S_GetName(self->AttackSound), 1, ATTN_NORM );
+		if ( missile1 )
+			SERVERCOMMANDS_SpawnMissile( missile1 );
+		if ( missile2 )
+			SERVERCOMMANDS_SpawnMissile( missile2 );
+	}
 }
 
 //============================================================================

@@ -22,6 +22,12 @@ DEFINE_ACTION_FUNCTION(AActor, A_SkelMissile)
 {		
 	AActor *missile;
 		
+	// [BC] This is handled server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (!self->target)
 		return;
 				
@@ -34,6 +40,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_SkelMissile)
 		missile->x += missile->velx;
 		missile->y += missile->vely;
 		missile->tracer = self->target;
+
+		// [BC] If we're the server, tell clients to spawn the missile.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SpawnMissile( missile );
 	}
 }
 
@@ -60,7 +70,8 @@ DEFINE_ACTION_FUNCTION(AActor, A_Tracer)
 		return;
 	
 	// spawn a puff of smoke behind the rocket
-	P_SpawnPuff (self, PClass::FindClass(NAME_BulletPuff), self->x, self->y, self->z, 0, 3);
+	// [BC] Don't tell clients to spawn this puff.
+	P_SpawnPuff (self, PClass::FindClass(NAME_BulletPuff), self->x, self->y, self->z, 0, 3, false, false);
 		
 	smoke = Spawn ("RevenantTracerSmoke", self->x - self->velx,
 		self->y - self->vely, self->z, ALLOW_REPLACE);
@@ -70,6 +81,13 @@ DEFINE_ACTION_FUNCTION(AActor, A_Tracer)
 	if (smoke->tics < 1)
 		smoke->tics = 1;
 	
+	// [BC] Server takes care of movement.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
+
 	// adjust direction
 	dest = self->tracer;
 		
@@ -124,19 +142,39 @@ DEFINE_ACTION_FUNCTION(AActor, A_Tracer)
 		else
 			self->velz += FRACUNIT/8;
 	}
+
+	// [BC] Update the thing's position, angle and momentum.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_MoveThingExact( self, CM_X|CM_Y|CM_Z|CM_ANGLE|CM_MOMX|CM_MOMY|CM_MOMZ );
 }
 
 
 DEFINE_ACTION_FUNCTION(AActor, A_SkelWhoosh)
 {
+	// [BC] This is handled server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (!self->target)
 		return;
 	A_FaceTarget (self);
 	S_Sound (self, CHAN_WEAPON, "skeleton/swing", 1, ATTN_NORM);
+
+	// [BC] If we're the server, tell clients to play the sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SoundActor( self, CHAN_WEAPON, "skeleton/swing", 1, ATTN_NORM );
 }
 
 DEFINE_ACTION_FUNCTION(AActor, A_SkelFist)
 {
+	// [BC] This is handled server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (!self->target)
 		return;
 				
@@ -148,5 +186,9 @@ DEFINE_ACTION_FUNCTION(AActor, A_SkelFist)
 		S_Sound (self, CHAN_WEAPON, "skeleton/melee", 1, ATTN_NORM);
 		int newdam = P_DamageMobj (self->target, self, self, damage, NAME_Melee);
 		P_TraceBleed (newdam > 0 ? newdam : damage, self->target, self);
+
+		// [BC] If we're the server, tell clients to play the sound.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SoundActor( self, CHAN_WEAPON, "skeleton/melee", 1, ATTN_NORM );
 	}
 }

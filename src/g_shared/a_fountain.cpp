@@ -36,6 +36,9 @@
 #include "info.h"
 #include "p_effect.h"
 #include "doomdata.h"
+// [BB] New #includes.
+#include "cl_demo.h"
+#include "network.h"
 
 class AParticleFountain : public AActor
 {
@@ -44,10 +47,11 @@ public:
 	void PostBeginPlay ();
 	void Activate (AActor *activator);
 	void Deactivate (AActor *activator);
+	// [BC]
+	bool IsActive( void );
 };
 
 IMPLEMENT_CLASS (AParticleFountain)
-
 void AParticleFountain::PostBeginPlay ()
 {
 	Super::PostBeginPlay ();
@@ -66,5 +70,22 @@ void AParticleFountain::Deactivate (AActor *activator)
 {
 	Super::Deactivate (activator);
 	effects &= ~FX_FOUNTAINMASK;
+
+	// [BC] In client mode, mark this as being dormant so that when PostBeginPlay() is
+	// called, it doesn't try to activate the fountain.
+	if ( NETWORK_InClientMode() )
+	{
+		SpawnFlags |= MTF_DORMANT;
+	}
 }
 
+//=============================================================================
+//
+//	[BC] AParticleFountain::IsActive
+//
+//=============================================================================
+
+bool AParticleFountain::IsActive( void )
+{
+	return !!( effects & ( health << FX_FOUNTAINSHIFT ));
+}
