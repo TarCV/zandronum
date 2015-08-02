@@ -45,6 +45,10 @@
 #include "r_data/voxels.h"
 
 
+// [BB] Use ZDoom's freelook limit for the sotfware renderer.
+// Note: ZDoom's limit is chosen such that the sky is rendered properly.
+CVAR (Bool, cl_oldfreelooklimit, false, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+
 class FArchive;
 void R_SWRSetWindow(int windowSize, int fullWidth, int fullHeight, int stHeight, int trueratio);
 void R_SetupColormap(player_t *);
@@ -173,7 +177,8 @@ void FSoftwareRenderer::DrawRemainingPlayerSprites()
 
 int FSoftwareRenderer::GetMaxViewPitch(bool down)
 {
-	return down ? MAX_DN_ANGLE : MAX_UP_ANGLE;
+	// [BB] The user can restore ZDoom's freelook limit.
+	return down ? MAX_DN_ANGLE : ( cl_oldfreelooklimit ? MAX_UP_ANGLE : 56 );
 }
 
 //==========================================================================

@@ -51,6 +51,17 @@
 #include "v_palette.h"
 #include "v_video.h"
 #include "colormatcher.h"
+// [BB] New #includes.
+#include "v_text.h"
+#include "deathmatch.h"
+#include "duel.h"
+#include "team.h"
+#include "campaign.h"
+#include "sv_commands.h"
+#include "network.h"
+#include "cl_demo.h"
+#include "m_png.h"
+#include "p_acs.h"
 
 struct FLatchedValue
 {
@@ -67,6 +78,8 @@ bool FBaseCVar::m_UseCallback = false;
 FBaseCVar *CVars = NULL;
 
 int cvar_defflags;
+
+EXTERN_CVAR( Bool, sv_cheats );
 
 FBaseCVar::FBaseCVar (const FBaseCVar &var)
 {
@@ -149,6 +162,14 @@ void FBaseCVar::SetGenericRep (UCVarValue value, ECVarType type)
 	{
 		return;
 	}
+	// [BB] ConsoleCommand may not mess with the cvar.
+	else if ( ( Flags & CVAR_NOSETBYACS ) && ( ACS_IsCalledFromConsoleCommand() ) )
+		return;
+	else if (( Flags & CVAR_CAMPAIGNLOCK ) && ( CAMPAIGN_InCampaign( )) && ( sv_cheats == false ))
+	{
+		Printf( "%s cannot be changed during a campaign.\n", GetName( ));
+		return;
+	}
 	else if ((Flags & CVAR_LATCH) && gamestate != GS_FULLCONSOLE && gamestate != GS_STARTUP)
 	{
 		FLatchedValue latch;
@@ -161,14 +182,17 @@ void FBaseCVar::SetGenericRep (UCVarValue value, ECVarType type)
 			latch.Value.String = copystring(value.String);
 		LatchedValues.Push (latch);
 	}
-	else if ((Flags & CVAR_SERVERINFO) && gamestate != GS_STARTUP && !demoplayback)
+	// [BC] Support for client-side demos.
+	else if ((Flags & CVAR_SERVERINFO) && gamestate != GS_STARTUP && !demoplayback && ( CLIENTDEMO_IsPlaying( ) == false ))
 	{
-		if (netgame && !players[consoleplayer].settings_controller)
+		if ( NETWORK_GetState( ) != NETSTATE_CLIENT )
 		{
-			Printf ("Only setting controllers can change %s\n", Name);
-			return;
+			ForceSet (value, type);
+//			D_SendServerInfoChange (this, value, type);
+			// [BB] Inform the clients about changes of server mod cvars.
+			if ( ( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( Flags & CVAR_MOD ) )
+				SERVERCOMMANDS_SetCVar ( *this );
 		}
-		D_SendServerInfoChange (this, value, type);
 	}
 	else
 	{
@@ -619,6 +643,18 @@ void FBaseCVar::DisableCallbacks ()
 	m_UseCallback = false;
 }
 
+// [TP]
+bool FBaseCVar::IsServerInfo()
+{
+	if ( IsFlagCVar() )
+		return static_cast<FFlagCVar*>( this )->GetValueVar()->IsServerInfo();
+
+	if ( IsMaskCVar() )
+		return static_cast<FMaskCVar*>( this )->GetValueVar()->IsServerInfo();
+
+	return !!( Flags & CVAR_SERVERINFO );
+}
+
 //
 // Boolean cvar implementation
 //
@@ -686,7 +722,7 @@ FIntCVar::FIntCVar (const char *name, int def, DWORD flags, void (*callback)(FIn
 {
 	DefaultValue = def;
 	if (Flags & CVAR_ISDEFAULT)
-		Value = def;
+		Value = PastValue = def; // [Dusk] Store PastValue here
 }
 
 ECVarType FIntCVar::GetRealType () const
@@ -732,6 +768,7 @@ void FIntCVar::SetGenericRepDefault (UCVarValue value, ECVarType type)
 
 void FIntCVar::DoSet (UCVarValue value, ECVarType type)
 {
+	PastValue = Value; // [Dusk]
 	Value = ToInt (value, type);
 }
 
@@ -1130,30 +1167,14 @@ void FFlagCVar::SetGenericRepDefault (UCVarValue value, ECVarType type)
 void FFlagCVar::DoSet (UCVarValue value, ECVarType type)
 {
 	bool newval = ToBool (value, type);
-
-	// Server cvars that get changed by this need to use a special message, because
-	// changes are not processed until the next net update. This is a problem with
-	// exec scripts because all flags will base their changes off of the value of
-	// the "master" cvar at the time the script was run, overriding any changes
-	// another flag might have made to the same cvar earlier in the script.
-	if ((ValueVar.GetFlags() & CVAR_SERVERINFO) && gamestate != GS_STARTUP && !demoplayback)
-	{
-		if (netgame && !players[consoleplayer].settings_controller)
-		{
-			Printf ("Only setting controllers can change %s\n", Name);
-			return;
-		}
-		D_SendServerFlagChange (&ValueVar, BitNum, newval);
-	}
+	ECVarType dummy;
+	UCVarValue val;
+	val = ValueVar.GetFavoriteRep (&dummy);
+	if (newval)
+		val.Int |= BitVal;
 	else
-	{
-		int val = *ValueVar;
-		if (newval)
-			val |= BitVal;
-		else
-			val &= ~BitVal;
-		ValueVar = val;
-	}
+		val.Int &= ~BitVal;
+	ValueVar = val.Int;
 }
 
 //
@@ -1240,7 +1261,8 @@ void FMaskCVar::DoSet (UCVarValue value, ECVarType type)
 	// another flag might have made to the same cvar earlier in the script.
 	if ((ValueVar.GetFlags() & CVAR_SERVERINFO) && gamestate != GS_STARTUP && !demoplayback)
 	{
-		if (netgame && !players[consoleplayer].settings_controller)
+		// [BB] netgame && !players[consoleplayer].settings_controller -> NETWORK_InClientMode( )
+		if ( NETWORK_InClientMode( ) )
 		{
 			Printf ("Only setting controllers can change %s\n", Name);
 			return;
@@ -1544,10 +1566,27 @@ void C_ArchiveCVars (FConfigFile *f, uint32 filter)
 		{
 			UCVarValue val;
 			val = cvar->GetGenericRep (CVAR_String);
-			f->SetValueForKey (cvar->GetName (), val.String);
+			// [BB] This is ancient code from Skulltag...
+			if ( filter == (CVAR_ARCHIVE|CVAR_USERINFO) )
+			{
+				char	szString[64];
+
+				strncpy( szString, val.String, 63 );
+				szString[63] = 0;
+				V_UnColorizeString( szString, 64 );
+				f->SetValueForKey (cvar->GetName (), szString);
+			}
+			else
+				f->SetValueForKey (cvar->GetName (), val.String);
 		}
 		cvar = cvar->m_Next;
 	}
+}
+
+// [Dusk]
+FBaseCVar* C_GetRootCVar()
+{
+	return CVars;
 }
 
 void FBaseCVar::CmdSet (const char *newval)

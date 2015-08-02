@@ -71,7 +71,7 @@ int currentrenderer = -1;
 bool changerenderer;
 
 // [ZDoomGL]
-CUSTOM_CVAR (Int, vid_renderer, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_NOINITCALL)
+CUSTOM_CVAR (Int, vid_renderer, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_NOINITCALL)
 {
 	// 0: Software renderer
 	// 1: OpenGL renderer
@@ -100,6 +100,10 @@ CCMD (vid_restart)
 {
 }
 
+#ifndef NO_GL
+#else
+	Video = new Win32Video (0);
+#endif
 
 void I_ShutdownGraphics ()
 {
@@ -137,8 +141,12 @@ void I_InitGraphics ()
 	ticker.SetGenericRepDefault (val, CVAR_Bool);
 
 	//currentrenderer = vid_renderer;
+#ifndef NO_GL
 	if (currentrenderer==1) Video = gl_CreateVideo();
 	else Video = new Win32Video (0);
+#else
+	Video = new Win32Video (0);
+#endif
 
 	if (Video == NULL)
 		I_FatalError ("Failed to initialize display");
