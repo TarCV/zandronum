@@ -44,6 +44,10 @@
 #include "i_system.h"
 #include "gl/system/gl_cvars.h"
 
+#ifdef _WIN32 // [BB] Detect some kinds of glBegin hooking.
+char myGlBeginCharArray[4] = {0,0,0,0};
+#endif
+
 #if defined (unix) || defined (__APPLE__)
 #include <SDL.h>
 #define wglGetProcAddress(x) (*SDL_GL_GetProcAddress)(x)
@@ -340,6 +344,7 @@ static void APIENTRY PrintStartupLog()
 //
 //==========================================================================
 
+	int attributes[28]; // [BB] Added two attributes.
 static void APIENTRY glBlendEquationDummy (GLenum mode)
 {
 	// If this is not supported all non-existent modes are
@@ -520,6 +525,11 @@ void APIENTRY GetContext(RenderContext & gl)
 	gl.Flush = glFlush;
 
 	gl.BlendEquation = glBlendEquationDummy;
+
+#ifdef _WIN32 // [BB] Detect some kinds of glBegin hooking.
+	for ( int i = 0; i < 4; ++i )
+		myGlBeginCharArray[i] = reinterpret_cast<char *>(gl.Begin)[i];
+#endif
 }
 
 

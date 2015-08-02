@@ -119,12 +119,24 @@ void AScriptedMarine::Tick ()
 				{
 				case 14:
 					S_Sound (this, CHAN_WEAPON, "weapons/sshoto", 1, ATTN_NORM);
+
+					// [BC] If we're the server, tell clients to play this sound.
+					if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+						SERVERCOMMANDS_SoundActor( this, CHAN_WEAPON, "weapons/sshoto", 1, ATTN_NORM );
 					break;
 				case 28:
 					S_Sound (this, CHAN_WEAPON, "weapons/sshotl", 1, ATTN_NORM);
+
+					// [BC] If we're the server, tell clients to play this sound.
+					if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+						SERVERCOMMANDS_SoundActor( this, CHAN_WEAPON, "weapons/sshotl", 1, ATTN_NORM );
 					break;
 				case 41:
 					S_Sound (this, CHAN_WEAPON, "weapons/sshotc", 1, ATTN_NORM);
+
+					// [BC] If we're the server, tell clients to play this sound.
+					if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+						SERVERCOMMANDS_SoundActor( this, CHAN_WEAPON, "weapons/sshotc", 1, ATTN_NORM );
 					break;
 				}
 			}
@@ -158,6 +170,12 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_M_Refire)
 	ACTION_PARAM_START(1);
 	ACTION_PARAM_BOOL(ignoremissile, 0);
 
+	// [BC] Let the server do this.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (self->target == NULL || self->target->health <= 0)
 	{
 		if (self->MissileState && pr_m_refire() < 160)
@@ -167,6 +185,11 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_M_Refire)
 				return;
 			}
 		}
+
+		// [BC] Update the thing's state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingFrame( self, self->state + 1 );
+
 		self->SetState (self->state + 1);
 		return;
 	}
@@ -174,6 +197,10 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_M_Refire)
 		!P_CheckSight (self, self->target) ||
 		pr_m_refire() < 4)	// Small chance of stopping even when target not dead
 	{
+		// [BC] Update the thing's state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingFrame( self, self->state + 1 );
+
 		self->SetState (self->state + 1);
 	}
 }
@@ -186,13 +213,27 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_M_Refire)
 
 DEFINE_ACTION_FUNCTION(AActor, A_M_SawRefire)
 {
+	// [BC] Let the server do this.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (self->target == NULL || self->target->health <= 0)
 	{
+		// [BC] Update the thing's state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingFrame( self, self->state + 1 );
+
 		self->SetState (self->state + 1);
 		return;
 	}
 	if (!self->CheckMeleeRange ())
 	{
+		// [BC] Update the thing's state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingFrame( self, self->state + 1 );
+
 		self->SetState (self->state + 1);
 	}
 }
@@ -205,9 +246,19 @@ DEFINE_ACTION_FUNCTION(AActor, A_M_SawRefire)
 
 DEFINE_ACTION_FUNCTION(AActor, A_MarineNoise)
 {
+	// [BC] Don't do this in client mode.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (static_cast<AScriptedMarine *>(self)->CurrentWeapon == AScriptedMarine::WEAPON_Chainsaw)
 	{
 		S_Sound (self, CHAN_WEAPON, "weapons/sawidle", 1, ATTN_NORM);
+
+		// [BC] If we're the server, tell clients to play this sound.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SoundActor( self, CHAN_WEAPON, "weapons/sawidle", 1, ATTN_NORM );
 	}
 }
 
@@ -249,6 +300,12 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_M_Saw)
 	ACTION_PARAM_INT(damage, 2);
 	ACTION_PARAM_CLASS(pufftype, 3);
 
+	// [BC] Don't do this in client mode.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (self->target == NULL)
 		return;
 
@@ -271,9 +328,17 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_M_Saw)
 		if (!linetarget)
 		{
 			S_Sound (self, CHAN_WEAPON, fullsound, 1, ATTN_NORM);
+
+			// [BC] If we're the server, tell clients to play this sound.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SoundActor( self, CHAN_WEAPON, S_GetName ( fullsound ), 1, ATTN_NORM );
 			return;
 		}
 		S_Sound (self, CHAN_WEAPON, hitsound, 1, ATTN_NORM);
+
+		// [BC] If we're the server, tell clients to play this sound.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SoundActor( self, CHAN_WEAPON, S_GetName ( hitsound ), 1, ATTN_NORM );
 			
 		// turn to face target
 		angle = R_PointToAngle2 (self->x, self->y, linetarget->x, linetarget->y);
@@ -295,6 +360,10 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_M_Saw)
 	else
 	{
 		S_Sound (self, CHAN_WEAPON, fullsound, 1, ATTN_NORM);
+
+		// [BC] If we're the server, tell clients to play this sound.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SoundActor( self, CHAN_WEAPON, S_GetName ( fullsound ), 1, ATTN_NORM );
 	}
 	//A_Chase (self);
 }
@@ -312,6 +381,12 @@ static void MarinePunch(AActor *self, int damagemul)
 	int 		pitch;
 	AActor		*linetarget;
 
+	// [BC] Don't do this in client mode.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (self->target == NULL)
 		return;
 
@@ -326,7 +401,16 @@ static void MarinePunch(AActor *self, int damagemul)
 	if (linetarget)
 	{
 		S_Sound (self, CHAN_WEAPON, "*fist", 1, ATTN_NORM);
+
+		// [BC] If we're the server, tell clients to play this sound.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SoundActor( self, CHAN_WEAPON, "*fist", 1, ATTN_NORM );
+
 		self->angle = R_PointToAngle2 (self->x, self->y, linetarget->x, linetarget->y);
+
+		// [BB] Update the thing's angle.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingAngle( self );
 	}
 }
 
@@ -349,6 +433,12 @@ void P_GunShot2 (AActor *mo, bool accurate, int pitch, const PClass *pufftype)
 	angle_t 	angle;
 	int 		damage;
 		
+	// [BC] Don't do this in client mode.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	damage = 5*(pr_m_gunshot()%3+1);
 	angle = mo->angle;
 
@@ -368,6 +458,12 @@ void P_GunShot2 (AActor *mo, bool accurate, int pitch, const PClass *pufftype)
 
 DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_M_FirePistol)
 {
+	// [BC] Don't do this in client mode.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (self->target == NULL)
 		return;
 
@@ -375,6 +471,11 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_M_FirePistol)
 	ACTION_PARAM_BOOL(accurate, 0);
 
 	S_Sound (self, CHAN_WEAPON, "weapons/pistol", 1, ATTN_NORM);
+
+	// [BC] If we're the server, tell clients to play this sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SoundActor( self, CHAN_WEAPON, "weapons/pistol", 1, ATTN_NORM );
+
 	A_FaceTarget (self);
 	P_GunShot2 (self, accurate, P_AimLineAttack (self, self->angle, MISSILERANGE),
 		PClass::FindClass(NAME_BulletPuff));
@@ -390,10 +491,21 @@ DEFINE_ACTION_FUNCTION(AActor, A_M_FireShotgun)
 {
 	int pitch;
 
+	// [BC] Don't do this in client mode.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (self->target == NULL)
 		return;
 
 	S_Sound (self, CHAN_WEAPON,  "weapons/shotgf", 1, ATTN_NORM);
+
+	// [BC] If we're the server, tell clients to play this sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SoundActor( self, CHAN_WEAPON, "weapons/shotgf", 1, ATTN_NORM );
+
 	A_FaceTarget (self);
 	pitch = P_AimLineAttack (self, self->angle, MISSILERANGE);
 	for (int i = 0; i < 7; ++i)
@@ -411,8 +523,18 @@ DEFINE_ACTION_FUNCTION(AActor, A_M_FireShotgun)
 
 DEFINE_ACTION_FUNCTION(AActor, A_M_CheckAttack)
 {
+	// [BC] Don't do this in client mode.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (self->special1 != 0 || self->target == NULL)
 	{
+		// [Dusk] Update the state to clients
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingFrame( self, self->FindState("SkipAttack") );
+
 		self->SetState (self->FindState("SkipAttack"));
 	}
 	else
@@ -431,10 +553,21 @@ DEFINE_ACTION_FUNCTION(AActor, A_M_FireShotgun2)
 {
 	int pitch;
 
+	// [BC] Don't do this in client mode.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (self->target == NULL)
 		return;
 
 	S_Sound (self, CHAN_WEAPON, "weapons/sshotf", 1, ATTN_NORM);
+
+	// [BC] If we're the server, tell clients to play this sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SoundActor( self, CHAN_WEAPON, "weapons/sshotf", 1, ATTN_NORM );
+
 	A_FaceTarget (self);
 	pitch = P_AimLineAttack (self, self->angle, MISSILERANGE);
 	for (int i = 0; i < 20; ++i)
@@ -457,6 +590,12 @@ DEFINE_ACTION_FUNCTION(AActor, A_M_FireShotgun2)
 
 DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_M_FireCGun)
 {
+	// [BC] Don't do this in client mode.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (self->target == NULL)
 		return;
 
@@ -464,6 +603,11 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_M_FireCGun)
 	ACTION_PARAM_BOOL(accurate, 0);
 
 	S_Sound (self, CHAN_WEAPON, "weapons/chngun", 1, ATTN_NORM);
+
+	// [BC] If we're the server, tell clients to play this sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SoundActor( self, CHAN_WEAPON, "weapons/chngun", 1, ATTN_NORM );
+
 	A_FaceTarget (self);
 	P_GunShot2 (self, accurate, P_AimLineAttack (self, self->angle, MISSILERANGE),
 		PClass::FindClass(NAME_BulletPuff));
@@ -481,6 +625,15 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_M_FireCGun)
 
 DEFINE_ACTION_FUNCTION(AActor, A_M_FireMissile)
 {
+	// [BC]
+	AActor	*pMissile;
+
+	// [BC] Don't do this in client mode.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (self->target == NULL)
 		return;
 
@@ -491,7 +644,11 @@ DEFINE_ACTION_FUNCTION(AActor, A_M_FireMissile)
 	else
 	{
 		A_FaceTarget (self);
-		P_SpawnMissile (self, self->target, PClass::FindClass("Rocket"));
+		pMissile = P_SpawnMissile (self, self->target, PClass::FindClass("Rocket"));
+
+		// [BC] If we're the server, tell clients to spawn this missile.
+		if (( pMissile ) && ( NETWORK_GetState( ) == NETSTATE_SERVER ))
+			SERVERCOMMANDS_SpawnMissile( pMissile );
 	}
 }
 
@@ -503,6 +660,12 @@ DEFINE_ACTION_FUNCTION(AActor, A_M_FireMissile)
 
 DEFINE_ACTION_FUNCTION(AActor, A_M_FireRailgun)
 {
+	// [BC] Don't do this in client mode.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (self->target == NULL)
 		return;
 
@@ -518,12 +681,25 @@ DEFINE_ACTION_FUNCTION(AActor, A_M_FireRailgun)
 
 DEFINE_ACTION_FUNCTION(AActor, A_M_FirePlasma)
 {
+	// [BC]
+	AActor	*pMissile;
+
+	// [BC] Don't do this in client mode.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (self->target == NULL)
 		return;
 
 	A_FaceTarget (self);
-	P_SpawnMissile (self, self->target, PClass::FindClass("PlasmaBall"));
+	pMissile = P_SpawnMissile (self, self->target, PClass::FindClass("PlasmaBall"));
 	self->special1 = level.maptime + 20;
+
+	// [BC] If we're the server, tell clients to spawn this missile.
+	if (( pMissile ) && ( NETWORK_GetState( ) == NETSTATE_SERVER ))
+		SERVERCOMMANDS_SpawnMissile( pMissile );
 }
 
 //============================================================================
@@ -534,17 +710,32 @@ DEFINE_ACTION_FUNCTION(AActor, A_M_FirePlasma)
 
 DEFINE_ACTION_FUNCTION(AActor, A_M_BFGsound)
 {
+	// [BC] Don't do this in client mode.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (self->target == NULL)
 		return;
 
 	if (self->special1 != 0)
 	{
+		// [Dusk] Update the state change to clients.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingFrame( self, self->SeeState );
+
 		self->SetState (self->SeeState);
 	}
 	else
 	{
 		A_FaceTarget (self);
 		S_Sound (self, CHAN_WEAPON, "weapons/bfgf", 1, ATTN_NORM);
+
+		// [BC] If we're the server, tell clients to play this sound.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SoundActor( self, CHAN_WEAPON, "weapons/bfgf", 1, ATTN_NORM );
+
 		// Don't interrupt the firing sequence
 		self->PainChance = 0;
 	}
@@ -558,13 +749,25 @@ DEFINE_ACTION_FUNCTION(AActor, A_M_BFGsound)
 
 DEFINE_ACTION_FUNCTION(AActor, A_M_FireBFG)
 {
+	AActor	*pMissile;
+
+	// [BC] Don't do this in client mode.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (self->target == NULL)
 		return;
 
 	A_FaceTarget (self);
-	P_SpawnMissile (self, self->target, PClass::FindClass("BFGBall"));
+	pMissile = P_SpawnMissile (self, self->target, PClass::FindClass("BFGBall"));
 	self->special1 = level.maptime + 30;
 	self->PainChance = MARINE_PAIN_CHANCE;
+
+	// [BC] If we're the server, tell clients to spawn this missile.
+	if (( pMissile ) && ( NETWORK_GetState( ) == NETSTATE_SERVER ))
+		SERVERCOMMANDS_SpawnMissile( pMissile );
 }
 
 //---------------------------------------------------------------------------

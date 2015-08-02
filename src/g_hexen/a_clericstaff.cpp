@@ -76,11 +76,19 @@ DEFINE_ACTION_FUNCTION(AActor, A_CStaffCheck)
 			if (((linetarget->player && (!linetarget->IsTeammate (pmo) || level.teamdamage != 0))|| linetarget->flags3&MF3_ISMONSTER)
 				&& (!(linetarget->flags2&(MF2_DORMANT+MF2_INVULNERABLE))))
 			{
-				newLife = player->health+(damage>>3);
-				newLife = newLife > max ? max : newLife;
-				if (newLife > player->health)
+				// [CW] Clients should not set their own health.
+				if ( NETWORK_InClientMode() == false )
 				{
-					pmo->health = player->health = newLife;
+					newLife = player->health+(damage>>3);
+					newLife = newLife > max ? max : newLife;
+					if (newLife > player->health)
+					{
+						pmo->health = player->health = newLife;
+
+						// [BC] Send the health update.
+						if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+							SERVERCOMMANDS_SetPlayerHealth( ULONG( player - players ));
+					}
 				}
 				P_SetPsprite (player, ps_weapon, weapon->FindState ("Drain"));
 			}
@@ -99,9 +107,18 @@ DEFINE_ACTION_FUNCTION(AActor, A_CStaffCheck)
 				linetarget->x, linetarget->y);
 			if ((linetarget->player && (!linetarget->IsTeammate (pmo) || level.teamdamage != 0)) || linetarget->flags3&MF3_ISMONSTER)
 			{
-				newLife = player->health+(damage>>4);
-				newLife = newLife > max ? max : newLife;
-				pmo->health = player->health = newLife;
+				// [CW] Clients should not set their own health.
+				if ( NETWORK_InClientMode() == false )
+				{
+					newLife = player->health+(damage>>4);
+					newLife = newLife > max ? max : newLife;
+					pmo->health = player->health = newLife;
+				}
+
+				// [BC] Send the health update.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_SetPlayerHealth( ULONG( player - players ));
+
 				P_SetPsprite (player, ps_weapon, weapon->FindState ("Drain"));
 			}
 			weapon->DepleteAmmo (weapon->bAltFire, false);
@@ -132,17 +149,68 @@ DEFINE_ACTION_FUNCTION(AActor, A_CStaffAttack)
 		if (!weapon->DepleteAmmo (weapon->bAltFire))
 			return;
 	}
+
+	// [BC] Weapons are handled by the server.
+	if ( NETWORK_InClientMode() )
+	{
+		S_Sound (self, CHAN_WEAPON, "ClericCStaffFire", 1, ATTN_NORM);
+		return;
+	}
+
 	mo = P_SpawnPlayerMissile (self, RUNTIME_CLASS(ACStaffMissile), self->angle-(ANG45/15));
 	if (mo)
 	{
 		mo->WeaveIndexXY = 32;
+
+		// [BC] Clients need to have this information.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingSpecial2( mo );
 	}
 	mo = P_SpawnPlayerMissile (self, RUNTIME_CLASS(ACStaffMissile), self->angle+(ANG45/15));
 	if (mo)
 	{
 		mo->WeaveIndexXY = 0;
 	}
+
+	// [BC] Apply spread.
+	if ( player->cheats2 & CF2_SPREAD )
+	{
+		mo = P_SpawnPlayerMissile( self, RUNTIME_CLASS( ACStaffMissile ), self->angle-(ANG45/15) + ( ANGLE_45 / 3 ));
+		if (mo)
+		{
+			mo->special2 = 32;
+
+			// [BC] Clients need to have this information.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetThingSpecial2( mo );
+		}
+		mo = P_SpawnPlayerMissile( self, RUNTIME_CLASS( ACStaffMissile ), self->angle+(ANG45/15) + ( ANGLE_45 / 3 ));
+		if (mo)
+		{
+			mo->special2 = 0;
+		}
+
+		mo = P_SpawnPlayerMissile( self, RUNTIME_CLASS( ACStaffMissile ), self->angle-(ANG45/15) - ( ANGLE_45 / 3 ));
+		if (mo)
+		{
+			mo->special2 = 32;
+
+			// [BC] Clients need to have this information.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetThingSpecial2( mo );
+		}
+		mo = P_SpawnPlayerMissile( self, RUNTIME_CLASS( ACStaffMissile ), self->angle+(ANG45/15) - ( ANGLE_45 / 3 ));
+		if (mo)
+		{
+			mo->special2 = 0;
+		}
+	}
+
 	S_Sound (self, CHAN_WEAPON, "ClericCStaffFire", 1, ATTN_NORM);
+
+	// [BC] If we're the server, play the sound for clients.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_WeaponSound( ULONG( player - players ), "ClericCStaffFire", ULONG( player - players ), SVCF_SKIPTHISCLIENT );
 }
 
 //============================================================================

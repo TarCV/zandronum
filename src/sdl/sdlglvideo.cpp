@@ -1,3 +1,4 @@
+#ifndef NO_GL
 
 // HEADER FILES ------------------------------------------------------------
 
@@ -486,3 +487,5 @@ void SDLGLFB::SwapBuffers()
 	SDL_GL_SwapBuffers ();
 }
 
+
+#endif

@@ -57,6 +57,9 @@ dog/death			dsdgdth
 dog/pain			dsdgpain
 dog/sight			dsdgsit
 
+// [BB] Connect sound for Zandronum.
+zandronum/connect   cnnctsnd
+
 /****************************************************************************/
 /*																			*/
 /* DOOM SOUNDS																*/
@@ -92,6 +95,8 @@ $playersounddup	player	male	*land		*grunt
 $playersound	player	male	*jump		dsjump
 $playersound	player	male	*fist		dspunch
 $playersound	player	male	*usefail	dsnoway
+// [BC] New player sound for Skulltag: taunt.
+$playersound	player	male	*taunt		dstaunt
 
 $playersound	player	female	*death		dsfldeth
 $playersound	player	female	*xdeath		dsfdiehi
@@ -105,6 +110,8 @@ $playersounddup	player	female	*land		*grunt
 $playersound	player	female	*jump		dsfjump
 $playersound	player	female	*fist		dspunch
 $playersound	player	female	*usefail	dsfnoway
+// [BC] New player sound for Skulltag: taunt.
+$playersound	player	female	*taunt		dstaunt
 
 $playersound	player	other	*death		dscldeth
 $playersound	player	other	*xdeath		dscdiehi
@@ -118,6 +125,8 @@ $playersounddup	player	other	*land		*grunt
 $playersound	player	other	*jump		dscjump
 $playersound	player	other	*fist		dspunch
 $playersound	player	other	*usefail	dscnoway
+// [BC] New player sound for Skulltag: taunt.
+$playersound	player	other	*taunt		dstaunt
 
 // Alternate names for some player sounds needed for ZDoom <= 1.22 compatibility
 //
@@ -143,6 +152,8 @@ $playercompat	player	male	*land		player/male/land1
 $playercompat	player	male	*jump		player/male/jump1
 $playercompat	player	male	*gibbed		player/male/gibbed
 $playercompat	player	male	*fist		player/male/fist
+// [BC] New player sound for Skulltag: taunt.
+$playercompat	player	male	*taunt		player/male/taunt
 
 $playercompat	player	female	*death		player/female/death1
 $playercompat	player	female	*death		player/female/death2
@@ -478,6 +489,8 @@ misc/k_pkup			dsitemup	// Pickup key
 misc/spawn			dsitmbk		// Item respawn
 misc/chat			dsradio		// Doom 2 chat sound
 misc/chat2			dstink		// Chat sound for everything else
+misc/llama			dsllama		// [BC] Llama sound
+misc/spam			dsspam		// [BC] Spam sound
 
 $limit misc/i_pkup		1
 $limit misc/k_pkup		1
