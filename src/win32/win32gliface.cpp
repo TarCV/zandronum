@@ -603,7 +603,7 @@ bool Win32GLVideo::SetupPixelFormat(bool allowsoftware, int multisample)
 {
 	int colorDepth;
 	HDC deskDC;
-	int attributes[26];
+	int attributes[28]; // [BB] Added two attributes.
 	int pixelFormat;
 	unsigned int numFormats;
 	float attribsFloat[] = {0.0f, 0.0f};
@@ -659,8 +659,13 @@ bool Win32GLVideo::SetupPixelFormat(bool allowsoftware, int multisample)
 			attributes[23]	=	0;
 		}
 	
-		attributes[24]	=	0;
-		attributes[25]	=	0;
+		// [BB] Starting with driver version 314.07, NVIDIA GeForce cards support OpenGL quad buffered
+		// stereo rendering with 3D Vision hardware. Select the corresponding attribute here.
+		const int offset = ( multisample > 0 ) ? 24 : 20;
+		attributes[offset]	=	WGL_STEREO_ARB;
+		attributes[offset+1]	=	true;
+		attributes[offset+2]	=	0;
+		attributes[offset+3]	=	0;
 	
 		if (!wglChoosePixelFormatARB(m_hDC, attributes, attribsFloat, 1, &pixelFormat, &numFormats))
 		{
