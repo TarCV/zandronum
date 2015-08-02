@@ -47,13 +47,19 @@
 #include "r_state.h"
 #include "r_data/r_translate.h"
 #include "v_text.h"
+// [BB] New #includes.
+#include "team.h"
 
 EXTERN_CVAR (String, playerclass)
 EXTERN_CVAR (String, name)
-EXTERN_CVAR (Int, team)
+// [BB]
+//EXTERN_CVAR (Int, team)
 EXTERN_CVAR (Float, autoaim)
-EXTERN_CVAR(Bool, neverswitchonpickup)
+// [BB] neverswitchonpickup -> switchonpickup
+EXTERN_CVAR(Int, switchonpickup)
 EXTERN_CVAR (Bool, cl_run)
+// [TP]
+EXTERN_CVAR( Int, handicap )
 
 //=============================================================================
 //
@@ -193,7 +199,8 @@ bool FPlayerNameBox::MenuEvent(int mkey, bool fromcontroller)
 		S_Sound (CHAN_VOICE | CHAN_UI, "menu/choose", snd_menuvolume, ATTN_NONE);
 		strcpy(mEditName, mPlayerName);
 		mEntering = true;
-		DMenu *input = new DTextEnterMenu(DMenu::CurrentMenu, mEditName, MAXPLAYERNAME, 2, fromcontroller);
+		// [TP] Pass allowcolors=true to support colors in player names.
+		DMenu *input = new DTextEnterMenu(DMenu::CurrentMenu, mEditName, MAXPLAYERNAME, 2, fromcontroller, true);
 		M_ActivateMenu(input);
 		return true;
 	}
@@ -559,6 +566,8 @@ void DPlayerMenu::Init(DMenu *parent, FListMenuDescriptor *desc)
 		li->SetString(0, name);
 	}
 
+	// [TP] Zandronum doesn't support teams in the player setup menu
+#if 0
 	li = GetItem(NAME_Team);
 	if (li != NULL)
 	{
@@ -569,8 +578,13 @@ void DPlayerMenu::Init(DMenu *parent, FListMenuDescriptor *desc)
 		}
 		li->SetValue(0, team == TEAM_NONE? 0 : team + 1);
 	}
+#endif
 
+	// [TP] Zandronum doesn't support colorsets for now.
+	const int mycolorset = -1;
+#if 0
 	int mycolorset = players[consoleplayer].userinfo.GetColorSet();
+#endif
 	int color = players[consoleplayer].userinfo.GetColor();
 
 	UpdateColorsets();
@@ -643,13 +657,21 @@ void DPlayerMenu::Init(DMenu *parent, FListMenuDescriptor *desc)
 	li = GetItem(NAME_Switch);
 	if (li != NULL)
 	{
-		li->SetValue(0, neverswitchonpickup);
+		// [BB] neverswitchonpickup -> switchonpickup
+		li->SetValue(0, switchonpickup);
 	}
 
 	li = GetItem(NAME_AlwaysRun);
 	if (li != NULL)
 	{
 		li->SetValue(0, cl_run);
+	}
+
+	// [TP]
+	li = GetItem( NAME_Handicap );
+	if ( li != NULL )
+	{
+		li->SetValue( 0, handicap );
 	}
 
 	if (mDesc->mSelectedItem < 0) mDesc->mSelectedItem = 1;
@@ -688,7 +710,12 @@ void DPlayerMenu::UpdateTranslation()
 {
 	int PlayerColor = players[consoleplayer].userinfo.GetColor();
 	int	PlayerSkin = players[consoleplayer].userinfo.GetSkin();
+
+	// [TP] Zandronum doesn't suppor colorsets for now.
+	int PlayerColorset = -1;
+#if 0
 	int PlayerColorset = players[consoleplayer].userinfo.GetColorSet();
+#endif
 
 	if (PlayerClass != NULL)
 	{
@@ -765,6 +792,8 @@ void DPlayerMenu::UpdateColorsets()
 		int sel = 0;
 		P_EnumPlayerColorSets(PlayerClass->Type->TypeName, &PlayerColorSets);
 		li->SetString(0, "Custom");
+		// [TP] Zandronum doesn't support colorsets for now.
+#if 0
 		for(unsigned i=0;i<PlayerColorSets.Size(); i++)
 		{
 			FPlayerColorSet *colorset = P_GetPlayerColorSet(PlayerClass->Type->TypeName, PlayerColorSets[i]);
@@ -781,6 +810,7 @@ void DPlayerMenu::UpdateColorsets()
 				}
 			}
 		}
+#endif
 		li->SetValue(0, sel);
 	}
 }
@@ -808,7 +838,8 @@ void DPlayerMenu::UpdateSkins()
 		else
 		{
 			PlayerSkins.Clear();
-			for(int i=0;i<(int)numskins; i++)
+			// [BB] numskins -> skins.Size()
+			for(int i=0;i<(int)skins.Size(); i++)
 			{
 				if (PlayerClass->CheckSkin(i))
 				{
@@ -868,6 +899,8 @@ void DPlayerMenu::PlayerNameChanged(FListMenuItem *li)
 
 void DPlayerMenu::ColorSetChanged (FListMenuItem *li)
 {
+	// [TP] Zandronum doesn't support colorsets
+#if 0
 	int	sel;
 
 	if (li->GetValue(0, &sel))
@@ -891,6 +924,7 @@ void DPlayerMenu::ColorSetChanged (FListMenuItem *li)
 		C_DoCommand(command);
 		UpdateTranslation();
 	}
+#endif
 }
 
 //=============================================================================
@@ -1005,7 +1039,9 @@ bool DPlayerMenu::MenuEvent (int mkey, bool fromcontroller)
 			case NAME_Team:
 				if (li->GetValue(0, &v))
 				{
-					team = v==0? TEAM_NONE : v-1;
+					// [BB] TEAM_NONE -> MAX_TEAMS
+					// [BB] FIXME
+					//team = v==0? MAX_TEAMS : v-1;
 				}
 				break;
 
@@ -1059,7 +1095,8 @@ bool DPlayerMenu::MenuEvent (int mkey, bool fromcontroller)
 			case NAME_Switch:
 				if (li->GetValue(0, &v))
 				{
-					neverswitchonpickup = !!v;
+					// [BB] neverswitchonpickup -> switchonpickup
+					switchonpickup = !!v;
 				}
 				break;
 
@@ -1069,6 +1106,12 @@ bool DPlayerMenu::MenuEvent (int mkey, bool fromcontroller)
 					cl_run = !!v;
 				}
 				break;
+
+			case NAME_Handicap:
+				if ( li->GetValue( 0, &v ))
+				{
+					handicap = v;
+				}
 
 			default:
 				break;

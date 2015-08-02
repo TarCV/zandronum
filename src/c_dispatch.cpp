@@ -54,6 +54,11 @@
 #include "d_net.h"
 #include "d_main.h"
 #include "farchive.h"
+// [BC] new #includes.
+#include "p_local.h"
+#include "g_level.h"
+#include "p_acs.h"
+#include "cl_demo.h"
 
 // MACROS ------------------------------------------------------------------
 
@@ -122,7 +127,9 @@ FButtonStatus Button_Mlook, Button_Klook, Button_Use, Button_AltAttack,
 	Button_Zoom, Button_Reload,
 	Button_User1, Button_User2, Button_User3, Button_User4,
 	Button_AM_PanLeft, Button_AM_PanRight, Button_AM_PanDown, Button_AM_PanUp,
-	Button_AM_ZoomIn, Button_AM_ZoomOut;
+	Button_AM_ZoomIn, Button_AM_ZoomOut,
+	Button_ShowMedals;	// [BC] Added the "show medals" button.
+
 
 bool ParsingKeyConf;
 
@@ -134,6 +141,7 @@ bool ParsingKeyConf;
 
 FActionMap ActionMaps[] =
 {
+	{ &Button_ShowMedals,	0x03fe31c3, "showmedals" },	// [BC] New "show medals" button.
 	{ &Button_AM_PanLeft,	0x0d52d67b, "am_panleft"},
 	{ &Button_User2,		0x125f5226, "user2" },
 	{ &Button_Jump,			0x1eefa611, "jump" },
@@ -529,7 +537,8 @@ void ResetButtonStates ()
 	{
 		FButtonStatus *button = ActionMaps[i].Button;
 
-		if (button != &Button_Mlook && button != &Button_Klook)
+		//[jam] Also don't reset the Button_Crouch state, to prevent possible toggle crouch to reset.
+		if (button != &Button_Mlook && button != &Button_Klook && button != &Button_Crouch)
 		{
 			button->ReleaseKey (0);
 		}
@@ -598,7 +607,18 @@ void C_DoCommand (const char *cmd, int keynum)
 				button->ReleaseKey (keynum);
 				if (button == &Button_Mlook && lookspring)
 				{
-					Net_WriteByte (DEM_CENTERVIEW);
+					// [BC] Only write this byte if we're recording a demo. Otherwise, just do it!
+					if ( demorecording )
+						Net_WriteByte (DEM_CENTERVIEW);
+					else
+					{
+						if ( players[consoleplayer].mo )
+							players[consoleplayer].mo->pitch = 0;
+
+						// [BB] We need to record this for the demo.
+						if ( CLIENTDEMO_IsRecording( ))
+							CLIENTDEMO_WriteLocalCommand( CLD_LCMD_CENTERVIEW, NULL );
+					}
 				}
 			}
 			return;
@@ -612,6 +632,12 @@ void C_DoCommand (const char *cmd, int keynum)
 
 	if ( (com = FindNameInHashTable (Commands, beg, len)) )
 	{
+		// [BB] For security reasons, we don't allow any alias to be called by ConsoleCommand.
+		if ( ACS_IsCalledFromConsoleCommand( ) && com->IsAlias() )
+		{
+			return;
+		}
+
 		if (gamestate != GS_STARTUP || ParsingKeyConf ||
 			(len == 3 && strnicmp (beg, "set", 3) == 0) ||
 			(len == 7 && strnicmp (beg, "logfile", 7) == 0) ||
@@ -652,7 +678,22 @@ void C_DoCommand (const char *cmd, int keynum)
 			else
 			{ // Get the variable's value
 				UCVarValue val = var->GetGenericRep (CVAR_String);
-				Printf ("\"%s\" is \"%s\"\n", var->GetName(), val.String);
+
+				// [BC] If this variable is passworded, just show a bunch of stars instead of
+				// the actual string value.
+				if ( var->GetFlags( ) & CVAR_PASSWORD )
+				{
+					ULONG	ulIdx;
+					char	szString[64];
+
+					sprintf( szString, "%s", val.String );
+					for ( ulIdx = 0; ulIdx < strlen( val.String ); ulIdx++ )
+						szString[ulIdx] = '*';
+
+					Printf( "\"%s\" is \"%s\"\n", var->GetName( ), szString );
+				}
+				else
+					Printf ("\"%s\" is \"%s\"\n", var->GetName(), val.String);
 			}
 		}
 		else
@@ -661,7 +702,7 @@ void C_DoCommand (const char *cmd, int keynum)
 			size_t minlen = MIN<size_t> (len, 63);
 
 			memcpy (cmdname, beg, minlen);
-			cmdname[len] = 0;
+			cmdname[minlen] = 0;
 			Printf ("Unknown command \"%s\"\n", cmdname);
 		}
 	}
@@ -704,7 +745,9 @@ void AddCommandString (char *cmd, int keynum)
 			{
 				if (!ParsingKeyConf &&
 					cmd[0] == 'w' && cmd[1] == 'a' && cmd[2] == 'i' && cmd[3] == 't' &&
-					(cmd[4] == 0 || cmd[4] == ' '))
+					(cmd[4] == 0 || cmd[4] == ' ')
+					// [BB] wait would allow to bypass ACS_IsCalledFromConsoleCommand( ) checks.
+					&& ( ACS_IsCalledFromConsoleCommand( ) == false ) )
 				{
 					int tics;
 
@@ -1261,6 +1304,10 @@ CCMD (alias)
 {
 	FConsoleCommand *prev, *alias, **chain;
 
+	// [BC] This function may not be used by ConsoleCommand.
+	if ( ACS_IsCalledFromConsoleCommand( ))
+		return;
+
 	if (argv.argc() == 1)
 	{
 		Printf ("Current alias commands:\n");
@@ -1439,6 +1486,8 @@ void FConsoleAlias::SafeDelete ()
 static BYTE PullinBad = 2;
 static const char *PullinFile;
 extern TArray<FString> allwads;
+// [BB]
+extern TArray<FString> autoloadedwads;
 
 int C_ExecFile (const char *file, bool usePullin)
 {
@@ -1555,7 +1604,9 @@ CCMD (pullin)
 						FixPathSeperator (path);
 					}
 				}
-				D_AddFile (allwads, path);
+				// [BB] We consider this file as loaded automatically.
+				if ( D_AddFile (allwads, path) )
+					autoloadedwads.Push ( allwads[ allwads.Size() - 1 ] );
 				if (path != argv[i])
 				{
 					delete[] path;
