@@ -30,6 +30,9 @@
 #include "farchive.h"
 #include "r_utility.h"
 #include "r_data/colormaps.h"
+// [CW] New includes.
+#include "cl_demo.h"
+#include "sv_commands.h"
 
 
 // [RH]
@@ -690,18 +693,40 @@ fixed_t sector_t::FindLowestCeilingPoint (vertex_t **v) const
 }
 
 
-void sector_t::SetColor(int r, int g, int b, int desat)
+// [BB] Added bInformClients and bExecuteOnClient.
+void sector_t::SetColor(int r, int g, int b, int desat, bool bInformClients, bool bExecuteOnClient)
 {
+	// [CW] Clients should not do this.
+	// [BB] Except if explicitly instructed to do so.
+	if ( NETWORK_InClientMode() && !bExecuteOnClient)
+		return;
+
 	PalEntry color = PalEntry (r,g,b);
 	ColorMap = GetSpecialLights (color, ColorMap->Fade, desat);
 	P_RecalculateAttachedLights(this);
+
+	// Tell clients about the sector color update.
+	// [BB] Only if instructed to.
+	if ( ( NETWORK_GetState( ) == NETSTATE_SERVER ) && bInformClients )
+		SERVERCOMMANDS_SetSectorColor( sectornum );
 }
 
-void sector_t::SetFade(int r, int g, int b)
+// [BB] Added bInformClients and bExecuteOnClient.
+void sector_t::SetFade(int r, int g, int b, bool bInformClients, bool bExecuteOnClient)
 {
+	// [CW] Clients should not do this.
+	// [BB] Except if explicitly instructed to do so.
+	if ( NETWORK_InClientMode() && !bExecuteOnClient)
+		return;
+
 	PalEntry fade = PalEntry (r,g,b);
 	ColorMap = GetSpecialLights (ColorMap->Color, fade, ColorMap->Desaturate);
 	P_RecalculateAttachedLights(this);
+
+	// [BC] Tell clients about the sector fade update.
+	// [BB] Only if instructed to.
+	if ( ( NETWORK_GetState( ) == NETSTATE_SERVER ) && bInformClients )
+		SERVERCOMMANDS_SetSectorFade( sectornum );
 }
 
 //===========================================================================
@@ -897,6 +922,9 @@ bool P_AlignFlat (int linenum, int side, int fc)
 	}
 
 	sec->SetBase(fc, dist & ((1<<(FRACBITS+8))-1), 0-angle);
+	// [BC] If we're the server, tell clients to update the sector's angle/y-offset.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SetSectorAngleYOffset( static_cast<ULONG>(sec - sectors) );
 	return true;
 }
 
@@ -999,7 +1027,7 @@ int side_t::GetLightLevel (bool foggy, int baselight, bool noabsolute, int *pfak
 	}
 	if (!(Flags & WALLF_ABSLIGHTING) && (!foggy || (Flags & WALLF_LIGHT_FOG)))
 	{
-		baselight += this->Light;
+		baselight = clamp(baselight + this->Light, 0, 255);
 	}
 	return baselight;
 }

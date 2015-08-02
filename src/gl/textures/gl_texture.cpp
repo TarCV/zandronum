@@ -58,7 +58,8 @@
 // Texture CVARs
 //
 //==========================================================================
-CUSTOM_CVAR(Float,gl_texture_filter_anisotropic,8.0f,CVAR_ARCHIVE|CVAR_GLOBALCONFIG|CVAR_NOINITCALL)
+// [BB] Changed default
+CUSTOM_CVAR(Float,gl_texture_filter_anisotropic,1.0f,CVAR_ARCHIVE|CVAR_GLOBALCONFIG|CVAR_NOINITCALL)
 {
 	if (GLRenderer != NULL) GLRenderer->FlushTextures();
 }
@@ -68,7 +69,8 @@ CCMD(gl_flush)
 	if (GLRenderer != NULL) GLRenderer->FlushTextures();
 }
 
-CUSTOM_CVAR(Int, gl_texture_filter, 4, CVAR_ARCHIVE|CVAR_GLOBALCONFIG|CVAR_NOINITCALL)
+// [BB] Changed default
+CUSTOM_CVAR(Int, gl_texture_filter, 0, CVAR_ARCHIVE|CVAR_GLOBALCONFIG|CVAR_NOINITCALL)
 {
 	if (self < 0 || self > 5) self=4;
 	if (GLRenderer != NULL) GLRenderer->FlushTextures();

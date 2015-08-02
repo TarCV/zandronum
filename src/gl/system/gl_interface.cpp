@@ -46,6 +46,10 @@
 #include "gl/system/gl_interface.h"
 #include "gl/system/gl_cvars.h"
 
+#ifdef _WIN32 // [BB] Detect some kinds of glBegin hooking.
+char myGlBeginCharArray[4] = {0,0,0,0};
+#endif
+
 #if defined (__unix__) || defined (__APPLE__)
 #define PROC void*
 #define LPCSTR const char*
@@ -127,6 +131,11 @@ static void InitContext()
 {
 	gl.flags=0;
 	glBlendEquation = glBlendEquationDummy;
+
+#ifdef _WIN32 // [BB] Detect some kinds of glBegin hooking.
+	for ( int i = 0; i < 4; ++i )
+		myGlBeginCharArray[i] = reinterpret_cast<char *>(glBegin)[i];
+#endif
 }
 
 //==========================================================================

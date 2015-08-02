@@ -426,8 +426,8 @@ void StartNetwork (bool autoPort)
 
 	atterm (CloseNetwork);
 
-	netgame = true;
-	multiplayer = true;
+//	netgame = true;
+//	multiplayer = true;
 	
 	// create communication socket
 	mysocket = UDPsocket ();
@@ -650,8 +650,8 @@ void HostGame (int i)
 
 	if (numplayers == 1)
 	{ // Special case: Only 1 player, so don't bother starting the network
-		netgame = false;
-		multiplayer = true;
+//		netgame = false;
+//		multiplayer = true;
 		doomcom.id = DOOMCOM_ID;
 		doomcom.numplayers = doomcom.numnodes = 1;
 		doomcom.consoleplayer = 0;
@@ -916,7 +916,7 @@ static bool NodesOnSameNetwork()
 //
 bool I_InitNetwork (void)
 {
-	int i;
+//	int i;
 	const char *v;
 
 	memset (&doomcom, 0, sizeof(doomcom));
@@ -947,6 +947,7 @@ bool I_InitNetwork (void)
 	// parse network game options,
 	//		player 1: -host <numplayers>
 	//		player x: -join <player 1's address>
+/*
 	if ( (i = Args->CheckParm ("-host")) )
 	{
 		HostGame (i);
@@ -956,10 +957,11 @@ bool I_InitNetwork (void)
 		JoinGame (i);
 	}
 	else
+*/
 	{
 		// single player game
-		netgame = false;
-		multiplayer = false;
+//		netgame = false;
+//		multiplayer = false;
 		doomcom.id = DOOMCOM_ID;
 		doomcom.numplayers = doomcom.numnodes = 1;
 		doomcom.consoleplayer = 0;
