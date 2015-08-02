@@ -78,6 +78,9 @@ public:
 	int GetAffectee () const { return m_Affectee; }
 	int GetScrollParts() const { return m_Parts; }
 
+	// [BC] Create this object for this new client entering the game.
+	void	UpdateToClient( ULONG ulClient );
+
 protected:
 	EScrollType m_Type;		// Type of scroll effect
 	fixed_t m_dx, m_dy;		// (dx,dy) scroll speeds
@@ -118,6 +121,9 @@ public:
 	int CheckForSectorMatch (EPusher type, int tag);
 	void ChangeValues (int magnitude, int angle)
 	{
+		// [BB] Save the original input angle value. This makes it easier to inform the clients about this pusher.
+		m_Angle = angle;
+
 		angle_t ang = ((angle_t)(angle<<24)) >> ANGLETOFINESHIFT;
 		m_Xmag = (magnitude * finecosine[ang]) >> FRACBITS;
 		m_Ymag = (magnitude * finesine[ang]) >> FRACBITS;
@@ -125,6 +131,9 @@ public:
 	}
 
 	void Tick ();
+
+	// [BB] Create this object for this new client entering the game.
+	void UpdateToClient( ULONG ulClient );
 
 protected:
 	EPusher m_Type;
@@ -136,6 +145,10 @@ protected:
 	int m_X;				// X of point source if point pusher
 	int m_Y;				// Y of point source if point pusher
 	int m_Affectee;			// Number of affected sector
+
+	// [BB]
+	line_t *m_pLine;
+	int m_Angle;
 
 	friend bool PIT_PushThing (AActor *thing);
 };
@@ -236,6 +249,9 @@ class DLighting : public DSectorEffect
 	DECLARE_CLASS (DLighting, DSectorEffect)
 public:
 	DLighting (sector_t *sector);
+
+	// [BB] Necessary for GAME_ResetMap
+	bool bNotMapSpawned;
 protected:
 	DLighting ();
 };
@@ -248,6 +264,9 @@ public:
 	DFireFlicker (sector_t *sector, int upper, int lower);
 	void		Serialize (FArchive &arc);
 	void		Tick ();
+
+	// [BC] Create this object for this new client entering the game.
+	void	UpdateToClient( ULONG ulClient );
 protected:
 	int 		m_Count;
 	int 		m_MaxLight;
@@ -263,6 +282,9 @@ public:
 	DFlicker (sector_t *sector, int upper, int lower);
 	void		Serialize (FArchive &arc);
 	void		Tick ();
+
+	// [BC] Create this object for this new client entering the game.
+	void	UpdateToClient( ULONG ulClient );
 protected:
 	int 		m_Count;
 	int 		m_MaxLight;
@@ -279,6 +301,12 @@ public:
 	DLightFlash (sector_t *sector, int min, int max);
 	void		Serialize (FArchive &arc);
 	void		Tick ();
+
+	// [BC] Create this object for this new client entering the game.
+	void	UpdateToClient( ULONG ulClient );
+
+	// [BC] Access function(s).
+	void		SetCount( LONG lCount );
 protected:
 	int 		m_Count;
 	int 		m_MaxLight;
@@ -297,6 +325,12 @@ public:
 	DStrobe (sector_t *sector, int upper, int lower, int utics, int ltics);
 	void		Serialize (FArchive &arc);
 	void		Tick ();
+
+	// [BC] Create this object for this new client entering the game.
+	void	UpdateToClient( ULONG ulClient );
+
+	// [BC] Access function(s).
+	void		SetCount( LONG lCount );
 protected:
 	int 		m_Count;
 	int 		m_MinLight;
@@ -314,6 +348,9 @@ public:
 	DGlow (sector_t *sector);
 	void		Serialize (FArchive &arc);
 	void		Tick ();
+
+	// [BC] Create this object for this new client entering the game.
+	void		UpdateToClient( ULONG ulClient );
 protected:
 	int 		m_MinLight;
 	int 		m_MaxLight;
@@ -330,6 +367,12 @@ public:
 	DGlow2 (sector_t *sector, int start, int end, int tics, bool oneshot);
 	void		Serialize (FArchive &arc);
 	void		Tick ();
+
+	// [BC] Create this object for this new client entering the game.
+	void		UpdateToClient( ULONG ulClient );
+
+	// [BC] Access function(s).
+	void		SetTics( LONG lTics );
 protected:
 	int			m_Start;
 	int			m_End;
@@ -349,6 +392,9 @@ public:
 	DPhased (sector_t *sector, int baselevel, int phase);
 	void		Serialize (FArchive &arc);
 	void		Tick ();
+
+	// [BC] Create this object for this new client entering the game.
+	void		UpdateToClient( ULONG ulClient );
 protected:
 	BYTE		m_BaseLevel;
 	BYTE		m_Phase;
@@ -419,13 +465,40 @@ public:
 		platRaiseAndStayLockout,
 	};
 
+	// [BC] Make this constructor public to clients can create it.
+	DPlat (sector_t *sector);
+
 	void Serialize (FArchive &arc);
 	void Tick ();
 
 	bool IsLift() const { return m_Type == platDownWaitUpStay || m_Type == platDownWaitUpStayStone; }
 
+	// [BC] Create this object for this new client entering the game.
+	void UpdateToClient( ULONG ulClient );
+
+	// [BC] Access function(s).
+	LONG	GetID( void );
+	void	SetID( LONG lID );
+
+	fixed_t	GetLow( void );
+	void	SetLow( fixed_t Low );
+
+	fixed_t	GetHigh( void );
+	void	SetHigh( fixed_t High );
+
+	EPlatState	GetStatus( void );
+	void		SetStatus( LONG lStatus );
+
+	void	SetType( EPlatType Type );
+	void	SetCrush( LONG lCrush );
+	void	SetTag( LONG lTag );
+	void	SetSpeed( LONG lSpeed );
+	void	SetDelay( LONG lDelay );
+
+	// [BC] Make this public so clients can use it.
+	void PlayPlatSound (const char *sound);
+
 protected:
-	DPlat (sector_t *sector);
 
 	fixed_t 	m_Speed;
 	fixed_t 	m_Low;
@@ -438,7 +511,10 @@ protected:
 	int 		m_Tag;
 	EPlatType	m_Type;
 
-	void PlayPlatSound (const char *sound);
+	// [BC] This is the platform's unique network ID.
+	// [EP] TODO: remove the 'l' prefix from this variable, it isn't LONG anymore
+	int			m_lPlatID;
+
 	void Reactivate ();
 	void Stop ();
 
@@ -476,9 +552,34 @@ public:
 	DPillar (sector_t *sector, EPillar type, fixed_t speed, fixed_t height,
 			 fixed_t height2, int crush, bool hexencrush);
 
+	// [BC] New constructor where we just pass in the sector.
+	DPillar (sector_t *sector);
+
 	void Serialize (FArchive &arc);
 	void Tick ();
 	void Destroy();
+
+	// [BC] Create this object for this new client entering the game.
+	void UpdateToClient( ULONG ulClient );
+
+	// [BC] Access function(s).
+	LONG	GetID( void );
+	void	SetID( LONG lID );
+
+	void	SetType( EPillar Type );
+	EPillar	GetType( );
+	void	SetFloorSpeed( LONG lSpeed );
+	LONG	GetFloorSpeed( );
+	void	SetCeilingSpeed( LONG lSpeed );
+	LONG	GetCeilingSpeed( );
+	void	SetFloorTarget( LONG lTarget );
+	LONG	GetFloorTarget( );
+	void	SetCeilingTarget( LONG lTarget );
+	LONG	GetCeilingTarget( );
+	LONG	GetCrush( void );
+	void	SetCrush( LONG Crush );
+	bool	GetHexencrush( void );
+	void	SetHexencrush( bool hexencrush );
 
 protected:
 	EPillar		m_Type;
@@ -491,8 +592,16 @@ protected:
 	TObjPtr<DInterpolation> m_Interp_Ceiling;
 	TObjPtr<DInterpolation> m_Interp_Floor;
 
+	// [BC] This is the pillar's unique network ID.
+	// [EP] TODO: remove the 'l' prefix from this variable, it isn't LONG anymore
+	int			m_lPillarID;
+
 private:
 	DPillar ();
+
+	// [BC] Make this a friend.
+	friend bool	EV_DoPillar (DPillar::EPillar type, int tag, fixed_t speed, fixed_t height,
+							 fixed_t height2, int crush);
 };
 
 bool EV_DoPillar (DPillar::EPillar type, int tag, fixed_t speed, fixed_t height,
@@ -515,10 +624,31 @@ public:
 	};
 
 	DDoor (sector_t *sector);
-	DDoor (sector_t *sec, EVlDoor type, fixed_t speed, int delay, int lightTag);
+	// [BC] Added option to create doors soundlessly.
+	DDoor (sector_t *sec, EVlDoor type, fixed_t speed, int delay, int lightTag, bool bNoSound = false);
 
 	void Serialize (FArchive &arc);
 	void Tick ();
+
+	// [BC] Create this object for this new client entering the game.
+	void UpdateToClient( ULONG ulClient );
+
+	// [BC] Access function(s).
+	int		GetDirection( void );
+	void	SetDirection( LONG lDirection );
+
+	LONG	GetID( void );
+	void	SetID( LONG lID );
+
+	EVlDoor	GetType( void );
+	void	SetType( EVlDoor Type );
+
+	LONG	GetSpeed( void );
+	void	SetSpeed( LONG lSpeed );
+
+	LONG	GetLightTag( void );
+	void	SetLightTag( LONG lTag );
+
 protected:
 	EVlDoor		m_Type;
 	fixed_t 	m_TopDist;
@@ -537,7 +667,14 @@ protected:
 
 	int			m_LightTag;
 
+	// [BC] Make this public so clients can call it.
+public:
 	void DoorSound (bool raise, class DSeqNode *curseq=NULL) const;
+protected:
+
+	// [BC] This is the door's unique network ID.
+	// [EP] TODO: remove the 'l' prefix from this variable, it isn't LONG anymore
+	int			m_lDoorID;
 
 	friend bool	EV_DoDoor (DDoor::EVlDoor type, line_t *line, AActor *thing,
 						   int tag, int speed, int delay, int lock,
@@ -642,6 +779,37 @@ public:
 						fixed_t speed, fixed_t speed2, fixed_t height,
 						int crush, int silent, int change, bool hexencrush);
 
+	// [BC] Create this object for this new client entering the game.
+	void UpdateToClient( ULONG ulClient );
+
+	// [BC] Make this public so clients can use it.
+	void PlayCeilingSound ();
+
+	// [BC] Access function(s).
+	LONG	GetID( void );
+	void	SetID( LONG lID );
+
+	fixed_t	GetTopHeight( void );
+	void	SetTopHeight( fixed_t TopHeight );
+
+	fixed_t	GetBottomHeight( void );
+	void	SetBottomHeight( fixed_t BottomHeight );
+
+	fixed_t	GetSpeed( void );
+	void	SetSpeed( fixed_t Speed );
+
+	LONG	GetDirection( void );
+	void	SetDirection( LONG lDirection );
+
+	ECeiling	GetType( void );
+	void		SetType( ECeiling Type );
+
+	LONG	GetCrush( void );
+	void	SetCrush( LONG lCrush );
+
+	bool	GetHexencrush( void );
+	void	SetHexencrush( bool Hexencrush );
+
 protected:
 	ECeiling	m_Type;
 	fixed_t 	m_BottomHeight;
@@ -662,7 +830,9 @@ protected:
 	int 		m_Tag;
 	int 		m_OldDirection;
 
-	void PlayCeilingSound ();
+	// [BC] This is the ceiling's unique network ID.
+	// [EP] TODO: remove the 'l' prefix from this variable, it isn't LONG anymore
+	int			m_lCeilingID;
 
 private:
 	DCeiling ();
@@ -738,6 +908,53 @@ public:
 	void Serialize (FArchive &arc);
 	void Tick ();
 
+	// [BC] Create this object for this new client entering the game.
+	void UpdateToClient( ULONG ulClient );
+
+	// [BC] Make these public so clients can use them.
+	void StartFloorSound ();
+	void SetFloorChangeType (sector_t *sec, int change);
+
+	// [BC] Access function(s).
+	LONG	GetID( void );
+	void	SetID( LONG lID );
+
+	EFloor	GetType( void );
+	void	SetType( EFloor Type );
+
+	LONG	GetCrush( void );
+	void	SetCrush( LONG lCrush );
+
+	bool	GetHexencrush( void );
+	void	SetHexencrush( bool hexencrush );
+
+	fixed_t	GetSpeed( void );
+	void	SetSpeed( fixed_t Speed );
+
+	LONG	GetResetCount( void );
+	void	SetResetCount( LONG lResetCount );
+
+	fixed_t	GetOrgDist( void );
+	void	SetOrgDist( fixed_t OrgDist );
+
+	LONG	GetDirection( void );
+	void	SetDirection( LONG lDirection );
+
+	fixed_t	GetFloorDestDist( void );
+	void	SetFloorDestDist( fixed_t FloorDestDist );
+
+	int		GetDelay( void );
+	void	SetDelay( int Delay );
+
+	int		GetPauseTime( void );
+	void	SetPauseTime( int PauseTime );
+
+	int		GetStepTime( void );
+	void	SetStepTime( int StepTime );
+
+	int		GetPerStepTime( void );
+	void	SetPerStepTime( int PerStepTime );
+
 protected:
 	EFloor	 	m_Type;
 	int 		m_Crush;
@@ -756,8 +973,9 @@ protected:
 	int			m_StepTime;
 	int			m_PerStepTime;
 
-	void StartFloorSound ();
-	void SetFloorChangeType (sector_t *sec, int change);
+	// [BC] This is the floor's unique network ID.
+	// [EP] TODO: remove the 'l' prefix from this variable, it isn't LONG anymore
+	int			m_lFloorID;
 
 	friend bool EV_BuildStairs (int tag, DFloor::EStair type, line_t *line,
 		fixed_t stairsize, fixed_t speed, int delay, int reset, int igntxt,
@@ -799,6 +1017,22 @@ public:
 	void Serialize (FArchive &arc);
 	void Tick ();
 
+	// [BC] Create this object for this new client entering the game.
+	void	UpdateToClient( ULONG ulClient );
+
+	// [BC] No longer protected so clients can call it.
+	void StartFloorSound ();
+
+	// [BC] Access function(s).
+	LONG	GetID( void );
+	void	SetID( LONG lID );
+
+	void	SetType( EElevator Type );
+	void	SetSpeed( LONG lSpeed );
+	void	SetDirection( LONG lDirection );
+	void	SetFloorDestDist( LONG lDestDist );
+	void	SetCeilingDestDist( LONG lDestDist );
+
 protected:
 	EElevator	m_Type;
 	int			m_Direction;
@@ -808,7 +1042,9 @@ protected:
 	TObjPtr<DInterpolation> m_Interp_Ceiling;
 	TObjPtr<DInterpolation> m_Interp_Floor;
 
-	void StartFloorSound ();
+	// [BC] This is the elevator's unique network ID.
+	// [EP] TODO: remove the 'l' prefix from this variable, it isn't LONG anymore
+	int			m_lElevatorID;
 
 	friend bool EV_DoElevator (line_t *line, DElevator::EElevator type, fixed_t speed,
 		fixed_t height, int tag);
@@ -828,6 +1064,22 @@ public:
 
 	void Serialize (FArchive &arc);
 
+	// [BC] Create this object for this new client entering the game.
+	void	UpdateToClient( ULONG ulClient );
+
+	// [BC] Access function(s).
+	LONG	GetID( void );
+	void	SetID( LONG lID );
+
+	void	SetOriginalDistance( LONG lOriginalDistance );
+	void	SetAccumulator( LONG lAccumulator );
+	void	SetAccelerationDelta( LONG lAccelerationDelta );
+	void	SetTargetScale( LONG lTargetScale );
+	void	SetScale( LONG lScale );
+	void	SetScaleDelta( LONG lScaleDelta );
+	void	SetTicker( LONG lTicker );
+	void	SetState( LONG lState );
+
 protected:
 	fixed_t m_OriginalDist;
 	fixed_t m_Accumulator;
@@ -839,11 +1091,18 @@ protected:
 	int m_State;
 	TObjPtr<DInterpolation> m_Interpolation;
 
+	// [BC] This is the waggle's unique network ID.
+	// [EP] TODO: remove the 'l' prefix from this variable, it isn't LONG anymore
+	int			m_lWaggleID;
+
 	friend bool EV_StartWaggle (int tag, line_t *line, int height, int speed,
 		int offset, int timer, bool ceiling);
 
 	void DoWaggle (bool ceiling);
+	// [BB] Changed Destroy to public, so that it can be called in cl_main.cpp.
+public:
 	void Destroy();
+protected:
 	DWaggleBase ();
 };
 
@@ -910,5 +1169,22 @@ void P_DoDeferedScripts (void);
 // [RH] p_quake.c
 //
 bool P_StartQuake (AActor *activator, int tid, int intensity, int duration, int damrad, int tremrad, FSoundID quakesfx);
+
+// [BC] Prototypes dealing with network IDs for movers.
+DDoor		*P_GetDoorByID( LONG lID );
+DPlat		*P_GetPlatByID( LONG lID );
+DFloor		*P_GetFloorByID( LONG lID );
+DElevator	*P_GetElevatorByID( LONG lID );
+DWaggleBase	*P_GetWaggleByID( LONG lID );
+DPillar		*P_GetPillarByID( LONG lID );
+DCeiling	*P_GetCeilingByID( LONG lID );
+
+LONG		P_GetFirstFreeDoorID( void );
+LONG		P_GetFirstFreePlatID( void );
+LONG		P_GetFirstFreeFloorID( void );
+LONG		P_GetFirstFreeElevatorID( void );
+LONG		P_GetFirstFreeWaggleID( void );
+LONG		P_GetFirstFreePillarID( void );
+LONG		P_GetFirstFreeCeilingID( void );
 
 #endif

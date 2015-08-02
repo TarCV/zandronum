@@ -1,11 +1,11 @@
 /*
 ** gl_hqresize.cpp
 ** Contains high quality upsampling functions.
-** So far Scale2x/3x/4x as described in http://scale2x.sourceforge.net/
-** are implemented.
+** So far supports Scale2x/3x/4x as described in http://scale2x.sourceforge.net/
+** and Maxim Stepin's hq2x/3x/4x.
 **
 **---------------------------------------------------------------------------
-** Copyright 2008 Benjamin Berkels
+** Copyright 2008-2009 Benjamin Berkels
 ** All rights reserved.
 **
 ** Redistribution and use in source and binary forms, with or without

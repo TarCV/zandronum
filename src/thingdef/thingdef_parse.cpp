@@ -62,7 +62,7 @@ void ParseOldDecoration(FScanner &sc, EDefinitionType def);
 //
 // ParseParameter
 //
-// Parses a parameter - either a default in a function declaration 
+// Parses aparameter - either a default in a function declaration 
 // or an argument in a function call.
 //
 //==========================================================================
@@ -1251,6 +1251,8 @@ void ParseDecorate (FScanner &sc)
 			}
 			FScanner newscanner;
 			newscanner.Open(sc.String);
+			// [BB] Clients may not tamper with DECORATE code, so mark the included lump for authentication.
+			NETWORK_AddLumpForAuthentication ( Wads.CheckNumForFullName(sc.String, true) );
 			ParseDecorate(newscanner);
 			break;
 		}

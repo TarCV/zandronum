@@ -62,6 +62,9 @@
 #include "gl/utility/gl_clock.h"
 #include "gl/shaders/gl_shader.h"
 #include "gl/gl_functions.h"
+// [BC]
+#include "network.h"
+#include "sv_commands.h"
 
 GLRenderSettings glset;
 long gl_frameMS;
@@ -140,8 +143,8 @@ void AdjustSpriteOffsets()
 	}
 }
 
-
-
+// [BC] Moved to p_lnspec.cpp.
+/*
 // Normally this would be better placed in p_lnspec.cpp.
 // But I have accidentally overwritten that file several times
 // so I'd rather place it here.
@@ -156,11 +159,15 @@ static int LS_Sector_SetPlaneReflection (line_t *ln, AActor *it, bool backSide,
 		sector_t * s = &sectors[secnum];
 		if (s->floorplane.a==0 && s->floorplane.b==0) s->reflect[sector_t::floor] = arg1/255.f;
 		if (s->ceilingplane.a==0 && s->ceilingplane.b==0) sectors[secnum].reflect[sector_t::ceiling] = arg2/255.f;
+
+		// [BC] If we're the server, tell clients that this sector's reflection is being altered.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetSectorReflection( secnum );
 	}
 
 	return true;
 }
-
+*/
 static int LS_SetGlobalFogParameter (line_t *ln, AActor *it, bool backSide,
 	int arg0, int arg1, int arg2, int arg3, int arg4)
 {
@@ -344,6 +351,9 @@ bool IsLightmodeValid()
 
 void InitGLRMapinfoData()
 {
+	// [BB/EP] Take care of gl_lightmode and ZADF_FORCE_GL_DEFAULTS.
+	OVERRIDE_INT_GL_CVAR_IF_NECESSARY( gl_lightmode );
+
 	FGLROptions *opt = level.info->GetOptData<FGLROptions>("gl_renderer", false);
 
 	if (opt != NULL)
@@ -380,6 +390,9 @@ void InitGLRMapinfoData()
 
 CCMD(gl_resetmap)
 {
+	// [BB/EP] Take care of gl_lightmode and ZADF_FORCE_GL_DEFAULTS.
+	OVERRIDE_INT_GL_CVAR_IF_NECESSARY( gl_lightmode );
+
 	if (!IsLightmodeValid()) glset.lightmode = gl_lightmode;
 	else glset.lightmode = glset.map_lightmode;
 	if (glset.map_nocoloredspritelighting == -1) glset.nocoloredspritelighting = gl_nocoloredspritelighting;
@@ -470,7 +483,8 @@ void gl_RecalcVertexHeights(vertex_t * v)
 void gl_InitData()
 {
 	LineSpecials[157]=LS_SetGlobalFogParameter;
-	LineSpecials[159]=LS_Sector_SetPlaneReflection;
+	// [BB] This is set in p_lnspec.cpp
+	//LineSpecials[159]=LS_Sector_SetPlaneReflection;
 	gl_InitModels();
 	AdjustSpriteOffsets();
 }

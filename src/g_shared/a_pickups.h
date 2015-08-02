@@ -135,6 +135,7 @@ enum
 	IF_NEVERRESPAWN		= 1<<20,	// Never, ever respawns
 	IF_NOSCREENFLASH	= 1<<21,	// No pickup flash on the player's screen
 	IF_TOSSED			= 1<<22,	// Was spawned by P_DropItem (i.e. as a monster drop)
+	IF_FORCERESPAWNINSURVIVAL = 1<<23,	// [BB] Will be respawned in survival even without DF_ITEMS_RESPAWN.
 
 };
 
@@ -154,6 +155,7 @@ public:
 	virtual bool ShouldRespawn ();
 	virtual bool ShouldStay ();
 	virtual void Hide ();
+	virtual void HideIndefinitely ();
 	bool CallTryPickup (AActor *toucher, AActor **toucher_return = NULL);
 	virtual void DoPickupSpecial (AActor *toucher);
 	virtual bool SpecialDropAction (AActor *dropper);
@@ -162,6 +164,7 @@ public:
 	virtual bool Grind(bool items);
 
 	virtual const char *PickupMessage ();
+	virtual const char *PickupAnnouncerEntry ();	// [BC]
 	virtual void PlayPickupSound (AActor *toucher);
 
 	bool DoRespawn ();
@@ -182,6 +185,9 @@ public:
 	const PClass *PickupFlash;	// actor to spawn as pickup flash
 
 	FSoundIDNoInit PickupSound;
+
+	// [BC]
+	char	szPickupAnnouncerEntry[32];
 
 	virtual void BecomeItem ();
 	virtual void BecomePickup ();
@@ -274,6 +280,10 @@ public:
 	fixed_t BobSpeed;						// [XA] Bobbing speed. Defines how quickly a weapon bobs.
 	fixed_t BobRangeX, BobRangeY;			// [XA] Bobbing range. Defines how far a weapon bobs in either direction.
 
+	// [BB] When a player uses this weapon and a skin with name equal to the PreferredSkin value exists for
+	// his/her player class, the player is forced to use this skin, overriding any personal skin settings.
+	FNameNoInit PreferredSkin;
+
 	// In-inventory instance variables
 	TObjPtr<AAmmo> Ammo1, Ammo2;
 	TObjPtr<AWeapon> SisterWeapon;
@@ -352,6 +362,10 @@ enum
 	WIF_MELEEWEAPON =		0x00008000,	// melee weapon. Used by bots and monster AI.
 	WIF_DEHAMMO	=			0x00010000,	// Uses Doom's original amount of ammo for the respective attack functions so that old DEHACKED patches work as intended.
 										// AmmoUse1 will be set to the first attack's ammo use so that checking for empty weapons still works
+	// [BC] New weapon info definitions.
+	WIF_ALLOW_WITH_RESPAWN_INVUL	= 0x00008000,	// The player can continue to wield this weapon even with respawn invulnerability active.
+	WIF_NOLMS						= 0x00010000,	// Don't give this weapon in LMS games.
+
 	WIF_CHEATNOTWEAPON	=	0x08000000,	// Give cheat considers this not a weapon (used by Sigil)
 
 	// Flags used only by bot AI:
@@ -378,6 +392,8 @@ class AHealth : public AInventory
 {
 	DECLARE_CLASS (AHealth, AInventory)
 
+protected:
+	// [BB] Made PrevHealth protected, so that it can be used in AMaxHealth.
 	int PrevHealth;
 public:
 	virtual bool TryPickup (AActor *&other);
@@ -396,6 +412,16 @@ public:
 	virtual AInventory *CreateTossable ();
 	virtual bool HandlePickup (AInventory *item);
 	virtual bool Use (bool pickup);
+};
+
+// [BC] New class definitions for the max. health class.
+// Max. health increases the maximum amount of health players can have, and also
+// gives the player health when picked up.
+class AMaxHealth : public AHealth
+{
+	DECLARE_CLASS( AMaxHealth, AHealth )
+public:
+	virtual bool TryPickup( AActor *&pOther );
 };
 
 // Armor absorbs some damage for the player.
@@ -524,5 +550,8 @@ public:
 	bool TryPickup(AActor *&toucher);
 };
 
+
+// [Dusk]
+extern TArray<unsigned short> g_keysFound;
 
 #endif //__A_PICKUPS_H__

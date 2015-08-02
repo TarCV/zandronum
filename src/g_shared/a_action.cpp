@@ -27,6 +27,8 @@ class ASwitchableDecoration : public AActor
 public:
 	void Activate (AActor *activator);
 	void Deactivate (AActor *activator);
+	// [BB]
+	bool IsActive( void );
 };
 
 IMPLEMENT_CLASS (ASwitchableDecoration)
@@ -39,6 +41,12 @@ void ASwitchableDecoration::Activate (AActor *activator)
 void ASwitchableDecoration::Deactivate (AActor *activator)
 {
 	SetState (FindState(NAME_Inactive));
+}
+
+// [BB]
+bool ASwitchableDecoration::IsActive( void )
+{
+	return ( InState ( NAME_Inactive ) == false );
 }
 
 // SwitchingDecoration: Only Activate changes state -------------------------
@@ -312,7 +320,12 @@ DEFINE_ACTION_FUNCTION(AActor, A_FreezeDeathChunks)
 	}
 	A_Unblock(self, true);
 
-	self->SetState(self->FindState(NAME_Null));
+	// [BB] Only destroy the actor if it's not needed for a map reset. Otherwise just hide it.
+	self->HideOrDestroyIfSafe ();
+	// [BB] ZDoom doesn't use destroy here anymore but it sets it to the "Null" state, which
+	// will make it invisible and destroy it one tic later. Shall Skulltag do this, too? With
+	// custom survival handling of course.
+	//self->SetState(self->FindState(NAME_Null));
 }
 
 //----------------------------------------------------------------------------
