@@ -51,6 +51,11 @@
 #include "g_level.h"
 #include "po_man.h"
 #include "farchive.h"
+// [BB] New #includes.
+#include "cl_demo.h"
+#include "deathmatch.h"
+#include "network.h"
+#include "sv_commands.h"
 
 // MACROS ------------------------------------------------------------------
 
@@ -121,6 +126,8 @@ static MusPlayingInfo mus_playing;	// music currently being played
 static FString	 LastSong;			// last music that was played
 static FPlayList *PlayList;
 static int		RestartEvictionsAt;	// do not restart evicted channels before this level.time
+static bool		g_bNewSoundCurve;
+static BYTE		*g_aOriginalSoundCurve;
 
 // PUBLIC DATA DEFINITIONS -------------------------------------------------
 
@@ -287,6 +294,10 @@ void S_Init ()
 {
 	int curvelump;
 
+	// [BC] Server doesn't use music/sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
+
 	atterm (S_Shutdown);
 
 	// remove old data (S_Init can be called multiple times!)
@@ -296,13 +307,33 @@ void S_Init ()
 		S_SoundCurve = NULL;
 	}
 
+	if ( g_aOriginalSoundCurve )
+		delete [] ( g_aOriginalSoundCurve );
+
+	g_bNewSoundCurve = false;
+	g_aOriginalSoundCurve = NULL;
+
 	// Heretic and Hexen have sound curve lookup tables. Doom does not.
 	curvelump = Wads.CheckNumForName ("SNDCURVE");
 	if (curvelump >= 0)
 	{
+		/*
+		// We have a new custom sound curve.
+		g_bNewSoundCurve = true;
+		*/
+
 		S_SoundCurveSize = Wads.LumpLength (curvelump);
 		S_SoundCurve = new BYTE[S_SoundCurveSize];
 		Wads.ReadLump(curvelump, S_SoundCurve);
+
+		/*
+		// Also, initialize the original sound curve.
+		g_aOriginalSoundCurve = new BYTE[S_CLIPPING_DIST];
+		for (i = 0; i < S_CLIPPING_DIST; ++i)
+		{
+			g_aOriginalSoundCurve[i] = (powf(10.f, MIN(1.f, (S_CLIPPING_DIST - i) / S_ATTENUATOR)) - 1.f) / 9.f;
+		}
+		*/
 	}
 
 	// Free all channels for use.
@@ -367,6 +398,13 @@ void S_Shutdown ()
 	S_StopMusic (true);
 	mus_playing.name = "";
 	LastSong = "";
+
+	// [BC/BB]
+	if ( g_aOriginalSoundCurve )
+	{
+		delete[] ( g_aOriginalSoundCurve );
+		g_aOriginalSoundCurve = NULL;
+	}
 }
 
 //==========================================================================
@@ -446,12 +484,23 @@ void S_Start ()
 	// start new music for the level
 	MusicPaused = false;
 
+	// [BC] In client mode, let the server tell us what music to play.
+	if ( NETWORK_InClientMode() && level.Music.IsNotEmpty() )
+		return;
+
 	// Don't start the music if loading a savegame, because the music is stored there.
 	// Don't start the music if revisiting a level in a hub for the same reason.
 	if (!savegamerestore && (level.info == NULL || level.info->snapshot == NULL || !level.info->isValid()))
 	{
 		if (level.cdtrack == 0 || !S_ChangeCDMusic (level.cdtrack, level.cdid))
+		{
 			S_ChangeMusic (level.Music, level.musicorder);
+
+			// [BC] If we're the server, save this music selection so we can tell clients
+			// what music to play when they connect.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVER_SetMapMusic( level.Music, level.musicorder );
+		}
 	}
 }
 
@@ -756,7 +805,8 @@ static void CalcSectorSoundOrg(const sector_t *sec, int channum, fixed_t *x, fix
 	if (!(i_compatflags & COMPATF_SECTORSOUNDS))
 	{
 		// Are we inside the sector? If yes, the closest point is the one we're on.
-		if (P_PointInSector(*x, *y) == sec)
+		// [BB] We need to check if players[consoleplayer].camera is valid.
+		if ( (P_PointInSector(*x, *y) == sec) && (players[consoleplayer].camera != NULL) )
 		{
 			*x = players[consoleplayer].camera->x;
 			*y = players[consoleplayer].camera->y;
@@ -833,6 +883,14 @@ static FSoundChan *S_StartSound(AActor *actor, const sector_t *sec, const FPolyO
 	FVector3 pos, vel;
 	FRolloffInfo *rolloff;
 
+	// [BC] Server doesn't use music/sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return NULL;
+
+	// [BB] Don't play sounds while skipping in a demo.
+	if ( CLIENTDEMO_IsSkipping() == true )
+		return NULL;
+
 	if (sound_id <= 0 || volume <= 0 || nosfx || nosound )
 		return NULL;
 
@@ -869,7 +927,9 @@ static FSoundChan *S_StartSound(AActor *actor, const sector_t *sec, const FPolyO
 	{ // For people who just can't play without a silent BFG.
 		channel = CHAN_WEAPON;
 	}
-	else if ((chanflags & CHAN_MAYBE_LOCAL) && (i_compatflags & COMPATF_SILENTPICKUP))
+
+	// [BB] COMPATF_SILENTPICKUP needs to be checked no matter if COMPATF_MAGICSILENCE is set or not.
+	if ((chanflags & CHAN_MAYBE_LOCAL) && (i_compatflags & COMPATF_SILENTPICKUP))
 	{
 		if (actor != NULL && actor != players[consoleplayer].camera)
 		{
@@ -1439,6 +1499,34 @@ bool S_CheckSoundLimit(sfxinfo_t *sfx, const FVector3 &pos, int near_limit, floa
 
 //==========================================================================
 //
+// [BB] S_IsMusicPaused
+//
+//==========================================================================
+
+bool S_IsMusicPaused ( void )
+{
+	return ( MusicPaused );
+}
+
+//==========================================================================
+//
+// [BB] S_StopSoundID
+//
+//==========================================================================
+
+void S_StopSoundID (int sound_id, int channel)
+{
+	for (FSoundChan *chan = Channels; chan != NULL; chan = chan->NextChan)
+	{
+		if ( (chan->SoundID == sound_id) && (chan->EntChannel == channel) )
+		{
+			S_StopChannel(chan);
+		}
+	}
+}
+
+//==========================================================================
+//
 // S_StopSound
 //
 // Stops an unpositioned sound from playing on a specific channel.
@@ -1550,6 +1638,23 @@ void S_StopAllChannels ()
 		chan = next;
 	}
 	GSnd->UpdateSounds();
+}
+
+//==========================================================================
+//
+// [BB] S_StopAllSoundsFromActor
+//
+//==========================================================================
+
+void S_StopAllSoundsFromActor (AActor *ent)
+{
+	for (FSoundChan *chan = Channels; chan != NULL; chan = chan->NextChan)
+	{
+		if ( chan->Actor == ent )
+		{
+			S_StopChannel(chan);
+		}
+	}
 }
 
 //==========================================================================
@@ -1738,6 +1843,10 @@ bool S_IsActorPlayingSomething (AActor *actor, int channel, int sound_id)
 
 void S_PauseSound (bool notmusic, bool notsfx)
 {
+	// [BC] Server doesn't use music/sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
+
 	if (!notmusic && mus_playing.handle && !MusicPaused)
 	{
 		mus_playing.handle->Pause();
@@ -1759,6 +1868,10 @@ void S_PauseSound (bool notmusic, bool notsfx)
 
 void S_ResumeSound (bool notsfx)
 {
+	// [BC] Server doesn't use music/sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
+
 	if (mus_playing.handle && MusicPaused)
 	{
 		mus_playing.handle->Resume();
@@ -1790,7 +1903,8 @@ void S_SetSoundPaused (int state)
 			{
 				GSnd->SetInactive(SoundRenderer::INACTIVE_Active);
 			}
-			if (!netgame
+			// [BB] !netgame -> (NETWORK_GetState( ) == NETSTATE_SINGLE)
+			if ((NETWORK_GetState( ) == NETSTATE_SINGLE)
 #ifdef _DEBUG
 				&& !demoplayback
 #endif
@@ -1811,7 +1925,8 @@ void S_SetSoundPaused (int state)
 					SoundRenderer::INACTIVE_Complete :
 					SoundRenderer::INACTIVE_Mute);
 			}
-			if (!netgame
+			// [BB] !netgame -> (NETWORK_GetState( ) == NETSTATE_SINGLE)
+			if ((NETWORK_GetState( ) == NETSTATE_SINGLE)
 #ifdef _DEBUG
 				&& !demoplayback
 #endif
@@ -1919,6 +2034,10 @@ void S_UpdateSounds (AActor *listenactor)
 {
 	FVector3 pos, vel;
 	SoundListener listener;
+
+	// [BC] Server doesn't use music/sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
 
 	I_UpdateMusic();
 
@@ -2294,6 +2413,10 @@ void S_ActivatePlayList (bool goBack)
 {
 	int startpos, pos;
 
+	// [BC] Server doesn't use music/sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
+
 	startpos = pos = PlayList->GetPosition ();
 	S_StopMusic (true);
 	while (!S_ChangeMusic (PlayList->GetSong (pos), 0, false, true))
@@ -2319,6 +2442,10 @@ void S_ActivatePlayList (bool goBack)
 bool S_ChangeCDMusic (int track, unsigned int id, bool looping)
 {
 	char temp[32];
+
+	// [BC] Server doesn't use music/sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return ( false );
 
 	if (id != 0)
 	{
@@ -2358,6 +2485,10 @@ TArray<BYTE> musiccache;
 
 bool S_ChangeMusic (const char *musicname, int order, bool looping, bool force)
 {
+	// [BC] Server doesn't use music/sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return ( false );
+
 	if (!force && PlayList)
 	{ // Don't change if a playlist is active
 		return false;
@@ -2560,6 +2691,10 @@ bool S_ChangeMusic (const char *musicname, int order, bool looping, bool force)
 
 void S_RestartMusic ()
 {
+	// [BC] Server doesn't use music/sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
+
 	if (!LastSong.IsEmpty())
 	{
 		FString song = LastSong;
@@ -2593,6 +2728,10 @@ int S_GetMusic (char **name)
 {
 	int order;
 
+	// [BC] Server doesn't use music/sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return ( 0 );
+
 	if (mus_playing.name)
 	{
 		*name = copystring (mus_playing.name);
@@ -2614,6 +2753,10 @@ int S_GetMusic (char **name)
 
 void S_StopMusic (bool force)
 {
+	// [BC] Server doesn't use music/sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
+
 	// [RH] Don't stop if a playlist is active.
 	if ((force || PlayList == NULL) && !mus_playing.name.IsEmpty())
 	{
@@ -2639,6 +2782,10 @@ void S_StopMusic (bool force)
 
 CCMD (playsound)
 {
+	// [BC] Server doesn't use music/sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
+
 	if (argv.argc() > 1)
 	{
 		FSoundID id = argv[1];
@@ -2661,7 +2808,8 @@ CCMD (playsound)
 
 CCMD (loopsound)
 {
-	if (players[consoleplayer].mo != NULL && !netgame && argv.argc() > 1)
+	// [BB] !netgame -> ( NETWORK_GetState( ) != NETSTATE_CLIENT )
+	if (players[consoleplayer].mo != NULL && ( NETWORK_GetState( ) != NETSTATE_CLIENT ) && argv.argc() > 1)
 	{
 		FSoundID id = argv[1];
 		if (id == 0)
@@ -2750,6 +2898,15 @@ CCMD (changemus)
 				PlayList = NULL;
 			}
 		S_ChangeMusic (argv[1], argv.argc() > 2 ? atoi (argv[2]) : 0);
+
+		// [BB] If we're the server, tell clients to change the music, and
+		// save the current music setting for when new clients connect.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			int musicorder =  argv.argc() > 2 ? atoi (argv[2]) : 0;
+			SERVERCOMMANDS_SetMapMusic( argv[1], musicorder );
+			SERVER_SetMapMusic( argv[1], musicorder );
+		}
 		}
 		else
 		{
@@ -2794,6 +2951,10 @@ CCMD (cd_play)
 {
 	char musname[16];
 
+	// [BC] Server doesn't use music/sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
+
 	if (argv.argc() == 1)
 	{
 		strcpy (musname, ",CD,");
@@ -2813,6 +2974,10 @@ CCMD (cd_play)
 
 CCMD (cd_stop)
 {
+	// [BC] Server doesn't use music/sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
+
 	CD_Stop ();
 }
 
@@ -2824,6 +2989,10 @@ CCMD (cd_stop)
 
 CCMD (cd_eject)
 {
+	// [BC] Server doesn't use music/sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
+
 	CD_Eject ();
 }
 
@@ -2835,6 +3004,10 @@ CCMD (cd_eject)
 
 CCMD (cd_close)
 {
+	// [BC] Server doesn't use music/sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
+
 	CD_UnEject ();
 }
 
@@ -2846,6 +3019,10 @@ CCMD (cd_close)
 
 CCMD (cd_pause)
 {
+	// [BC] Server doesn't use music/sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
+
 	CD_Pause ();
 }
 
@@ -2857,6 +3034,10 @@ CCMD (cd_pause)
 
 CCMD (cd_resume)
 {
+	// [BC] Server doesn't use music/sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
+
 	CD_Resume ();
 }
 
@@ -2869,6 +3050,10 @@ CCMD (cd_resume)
 CCMD (playlist)
 {
 	int argc = argv.argc();
+
+	// [BC] Server doesn't use music/sound.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return;
 
 	if (argc < 2 || argc > 3)
 	{

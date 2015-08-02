@@ -1288,6 +1288,10 @@ DEFINE_PROPERTY(clearflags, 0, Actor)
 		defaults->flags5 =
 		defaults->flags6 = 0;
 	defaults->flags2 &= MF2_ARGSDEFINED;	// this flag must not be cleared
+
+	// [BC] Also zero out ST's flags.
+	defaults->ulSTFlags = 0;
+	defaults->ulNetworkFlags = 0;
 }
 
 //==========================================================================
@@ -1329,9 +1333,19 @@ DEFINE_PROPERTY(activation, N, Actor)
 DEFINE_PROPERTY(designatedteam, I, Actor)
 {
 	PROP_INT_PARM(val, 0);
-	if(val < 0 || (val >= (signed) Teams.Size() && val != TEAM_NONE))
+	// [BB] Zandronum handles teams differently.
+	if(val < 0 || (val >= (signed) teams.Size() && val != TEAM_None))
 		I_Error("Invalid team designation.\n");
 	defaults->DesignatedTeam = val;
+}
+
+//==========================================================================
+// [BB]
+//==========================================================================
+DEFINE_PROPERTY(limitedtoteam, I, Actor)
+{
+	PROP_INT_PARM(i, 0);
+	defaults->ulLimitedToTeam=i+1;
 }
 
 //==========================================================================
@@ -1648,6 +1662,9 @@ DEFINE_CLASS_PROPERTY(pickupsound, S, Inventory)
 //==========================================================================
 DEFINE_CLASS_PROPERTY(pickupannouncerentry, S, Inventory)
 {
+	// [BB] Not a dummy in Zandronum.
+	PROP_STRING_PARM(str, 0);
+	sprintf( defaults->szPickupAnnouncerEntry, "%s", str );
 }
 
 //==========================================================================
@@ -1949,7 +1966,8 @@ DEFINE_CLASS_PROPERTY(slotpriority, F, Weapon)
 DEFINE_CLASS_PROPERTY(preferredskin, S, Weapon)
 {
 	PROP_STRING_PARM(str, 0);
-	// NoOp - only for Skulltag compatibility
+	// [BB] Not a dummy in Zandronum
+	defaults->PreferredSkin = str;
 }
 
 //==========================================================================
@@ -2159,6 +2177,30 @@ DEFINE_CLASS_PROPERTY_PREFIX(powerup, type, S, PowerupGiver)
 	}
 
 	defaults->PowerupType = cls;
+}
+
+//==========================================================================
+//	[BC] These are new.
+//==========================================================================
+DEFINE_CLASS_PROPERTY_PREFIX(rune, type, S, RuneGiver)
+{
+	FString typestr;
+
+	PROP_STRING_PARM(str, 0);
+	typestr.Format ("Rune%s", str);
+	const PClass * runetype=PClass::FindClass(typestr);
+	if (!runetype)
+	{
+		I_Error("Unknown rune type '%s' in '%s'\n", str, bag.Info->Class->TypeName.GetChars());
+	}
+	else if (!runetype->IsDescendantOf(RUNTIME_CLASS(ARune)))
+	{
+		I_Error("Invalid rune type '%s' in '%s'\n", str, bag.Info->Class->TypeName.GetChars());
+	}
+	else
+	{
+		defaults->RuneType=runetype;
+	}
 }
 
 //==========================================================================
@@ -2747,6 +2789,21 @@ DEFINE_CLASS_PROPERTY(unmorphflash, S, PowerMorph)
 {
 	PROP_STRING_PARM(str, 0);
 	defaults->UnMorphFlash = FName(str);
+}
+
+//==========================================================================
+// [TP]
+//==========================================================================
+DEFINE_CLASS_PROPERTY_PREFIX( player, maxskinsizefactor, F_F, PlayerPawn )
+{
+	PROP_FIXED_PARM( widthfactor, 0 );
+	PROP_FIXED_PARM( heightfactor, 1 );
+
+	if ( widthfactor < 0 || heightfactor < 0 )
+		I_Error( "Maximum skin size factors may not be negative.");
+
+	info->Class->Meta.SetMetaFixed( APMETA_MaxSkinWidthFactor, widthfactor );
+	info->Class->Meta.SetMetaFixed( APMETA_MaxSkinHeightFactor, heightfactor );
 }
 
 

@@ -1039,6 +1039,92 @@ TAG_ZORCHPROPULSOR = "Zorch Propulsor";
 TAG_PHASINGZORCHER = "Phasing Zorcher";
 TAG_LAZDEVICE = "LAZ Device";
 
+// [BC] Start of Skulltag strings.
+// [BB] Save string.
+SAVENET = "you can't save while in a net game!\n\npress a key.";
+// Pickup strings.
+PICKUP_MAXHEALTHBONUS = "Picked up a max. health bonus.";
+PICKUP_MAXARMORBONUS = "Picked up a max. armor bonus.";
+
+PICKUP_TURBOSPHERE = "Turbosphere!";
+PICKUP_ANTIGRAVBELT = "Anti-gravity belt! Wheee!";
+PICKUP_TIMEFREEZER = "Time freeze!";
+PICKUP_INFRAREDGOGGLES = "Infrared Goggles";
+PICKUP_INFRAREDTRACKER = "Infrared tracker";
+PICKUP_INVISIBILITY = "Invisibility";
+PICKUP_DOOMSPHERE = "Doomsphere";
+PICKUP_GUARDSPHERE = "Guardsphere";
+PICKUP_TERMINATOR = "Terminator!";
+PICKUP_POSSESSIONSTONE = "Hellstone!";
+
+PICKUP_BLUEFLAG = "You got the blue flag!";
+PICKUP_BLUESKULL_ST = "You got the blue skull!";
+PICKUP_REDFLAG = "You got the red flag!";
+PICKUP_REDSKULL_ST = "You got the red skull!";
+PICKUP_GREENFLAG = "You got the green flag!";
+PICKUP_GREENSKULL_ST = "You got the green skull!";
+PICKUP_GOLDFLAG = "You got the gold flag!";
+PICKUP_GOLDFLAG_ST = "You got the gold skull!";
+PICKUP_WHITEFLAG = "You got the flag!";
+
+PICKUP_COOPERATIVEBACKPACK = "Picked up a backpack full of weapons and ammo!";
+
+PICKUP_STRENGTH = "Strength!";
+PICKUP_RAGE = "Rage!";
+PICKUP_DRAIN = "Drain!";
+PICKUP_SPREAD = "Spread!";
+PICKUP_RESISTANCE = "Resistance!";
+PICKUP_REGENERATION = "Regeneration!";
+PICKUP_PROSPERITY = "Prosperity!";
+PICKUP_REFLECTION = "Reflection!";
+PICKUP_HIGHJUMP = "High jump!";
+PICKUP_HASTE = "Haste!";
+
+PICKUP_PISTOL = "You got your pistol back!  Whew!";
+
+// Possession strings.
+POSSESSIONARTIFACT_PICKEDUP = "Hellstone picked up!";
+POSSESSIONARTIFACT_DROPPED = "Hellstone dropped!";
+
+// Obituary strings.
+OB_FIST_2 = "%o was fisted by %k.";
+OB_FIST_RARE = "%o was molested by %k's fist.";
+OB_PISTOL_RARE = "%o got a cap popped in %p ass by %k.";
+OB_CHAINSAW_RARE = "%o was h4x0r3d by %k's chainsaw.";
+OB_ROCKET_GIB = "%o was gibbed by %k's rocket.";
+OB_ROCKET_GIB_2 = "%o was souped by %k's rocket.";
+OB_ROCKET_GIB_3 = "%o was blown to bits by %k's rocket.";
+OB_ROCKET_GIB_4 = "%o was shredded by %k's rocket.";
+OB_ROCKET_RARE = "%o was assraped by %k's rocket.";
+OB_ROCKET_SELF_2 = "%o discovers splash damage.";
+OB_ROCKET_SELF_3 = "%o blew %hself up.";
+OB_ROCKET_SELF_RARE = "%o blew %p own dumbass up.";
+OB_GRENADE = "%o caught %k's grenade.";
+OB_GRENADE_SPLASH = "%o was shredded by %k's shrapnel.";
+OB_GRENADE_SELF = "%o tripped %p own grenade.";
+OB_PLASMARIFLE_RARE = "%o was owned %k's plasma gun.";
+OB_BFG_GIB_RARE = "%o was gibbed by %k's big fucking gun.";
+
+OB_IMPALED = "%o got impaled on a stick.";
+OB_SPACE = "%o tried to explore space.";
+OB_SELF_2 = "%o had a heart attack.";
+OB_FALL_2 = "%o went splat.";
+OB_EXIT_2 = "%o seems bored on this level.";
+OB_REFLECTION = "%o was killed via %k's reflection rune.";
+
+// Medal strings. (THESE ARE NOT USED ATM).
+MEDALSTRING_EXCELLENT = "Excellent!";
+MEDALSTRING_INCREDIBLE = "Incredible!";
+MEDALSTRING_IMPRESSIVE = "Impressive!";
+MEDALSTRING_MOSTIMPRESSIVE = "Most Impressive!";
+MEDALSTRING_DOMINATION = "Domination!";
+MEDALSTRING_TOTALDOMINATION = "Total Domination!";
+MEDALSTRING_ACCURACY = "Accuracy!";
+MEDALSTRING_PRECISION = "Precision!";
+MEDALSTRING_LLAMA = "Llama!";
+MEDALSTRING_YOUFAILIT = "You Fail It!";
+
+
 // Heretic strings
 HE1TEXT =
 		"with the destruction of the iron\n"
@@ -1552,8 +1638,10 @@ SSKILL_NORMAL		= "Veteran";
 SSKILL_HARD			= "Elite";
 SSKILL_NIGHTMARE	= "Bloodbath";
 
+
 // Menu
 MNU_NEWGAME			= "NEW GAME";
+MNU_MULTIPLAYER			= "MULTIPLAYER";
 MNU_OPTIONS			= "OPTIONS";
 MNU_GAMEFILES		= "GAME FILES";
 MNU_INFO			= "INFO";
@@ -1591,13 +1679,13 @@ MNU_KNIGHT			= "KNIGHT";
 MNU_WARRIOR			= "WARRIOR";
 MNU_BERSERKER		= "BERSERKER";
 MNU_TITAN			= "TITAN";
-                                    
+
 MNU_ALTARBOY		= "ALTAR BOY";
 MNU_ACOLYTE			= "ACOLYTE";
 MNU_PRIEST			= "PRIEST";
 MNU_CARDINAL		= "CARDINAL";
 MNU_POPE			= "POPE";
-                                    
+
 MNU_APPRENTICE		= "APPRENTICE";
 MNU_ENCHANTER		= "ENCHANTER";
 MNU_SORCERER        = "SORCERER";

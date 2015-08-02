@@ -40,11 +40,12 @@ ACTOR Cacodemon 3005
 		HEAD F 6
 		Goto See
 	Death:
-		HEAD G 8
+		// [BB] In ST A_NoBlocking is called in the beginning of the death state.
+		HEAD G 8 A_NoBlocking
 		HEAD H 8 A_Scream
 		HEAD I 8
 		HEAD J 8
-		HEAD K 8 A_NoBlocking
+		HEAD K 8
 		HEAD L -1 A_SetFloorClip
 		Stop
 	Raise:

@@ -26,6 +26,7 @@ ACTOR Actor native //: Thinker
 	PainType Normal
 	DeathType Normal
 
+
 	// Variables for the expression evaluator
 	// NOTE: fixed_t and angle_t are only used here to ensure proper conversion
 	// Internally they are handled as floats.
@@ -184,6 +185,7 @@ ACTOR Actor native //: Thinker
 	action native A_ClearSoundTarget();
 	action native A_FireAssaultGun();
 	action native A_CheckTerrain();
+	action native A_FaceConsolePlayer(float MaxTurnAngle = 0); // [Dusk]
 
 	action native A_MissileAttack();
 	action native A_MeleeAttack();

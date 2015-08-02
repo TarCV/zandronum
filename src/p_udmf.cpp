@@ -46,6 +46,8 @@
 #include "r_state.h"
 #include "r_data/colormaps.h"
 #include "w_wad.h"
+// [BB] New #includes.
+#include "g_game.h"
 
 //===========================================================================
 //
@@ -1638,6 +1640,11 @@ public:
 			{
 				line_t li;
 				ParseLinedef(&li, ParsedLines.Size());
+
+				// [BB] Save some values that are necessary for a map reset.
+				GAME_BackupLineProperties(&li);
+				li.SavedAlpha = li.Alpha;
+
 				ParsedLines.Push(li);
 			}
 			else if (sc.Compare("sidedef"))
@@ -1692,6 +1699,10 @@ public:
 		for(int i = 0; i < numsectors; i++)
 		{
 			sectors[i].e = &sectors[0].e[i];
+
+			// [Dusk] Move distances must be explicitly zeroed out.
+			if ( sectors[i].e )
+				sectors[i].e->Midtex.Floor.MoveDistance = sectors[i].e->Midtex.Ceiling.MoveDistance = 0;
 		}
 
 		// Create the real linedefs and decompress the sidedefs

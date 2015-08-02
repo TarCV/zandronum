@@ -235,6 +235,26 @@ static FFlagDef ActorFlags[]=
 	DEFINE_FLAG(MF6, POISONALWAYS, AActor, flags6),
 	DEFINE_FLAG(MF6, NOTAUTOAIMED, AActor, flags6),
 
+	// [BC] New DECORATE flag defines here.
+	DEFINE_FLAG(STFL, BLUETEAM, AActor, ulSTFlags),
+	DEFINE_FLAG(STFL, REDTEAM, AActor, ulSTFlags),
+	DEFINE_FLAG(STFL, USESPECIAL, AActor, ulSTFlags),
+	DEFINE_FLAG(STFL, BASEHEALTH, AActor, ulSTFlags),
+	DEFINE_FLAG(STFL, SUPERHEALTH, AActor, ulSTFlags),
+	DEFINE_FLAG(STFL, BASEARMOR, AActor, ulSTFlags),
+	DEFINE_FLAG(STFL, SUPERARMOR, AActor, ulSTFlags),
+	DEFINE_FLAG(STFL, SCOREPILLAR, AActor, ulSTFlags),
+	DEFINE_FLAG(STFL, NODE, AActor, ulSTFlags),
+	DEFINE_FLAG(STFL, USESTBOUNCESOUND, AActor, ulSTFlags),
+	DEFINE_FLAG(STFL, EXPLODEONDEATH, AActor, ulSTFlags),
+	DEFINE_FLAG(STFL, DONTIDENTIFYTARGET, AActor, ulSTFlags), // [CK]
+
+	// [BB] New DECORATE network related flag defines here.
+	DEFINE_FLAG(NETFL, NONETID, AActor, ulNetworkFlags),
+	DEFINE_FLAG(NETFL, ALLOWCLIENTSPAWN, AActor, ulNetworkFlags),
+	DEFINE_FLAG(NETFL, CLIENTSIDEONLY, AActor, ulNetworkFlags),
+	DEFINE_FLAG(NETFL, SERVERSIDEONLY, AActor, ulNetworkFlags),
+
 	// Effect flags
 	DEFINE_FLAG(FX, VISIBILITYPULSE, AActor, effects),
 	DEFINE_FLAG2(FX_ROCKET, ROCKETTRAIL, AActor, effects),
@@ -275,12 +295,15 @@ static FFlagDef ActorFlags[]=
 	DEFINE_DUMMY_FLAG(FASTER),				// obsolete, replaced by 'Fast' state flag
 	DEFINE_DUMMY_FLAG(FASTMELEE),			// obsolete, replaced by 'Fast' state flag
 
+	// [BB] ST supports these flags.
+	/*
 	// Various Skulltag flags that are quite irrelevant to ZDoom
 	DEFINE_DUMMY_FLAG(NONETID),				// netcode-based
 	DEFINE_DUMMY_FLAG(ALLOWCLIENTSPAWN),	// netcode-based
 	DEFINE_DUMMY_FLAG(CLIENTSIDEONLY),	    // netcode-based
 	DEFINE_DUMMY_FLAG(SERVERSIDEONLY),		// netcode-based
 	DEFINE_DUMMY_FLAG(EXPLODEONDEATH),	    // seems useless
+	*/
 };
 
 static FFlagDef InventoryFlags[] =
@@ -303,6 +326,8 @@ static FFlagDef InventoryFlags[] =
 	DEFINE_FLAG(IF, RESTRICTABSOLUTELY, AInventory, ItemFlags),
 	DEFINE_FLAG(IF, NEVERRESPAWN, AInventory, ItemFlags),
 	DEFINE_FLAG(IF, NOSCREENFLASH, AInventory, ItemFlags),
+	// [BB] New ST flags.
+	DEFINE_FLAG(IF, FORCERESPAWNINSURVIVAL, AInventory, ItemFlags),
 
 	DEFINE_DEPRECATED_FLAG(PICKUPFLASH),
 	DEFINE_DEPRECATED_FLAG(INTERHUBSTRIP),};
@@ -328,10 +353,9 @@ static FFlagDef WeaponFlags[] =
 	DEFINE_FLAG(WIF, NO_AUTO_SWITCH, AWeapon, WeaponFlags),
 	DEFINE_FLAG(WIF, AMMO_CHECKBOTH, AWeapon, WeaponFlags),
 	DEFINE_FLAG(WIF, NOAUTOAIM, AWeapon, WeaponFlags),
-	
-	DEFINE_DUMMY_FLAG(NOLMS),
+	DEFINE_FLAG(WIF, ALLOW_WITH_RESPAWN_INVUL, AWeapon, WeaponFlags), // [BB] Marks weapons that can be used while respawn invulnerability is active.
+	DEFINE_FLAG(WIF, NOLMS, AWeapon, WeaponFlags), // [BB] Marks weapons that are not given to the player in LMS.
 	DEFINE_FLAG(WIF, ALT_USES_BOTH, AWeapon, WeaponFlags),
-	DEFINE_DUMMY_FLAG(ALLOW_WITH_RESPAWN_INVUL),
 };
 
 static FFlagDef PlayerPawnFlags[] =
