@@ -27,6 +27,12 @@
 
 DEFINE_ACTION_FUNCTION(AActor, A_HideDecepticon)
 {
+	// [BC] This is handled server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	EV_DoDoor (DDoor::doorClose, NULL, self, 999, 8*FRACUNIT, 0, 0, 0);
 	if (self->target != NULL && self->target->player != NULL)
 	{
@@ -46,6 +52,12 @@ DEFINE_ACTION_FUNCTION(AActor, A_AcolyteDie)
 
 	// [RH] Disable translucency here.
 	self->RenderStyle = STYLE_Normal;
+
+	// [BC] This is handled server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
 
 	// Only the Blue Acolyte does extra stuff on death.
 	if (self->GetClass()->TypeName != NAME_AcolyteBlue)
@@ -75,6 +87,11 @@ DEFINE_ACTION_FUNCTION(AActor, A_AcolyteDie)
 	players[i].mo->GiveInventoryType (QuestItemClasses[6]);
 	players[i].SetLogNumber (14);
 	S_StopSound (CHAN_VOICE);
+
+	// [BC] Play the sound to clients.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_Sound( CHAN_VOICE, "svox/voc14", 1, ATTN_NORM );
+
 	S_Sound (CHAN_VOICE, "svox/voc14", 1, ATTN_NORM);
 }
 

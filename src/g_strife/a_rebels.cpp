@@ -27,6 +27,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_ShootGun)
 	if (self->target == NULL)
 		return;
 
+	// [BC] Play this sound to clients.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SoundActor( self, CHAN_WEAPON, "monsters/rifle", 1, ATTN_NORM );
+
 	S_Sound (self, CHAN_WEAPON, "monsters/rifle", 1, ATTN_NORM);
 	A_FaceTarget (self);
 	pitch = P_AimLineAttack (self, self->angle, MISSILERANGE);
@@ -49,6 +53,12 @@ IMPLEMENT_CLASS (ATeleporterBeacon)
 bool ATeleporterBeacon::Use (bool pickup)
 {
 	AInventory *drop;
+
+	// [BC] This is handled server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return ( true );
+	}
 
 	// Increase the amount by one so that when DropInventory decrements it,
 	// the actor will have the same number of beacons that he started with.
@@ -74,6 +84,14 @@ DEFINE_ACTION_FUNCTION(AActor, A_Beacon)
 	AActor *owner = self->target;
 	AActor *rebel;
 	angle_t an;
+	// [BC]
+	AActor	*pFog;
+
+	// [BC] This is handled server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
 
 	rebel = Spawn("Rebel1", self->x, self->y, self->floorz, ALLOW_REPLACE);
 	if (!P_TryMove (rebel, rebel->x, rebel->y, true))
@@ -96,7 +114,8 @@ DEFINE_ACTION_FUNCTION(AActor, A_Beacon)
 	if (owner != NULL)
 	{
 		// Rebels are the same color as their owner (but only in multiplayer)
-		if (multiplayer)
+		// [BB] Changed "multiplayer" check
+		if ( NETWORK_GetState( ) != NETSTATE_SINGLE )
 		{
 			rebel->Translation = owner->Translation;
 		}
@@ -109,12 +128,30 @@ DEFINE_ACTION_FUNCTION(AActor, A_Beacon)
 		}
 	}
 
+	// [BC] Spawn the rebel, and put him in the see state.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		SERVERCOMMANDS_SpawnThing( rebel );
+		SERVERCOMMANDS_SetThingState( rebel, STATE_SEE );
+	}
+
 	rebel->SetState (rebel->SeeState);
 	rebel->angle = self->angle;
 	an = self->angle >> ANGLETOFINESHIFT;
-	Spawn<ATeleportFog> (rebel->x + 20*finecosine[an], rebel->y + 20*finesine[an], rebel->z + TELEFOGHEIGHT, ALLOW_REPLACE);
+	pFog = Spawn<ATeleportFog> (rebel->x + 20*finecosine[an], rebel->y + 20*finesine[an], rebel->z + TELEFOGHEIGHT, ALLOW_REPLACE);
+	// [BC] Spawn the teleport fog.
+	if (( NETWORK_GetState( ) == NETSTATE_SERVER ) &&
+		( pFog ))
+	{
+		SERVERCOMMANDS_SpawnThing( pFog );
+	}
+
 	if (--self->health < 0)
 	{
+		// [BB] Tell clients to set the thing's state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingState( self, STATE_DEATH );
+
 		self->SetState(self->FindState(NAME_Death));
 	}
 }

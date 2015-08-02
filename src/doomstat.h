@@ -63,20 +63,12 @@ extern	bool 			autostart;
 EXTERN_CVAR (Int, gameskill);
 extern	int				NextSkill;			// [RH] Skill to use at next level load
 
-// Netgame? Only true if >1 player.
-extern	bool			netgame;
-
-// Bot game? Like netgame, but doesn't involve network communication.
-extern	bool			multiplayer;
-
-// Flag: true only if started as net deathmatch.
-EXTERN_CVAR (Int, deathmatch)
+// [BC] Removed netgame/multiplayer since it's been replaced by NETWORK_GetState().
 
 // [RH] Pretend as deathmatch for purposes of dmflags
 EXTERN_CVAR (Bool, alwaysapplydmflags)
 
-// [RH] Teamplay mode
-EXTERN_CVAR (Bool, teamplay)
+// [BC] Moved teamplay to a more appropriate location.
 
 // [RH] Friendly fire amount
 EXTERN_CVAR (Float, teamdamage)
@@ -239,9 +231,11 @@ EXTERN_CVAR (Int, infighting)
 
 EXTERN_CVAR (Int, dmflags);
 EXTERN_CVAR (Int, dmflags2);	// [BC]
+EXTERN_CVAR (Int, zadmflags);	// [BB]
 
 EXTERN_CVAR (Int, compatflags);
 EXTERN_CVAR (Int, compatflags2);
+EXTERN_CVAR (Int, zacompatflags); // [BB]
 extern int i_compatflags, i_compatflags2, ii_compatflags, ii_compatflags2, ib_compatflags;
 
 #endif
