@@ -2,6 +2,10 @@
 #define __A_DOOMGLOBAL_H__
 
 #include "info.h"
+// [BB] New #includes.
+#include "gstrings.h"
+#include "network.h"
+#include "sv_commands.h"
 
 class AScriptedMarine : public AActor
 {

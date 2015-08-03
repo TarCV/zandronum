@@ -364,6 +364,10 @@ int APoisonCloud::DoSpecialDamage (AActor *victim, int damage, FName damagetype)
 				// If successful, play the poison sound.
 				if (P_PoisonPlayer (victim->player, this, this->target, 50))
 					S_Sound (victim, CHAN_VOICE, "*poison", 1, ATTN_NORM);
+
+				// [Dusk] Play the sound on the clients
+				if( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVERCOMMANDS_SoundActor( victim, CHAN_VOICE, "*poison", 1, ATTN_NORM );
 			}
 		}	
 		return -1;
@@ -389,6 +393,18 @@ DEFINE_ACTION_FUNCTION(AActor, A_PoisonBagInit)
 	if (mo)
 	{
 		mo->target = self->target;
+
+		// [CK] This is executed both server and clientside, resulting in 
+		// clientside clouds with no netID, but the server does have a netID. 
+		// Clearing of clouds therefore fail because the client's poisoncloud 
+		// netID is -1.
+		// This is run on both the server and client, so since we can safely
+		// assume this is clientside only, we can ensure proper cleanup by
+		// setting NETFL_CLIENTSIDEONLY, resulting in proper removal when
+		// GAME_ResetMap() is executed.
+		if (NETWORK_GetState() == NETSTATE_CLIENT) {
+			mo->ulNetworkFlags |= NETFL_CLIENTSIDEONLY;
+		}
 	}
 }
 
