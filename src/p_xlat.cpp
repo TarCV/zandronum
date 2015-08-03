@@ -45,7 +45,6 @@
 #include "sc_man.h"
 #include "cmdlib.h"
 #include "xlat/xlat.h"
-
 // define names for the TriggerType field of the general linedefs
 
 typedef enum
@@ -66,7 +65,6 @@ void P_TranslateLineDef (line_t *ld, maplinedef_t *mld)
 	short tag = LittleShort(mld->tag);
 	DWORD flags = LittleShort(mld->flags);
 	INTBOOL passthrough = 0;
-
 	DWORD flags1 = flags;
 	DWORD newflags = 0;
 

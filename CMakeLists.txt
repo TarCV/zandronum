@@ -1,5 +1,5 @@
 cmake_minimum_required( VERSION 2.4 )
-project(GZDoom)
+project(Zandronum)
 
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR} )
 include( CreateLaunchers )
@@ -69,7 +69,7 @@ IF( NOT CMAKE_BUILD_TYPE )
 ENDIF( NOT CMAKE_BUILD_TYPE )
 
 set( ZDOOM_OUTPUT_DIR ${CMAKE_BINARY_DIR} CACHE PATH "Directory where zdoom.pk3 and the executable will be created." )
-set( ZDOOM_EXE_NAME "gzdoom" CACHE FILEPATH "Name of the executable to create" )
+set( ZDOOM_EXE_NAME "zandronum" CACHE FILEPATH "Name of the executable to create" )
 if( MSVC )
 	# Allow the user to use ZDOOM_OUTPUT_DIR as a single release point.
 	# Use zdoom, zdoomd, zdoom64, and zdoomd64 for the binary names
@@ -83,6 +83,11 @@ if( "${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" OR "${CMAKE_CXX_COMPILER_ID}" STRE
 endif( "${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" )
 
 set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}")
+
+# [EP]
+if( CMAKE_BUILD_TYPE MATCHES Release AND CMAKE_COMPILER_IS_GNUCXX AND NOT APPLE )
+	option( RELEASE_WITH_DEBUG_FILE "Create the debug symbols file for the release build." ON )
+endif( CMAKE_BUILD_TYPE MATCHES Release AND CMAKE_COMPILER_IS_GNUCXX AND NOT APPLE )
 
 find_package( BZip2 )
 find_package( JPEG )
@@ -129,7 +134,7 @@ if( MSVC )
 
 	
 	# Debug allocations in debug builds
-	set( DEB_C_FLAGS "/D _CRTDBG_MAP_ALLOC /MTd" )
+	set( DEB_C_FLAGS "/D _CRTDBG_MAP_ALLOC /MTd /Gm" )
 
 	# Disable warnings for unsecure CRT functions from VC8+
 	if( MSVC_VERSION GREATER 1399 )
@@ -215,17 +220,33 @@ endif( GME_FOUND AND NOT FORCE_INTERNAL_GME )
 
 set( LZMA_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lzma/C" )
 
+# [EP]
+if( RELEASE_WITH_DEBUG_FILE )
+	set( CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -g3" )
+	set( CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -g3" )
+endif( RELEASE_WITH_DEBUG_FILE )
+
+# [BB] Library that allows to map IP addresses to country names.
+add_subdirectory( GeoIP )
+# [BB] Library for the database backend.
+add_subdirectory( sqlite )
 add_subdirectory( lzma )
 add_subdirectory( tools )
 add_subdirectory( dumb )
 add_subdirectory( gdtoa )
 add_subdirectory( wadsrc )
 add_subdirectory( wadsrc_bm )
-add_subdirectory( wadsrc_lights )
+# [BB] Zandronum includes the light definitions in zandronum.pk3.
+#add_subdirectory( wadsrc_lights )
+# [BB] Compatibility wad to support Skulltag mods.
+add_subdirectory( wadsrc_st )
 add_subdirectory( src )
 
 if( NOT WIN32 AND NOT APPLE )
-	add_subdirectory( output_sdl )
+	# [BB] We don't need output_sdl (only used for sound), if we are just building the server.
+	if ( NOT SERVERONLY )
+		add_subdirectory( output_sdl )
+	endif ( NOT SERVERONLY )
 endif( NOT WIN32 AND NOT APPLE )
 
 if( NOT CMAKE_CROSSCOMPILING )

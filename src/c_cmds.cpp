@@ -71,12 +71,34 @@
 #include "v_text.h"
 #include "p_lnspec.h"
 #include "v_video.h"
+// [BC] New #includes.
+#include "deathmatch.h"
+#include "cl_demo.h"
+#include "cl_main.h"
+#include "network.h"
+#include "p_local.h"
+#include "p_acs.h"
+#include "team.h"
+#include "maprotation.h"
+#include "cl_commands.h"
+#include "cooperative.h"
+#include "survival.h"
+#include "m_cheat.h"
 
 extern FILE *Logfile;
 extern bool insave;
 
+// [BC] The user's desired name of the logfile.
+extern char g_szDesiredLogFilename[256];
+
+// [RC] The actual name of the logfile (most likely g_szDesiredLogFilename with a timestamp).
+extern char g_szActualLogFilename[256];
+
+
 CVAR (Bool, sv_cheats, false, CVAR_SERVERINFO | CVAR_LATCH)
 CVAR (Bool, sv_unlimited_pickup, false, CVAR_SERVERINFO)
+CVAR (Bool, sv_logfilenametimestamp, true, CVAR_ARCHIVE)
+CVAR (Bool, sv_logfile_append, false, CVAR_ARCHIVE)
 
 CCMD (toggleconsole)
 {
@@ -85,9 +107,17 @@ CCMD (toggleconsole)
 
 bool CheckCheatmode (bool printmsg)
 {
-	if ((G_SkillProperty(SKILLP_DisableCheats) || netgame || deathmatch) && (!sv_cheats))
+	if ((( G_SkillProperty( SKILLP_DisableCheats )) ||
+		NETWORK_InClientMode() ||
+		( NETWORK_GetState( ) == NETSTATE_SERVER )) &&
+		( sv_cheats == false ))
 	{
-		if (printmsg) Printf ("sv_cheats must be true to enable this command.\n");
+		if (printmsg)
+		{
+			// [BB] Don't allow clients to lag themself by flooding the cheat message.
+			if ( ( NETWORK_InClientMode() == false ) || CLIENT_AllowSVCheatMessage( ) )
+ 				Printf ("sv_cheats must be true to enable this command.\n");
+ 		}
 		return true;
 	}
 	else
@@ -96,13 +126,58 @@ bool CheckCheatmode (bool printmsg)
 	}
 }
 
+// [RC] Creates the log file and starts logging to it.
+void StartLogging( const char *szFileName )
+{
+	char		logfilename[512];
+	time_t		tNow;
+	// [BB] Write the current system time to tNow.
+	time (&tNow);
+	struct tm	*lt = localtime( &tNow );
+
+	// [BB] If sv_logfilenametimestamp, we append the current date/time to the logfile name.
+	if ( lt != NULL && sv_logfilenametimestamp )
+		sprintf( logfilename, "%s__%d_%02d_%02d-%02d_%02d_%02d.log", szFileName, lt->tm_year + 1900, lt->tm_mon + 1, lt->tm_mday, lt->tm_hour, lt->tm_min, lt->tm_sec);
+	else
+		strncpy( logfilename, szFileName, 256 );
+
+	if (( Logfile = fopen( logfilename, sv_logfile_append ? "a" : "w" )))
+	{
+		sprintf( g_szDesiredLogFilename, "%s", szFileName );
+		sprintf( g_szActualLogFilename, "%s", logfilename );
+		Printf( "Log started: %s, %s", g_szActualLogFilename, myasctime( ));
+	}
+	else
+		Printf( "Could not start log: %s.\n", szFileName );
+}
+
+// Closes the log file, if there is one.
+void StopLogging( void )
+{
+	if ( Logfile )
+	{
+		Printf( "Log stopped: %s, %s", g_szActualLogFilename, myasctime() );
+		fclose( Logfile );
+		Logfile = NULL;
+		g_szActualLogFilename[0] = 0;
+	}
+}
+
 CCMD (quit)
 {
+	// [BC] This function may not be used by ConsoleCommand.
+	if ( ACS_IsCalledFromConsoleCommand( ))
+		return;
+
 	if (!insave) exit (0);
 }
 
 CCMD (exit)
 {
+	// [BC] This function may not be used by ConsoleCommand.
+	if ( ACS_IsCalledFromConsoleCommand( ))
+		return;
+
 	if (!insave) exit (0);
 }
 
@@ -120,8 +195,13 @@ CCMD (god)
 	if (CheckCheatmode ())
 		return;
 
-	Net_WriteByte (DEM_GENERICCHEAT);
-	Net_WriteByte (CHT_GOD);
+	if ( NETWORK_GetState( ) == NETSTATE_CLIENT )
+		CLIENTCOMMANDS_GenericCheat( CHT_GOD );
+	else
+	{
+		Net_WriteByte (DEM_GENERICCHEAT);
+		Net_WriteByte (CHT_GOD);
+	}
 }
 
 CCMD (iddqd)
@@ -129,14 +209,71 @@ CCMD (iddqd)
 	if (CheckCheatmode ())
 		return;
 
-	Net_WriteByte (DEM_GENERICCHEAT);
-	Net_WriteByte (CHT_IDDQD);
+	if ( NETWORK_GetState( ) == NETSTATE_CLIENT )
+		CLIENTCOMMANDS_GenericCheat( CHT_IDDQD );
+	else
+	{
+		Net_WriteByte (DEM_GENERICCHEAT);
+		Net_WriteByte (CHT_IDDQD);
+	}
+}
+
+// [BC] Allow users to execute the "idfa" cheat from the console.
+CCMD( idfa )
+{
+	if ( CheckCheatmode( ))
+		return;
+
+	if ( NETWORK_GetState( ) == NETSTATE_CLIENT )
+		CLIENTCOMMANDS_GenericCheat( CHT_IDFA );
+	else
+	{
+		Net_WriteByte (DEM_GENERICCHEAT);
+		Net_WriteByte (CHT_IDFA);
+	}
+}
+
+// [BC] Allow users to execute the "idkfa" cheat from the console.
+CCMD( idkfa )
+{
+	if ( CheckCheatmode( ))
+		return;
+
+	if ( NETWORK_GetState( ) == NETSTATE_CLIENT )
+		CLIENTCOMMANDS_GenericCheat( CHT_IDKFA );
+	else
+	{
+		Net_WriteByte (DEM_GENERICCHEAT);
+		Net_WriteByte (CHT_IDKFA);
+	}
+}
+
+// [BC] Allow users to execute the "idchoppers" cheat from the console.
+CCMD( idchoppers )
+{
+	if ( CheckCheatmode( ))
+		return;
+
+	if ( NETWORK_GetState( ) == NETSTATE_CLIENT )
+		CLIENTCOMMANDS_GenericCheat( CHT_CHAINSAW );
+	else
+	{
+		Net_WriteByte (DEM_GENERICCHEAT);
+		Net_WriteByte (CHT_CHAINSAW);
+	}
 }
 
 CCMD (buddha)
 {
 	if (CheckCheatmode())
 		return;
+
+	// [BB] Clients need to request the cheat from the server.
+	if ( NETWORK_GetState( ) == NETSTATE_CLIENT )
+	{
+		CLIENTCOMMANDS_GenericCheat( CHT_BUDDHA );
+		return;
+	}
 
 	Net_WriteByte(DEM_GENERICCHEAT);
 	Net_WriteByte(CHT_BUDDHA);
@@ -147,8 +284,13 @@ CCMD (notarget)
 	if (CheckCheatmode ())
 		return;
 
-	Net_WriteByte (DEM_GENERICCHEAT);
-	Net_WriteByte (CHT_NOTARGET);
+	if ( NETWORK_GetState( ) == NETSTATE_CLIENT )
+		CLIENTCOMMANDS_GenericCheat( CHT_NOTARGET );
+	else
+	{
+		Net_WriteByte (DEM_GENERICCHEAT);
+		Net_WriteByte (CHT_NOTARGET);
+	}
 }
 
 CCMD (fly)
@@ -156,8 +298,13 @@ CCMD (fly)
 	if (CheckCheatmode ())
 		return;
 
-	Net_WriteByte (DEM_GENERICCHEAT);
-	Net_WriteByte (CHT_FLY);
+	if ( NETWORK_GetState( ) == NETSTATE_CLIENT )
+		CLIENTCOMMANDS_GenericCheat( CHT_FLY );
+	else
+	{
+		Net_WriteByte (DEM_GENERICCHEAT);
+		Net_WriteByte (CHT_FLY);
+	}
 }
 
 /*
@@ -169,11 +316,34 @@ argv(0) noclip
 */
 CCMD (noclip)
 {
-	if (CheckCheatmode ())
+	// [BB] Allow spectators to use noclip.
+	if ( ( CLIENTDEMO_IsInFreeSpectateMode( ) == false ) && ( players[consoleplayer].bSpectating == false ) && CheckCheatmode( ) )
 		return;
 
-	Net_WriteByte (DEM_GENERICCHEAT);
-	Net_WriteByte (CHT_NOCLIP);
+	if ( NETWORK_GetState( ) == NETSTATE_CLIENT )
+	{
+		// [Dusk] Don't bother sending a request to the server when we're spectating.
+		// Spectator movement is entirely client-side and thus we can noclip on our own.
+		if ( players[consoleplayer].bSpectating )
+		{
+			cht_DoCheat( &players[consoleplayer], CHT_NOCLIP );
+
+			// [Dusk] If we are recording a demo, we need to write this noclip use down
+			// so that it can be re-enacted correctly
+			if ( CLIENTDEMO_IsRecording( ))
+				CLIENTDEMO_WriteLocalCommand( CLD_LCMD_NOCLIP, NULL );
+			return;
+		}
+
+		CLIENTCOMMANDS_GenericCheat( CHT_NOCLIP );
+	}
+	else if ( CLIENTDEMO_IsInFreeSpectateMode( ) )
+		cht_DoCheat( CLIENTDEMO_GetFreeSpectatorPlayer( ), CHT_NOCLIP );
+	else
+	{
+		Net_WriteByte (DEM_GENERICCHEAT);
+		Net_WriteByte (CHT_NOCLIP);
+	}
 }
 
 CCMD (noclip2)
@@ -190,8 +360,13 @@ CCMD (powerup)
 	if (CheckCheatmode ())
 		return;
 
-	Net_WriteByte (DEM_GENERICCHEAT);
-	Net_WriteByte (CHT_POWER);
+	if ( NETWORK_GetState( ) == NETSTATE_CLIENT )
+		CLIENTCOMMANDS_GenericCheat( CHT_POWER );
+	else
+	{
+		Net_WriteByte (DEM_GENERICCHEAT);
+		Net_WriteByte (CHT_POWER);
+	}
 }
 
 CCMD (morphme)
@@ -199,15 +374,25 @@ CCMD (morphme)
 	if (CheckCheatmode ())
 		return;
 
-	if (argv.argc() == 1)
+	if ( NETWORK_GetState( ) == NETSTATE_CLIENT )
 	{
-		Net_WriteByte (DEM_GENERICCHEAT);
-		Net_WriteByte (CHT_MORPH);
+		if (argv.argc() == 1)
+			CLIENTCOMMANDS_GenericCheat( CHT_MORPH );
+		else
+			CLIENTCOMMANDS_MorphCheat( argv[1] );
 	}
 	else
 	{
-		Net_WriteByte (DEM_MORPHEX);
-		Net_WriteString (argv[1]);
+		if (argv.argc() == 1)
+		{
+			Net_WriteByte (DEM_GENERICCHEAT);
+			Net_WriteByte (CHT_MORPH);
+		}
+		else
+		{
+			Net_WriteByte (DEM_MORPHEX);
+			Net_WriteString (argv[1]);
+		}
 	}
 }
 
@@ -216,13 +401,25 @@ CCMD (anubis)
 	if (CheckCheatmode ())
 		return;
 
-	Net_WriteByte (DEM_GENERICCHEAT);
-	Net_WriteByte (CHT_ANUBIS);
+	if ( NETWORK_GetState( ) == NETSTATE_CLIENT )
+		CLIENTCOMMANDS_GenericCheat( CHT_ANUBIS );
+	else
+	{
+		Net_WriteByte (DEM_GENERICCHEAT);
+		Net_WriteByte (CHT_ANUBIS);
+	}
 }
 
 // [GRB]
 CCMD (resurrect)
 {
+	// [BB] Only allow resurrect in single player.
+	if (( NETWORK_GetState( ) != NETSTATE_SINGLE ) && ( NETWORK_GetState( ) != NETSTATE_SINGLE_MULTIPLAYER ))
+	{
+		Printf ("You cannot use resurrect during a network game.\n");
+		return;
+	}
+
 	if (CheckCheatmode ())
 		return;
 
@@ -234,7 +431,8 @@ EXTERN_CVAR (Bool, chasedemo)
 
 CCMD (chase)
 {
-	if (demoplayback)
+	// [BC] Support for client-side demos.
+	if (demoplayback || ( CLIENTDEMO_IsPlaying( )))
 	{
 		int i;
 
@@ -255,17 +453,28 @@ CCMD (chase)
 	else
 	{
 		// Check if we're allowed to use chasecam.
-		if (gamestate != GS_LEVEL || (!(dmflags2 & DF2_CHASECAM) && deathmatch && CheckCheatmode ()))
+		// [BB] Unlike ZDoom we disallow chasecam by default in all game modes.
+		// [BB] Always allow chasecam for spectators. CheckCheatmode has to be checked last
+		// because it prints a message if cheats are not allowed.
+		if (gamestate != GS_LEVEL || (!(dmflags2 & DF2_CHASECAM)
+			&& (players[consoleplayer].bSpectating == false)
+			&& CheckCheatmode () ) )
 			return;
 
-		Net_WriteByte (DEM_GENERICCHEAT);
-		Net_WriteByte (CHT_CHASECAM);
+		if ( NETWORK_GetState( ) == NETSTATE_CLIENT )
+			CLIENTCOMMANDS_GenericCheat( CHT_CHASECAM );
+		else
+		{
+			Net_WriteByte (DEM_GENERICCHEAT);
+			Net_WriteByte (CHT_CHASECAM);
+		}
 	}
 }
 
 CCMD (idclev)
 {
-	if (netgame)
+	// [BB] Check if client instead of "netgame"
+	if ( NETWORK_GetState( ) == NETSTATE_CLIENT )
 		return;
 
 	if ((argv.argc() > 1) && (*(argv[1] + 2) == 0) && *(argv[1] + 1) && *argv[1])
@@ -303,7 +512,8 @@ CCMD (idclev)
 
 CCMD (hxvisit)
 {
-	if (netgame)
+	// [BB] Check if client instead of "netgame"
+	if ( NETWORK_GetState( ) == NETSTATE_CLIENT )
 		return;
 
 	if ((argv.argc() > 1) && (*(argv[1] + 2) == 0) && *(argv[1] + 1) && *argv[1])
@@ -330,15 +540,15 @@ CCMD (hxvisit)
 
 CCMD (changemap)
 {
-	if (who == NULL || !usergame)
+	if ( level.info == NULL )
 	{
-		Printf ("Use the map command when not in a game.\n");
+		Printf( "You can't use changemap, when not in a level.\n" );
 		return;
 	}
 
-	if (!players[who->player - players].settings_controller && netgame)
+	if ( NETWORK_GetState( ) == NETSTATE_CLIENT )
 	{
-		Printf ("Only setting controllers can change the map.\n");
+		Printf( "Only the server can change the map.\n" );
 		return;
 	}
 
@@ -352,16 +562,38 @@ CCMD (changemap)
 			}
 			else
 			{
-				if (argv.argc() > 2)
+				// [BB] We cannot end the map during survival's countdown, so just end the map after the countdown ends.
+				if ( ( survival ) && ( SURVIVAL_GetState( ) == SURVS_COUNTDOWN ) )
 				{
-					Net_WriteByte (DEM_CHANGEMAP2);
-					Net_WriteByte (atoi(argv[2]));
+					char commandString[128];
+					sprintf ( commandString, "wait %lu;changemap %s", SURVIVAL_GetCountdownTicks() + TICRATE, argv[1] );
+					Printf ( "changemap called during a survival countdown. Delaying the map change till the countdown ends.\n" );
+					AddCommandString ( commandString );
+					return;
+				}
+
+				// Fuck that DEM shit!
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				{
+					strncpy( level.nextmap, argv[1], 8 );
+
+					level.flags |= LEVEL_CHANGEMAPCHEAT;
+
+					G_ExitLevel( 0, false );
 				}
 				else
 				{
-					Net_WriteByte (DEM_CHANGEMAP);
+					if (argv.argc() > 2)
+					{
+						Net_WriteByte (DEM_CHANGEMAP2);
+						Net_WriteByte (atoi(argv[2]));
+					}
+					else
+					{
+						Net_WriteByte (DEM_CHANGEMAP);
+					}
+					Net_WriteString (argv[1]);
 				}
-				Net_WriteString (argv[1]);
 			}
 		}
 		catch(CRecoverableError &error)
@@ -381,12 +613,22 @@ CCMD (give)
 	if (CheckCheatmode () || argv.argc() < 2)
 		return;
 
-	Net_WriteByte (DEM_GIVECHEAT);
-	Net_WriteString (argv[1]);
-	if (argv.argc() > 2)
-		Net_WriteWord (clamp (atoi (argv[2]), 1, 32767));
+	if ( NETWORK_GetState( ) == NETSTATE_CLIENT )
+	{
+		if ( argv.argc( ) > 2 )
+			CLIENTCOMMANDS_GiveCheat( argv[1], clamp( atoi( argv[2]), 1, 255 ));
+		else
+			CLIENTCOMMANDS_GiveCheat( argv[1], 0 );
+	}
 	else
-		Net_WriteWord (0);
+	{
+		Net_WriteByte (DEM_GIVECHEAT);
+		Net_WriteString (argv[1]);
+		if (argv.argc() > 2)
+			Net_WriteWord (clamp (atoi (argv[2]), 1, 32767));
+		else
+			Net_WriteWord (0);
+	}
 }
 
 CCMD (take)
@@ -456,19 +698,47 @@ void execLogfile(const char *fn)
 
 CCMD (logfile)
 {
+	// [BC/BB] This function may not be used by ConsoleCommand.
+	if ( ACS_IsCalledFromConsoleCommand( ))
+		return;
 
-	if (Logfile)
+	// [BB] Zandronum handles logging differently.
+	if ( Logfile )
+		StopLogging( );
+
+	if ( argv.argc() >= 2 )
+		StartLogging( argv[1] );
+}
+
+// [TP] CCMD(puke)'s online handling encapsulated into a function.
+// Returns true if the function eats the script call.
+static bool CheckOnlinePuke ( int script, int args[4], bool always )
+{
+	if ( NETWORK_InClientMode() == false && ( NETWORK_GetState( ) != NETSTATE_SERVER ))
+		return false;
+
+	// [BB] The check if the client is allowed to puke a CLIENTSIDE script
+	// is done in P_StartScript, no need to check here.
+	if ( ( NETWORK_GetState( ) == NETSTATE_SERVER ) || ACS_IsScriptClientSide ( script ) )
 	{
-		const char *timestr = myasctime();
-		Printf("Log stopped: %s\n", timestr);
-		fclose (Logfile);
-		Logfile = NULL;
+		P_StartScript( players[consoleplayer].mo, NULL, script, level.mapname,
+			args, 4, ( (script < 0 ) ? ACS_ALWAYS : 0 ) | ACS_NET );
+
+		// [BB] If the server (and not any ACS script via ConsoleCommand) calls puke, let the clients know.
+		if ( ( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( ACS_IsCalledFromConsoleCommand( ) == false ) )
+		{
+			SERVER_Printf( PRINT_HIGH, "The Server host or an RCON user is possibly cheating "
+				"by calling \"puke %s %d %d %d %d\"\n",
+				FBehavior::RepresentScript( script ).GetChars(),
+				args[0], args[1], args[2], args[3] );
+		}
+	}
+	else if ( ( NETWORK_GetState( ) == NETSTATE_CLIENT ) && ACS_IsScriptPukeable ( script ) )
+	{
+		CLIENTCOMMANDS_Puke ( script, args, always );
 	}
 
-	if (argv.argc() >= 2)
-	{
-		execLogfile(argv[1]);
-	}
+	return true;
 }
 
 CCMD (puke)
@@ -494,6 +764,10 @@ CCMD (puke)
 		{
 			arg[i] = atoi (argv[2+i]);
 		}
+
+		// [TP] Check online handling
+		if ( CheckOnlinePuke( abs( script ), arg, script < 0 ) )
+			return;
 
 		if (script > 0)
 		{
@@ -541,6 +815,11 @@ CCMD (pukename)
 				arg[i] = atoi(argv[argstart + i]);
 			}
 		}
+
+		// [TP] Check online handling
+		if ( CheckOnlinePuke( -FName( argv[1] ), arg, always ) )
+			return;
+
 		Net_WriteByte(DEM_RUNNAMEDSCRIPT);
 		Net_WriteString(argv[1]);
 		Net_WriteByte(argn | (always << 7));
@@ -599,6 +878,10 @@ CCMD (special)
 
 CCMD (error)
 {
+	// [BB] This function may not be used by ConsoleCommand.
+	if ( ACS_IsCalledFromConsoleCommand( ))
+		return;
+
 	if (argv.argc() > 1)
 	{
 		char *textcopy = copystring (argv[1]);
@@ -612,6 +895,10 @@ CCMD (error)
 
 CCMD (error_fatal)
 {
+	// [BB] This function may not be used by ConsoleCommand.
+	if ( ACS_IsCalledFromConsoleCommand( ))
+		return;
+
 	if (argv.argc() > 1)
 	{
 		char *textcopy = copystring (argv[1]);
@@ -622,6 +909,27 @@ CCMD (error_fatal)
 		Printf ("Usage: error_fatal <error text>\n");
 	}
 }
+
+//==========================================================================
+//
+// CCMD crashout
+//
+// Debugging routine for testing the crash logger.
+// Useless in a win32 debug build, because that doesn't enable the crash logger.
+//
+//==========================================================================
+
+#if !defined(_WIN32) || !defined(_DEBUG)
+CCMD (crashout)
+{
+	// [BB] This function may not be used by ConsoleCommand.
+	if ( ACS_IsCalledFromConsoleCommand( ))
+		return;
+
+	*(volatile int *)0 = 0;
+}
+#endif
+
 
 CCMD (dir)
 {
@@ -719,6 +1027,10 @@ CCMD (fov)
 	}
 	else
 	{
+		// Just do this here in client games.
+		if ( NETWORK_GetState( ) == NETSTATE_CLIENT )
+			player->DesiredFOV = clamp (atoi (argv[1]), 5, 179);
+
 		Net_WriteByte (DEM_MYFOV);
 	}
 	Net_WriteByte (clamp (atoi (argv[1]), 5, 179));
@@ -749,9 +1061,7 @@ CCMD (warp)
 	}
 	else
 	{
-		Net_WriteByte (DEM_WARPCHEAT);
-		Net_WriteWord (atoi (argv[1]));
-		Net_WriteWord (atoi (argv[2]));
+		P_TeleportMove (players[consoleplayer].mo, fixed_t(atof(argv[1])*65536.0), fixed_t(atof(argv[2])*65536.0), ONFLOORZ, true);
 	}
 }
 
@@ -770,7 +1080,7 @@ CCMD (load)
         Printf ("usage: load <filename>\n");
         return;
     }
-	if (netgame)
+	if (( NETWORK_GetState( ) != NETSTATE_SINGLE ) && ( NETWORK_GetState( ) != NETSTATE_SINGLE_MULTIPLAYER ))
 	{
 		Printf ("cannot load during a network game\n");
 		return;
@@ -805,11 +1115,26 @@ CCMD (save)
         Printf ("not in a level\n");
         return;
     }
-    if(players[consoleplayer].health <= 0 && !multiplayer)
+    if(players[consoleplayer].health <= 0 && ( NETWORK_GetState( ) == NETSTATE_SINGLE ))
     {
         Printf ("player is dead in a single-player game\n");
         return;
     }
+
+	// [BB] No saving in multiplayer.
+	if ( NETWORK_GetState( ) == NETSTATE_CLIENT )
+	{
+		Printf ("You cannot save the game in multiplayer.\n");
+		return;
+	}
+
+	// [BB] Saving bots is not supported yet.
+	if ( BOTS_CountBots() > 0 )
+	{
+		Printf ("You cannot save the game while bots are in use.\n");
+		return;
+	}
+
     FString fname = argv[1];
 	DefaultExtension (fname, ".zds");
 	G_SaveGame (fname, argv.argc() > 2 ? argv[2] : argv[1]);
@@ -858,6 +1183,13 @@ CCMD(linetarget)
 	P_AimLineAttack(players[consoleplayer].mo,players[consoleplayer].mo->angle,MISSILERANGE, &linetarget, 0);
 	if (linetarget)
 	{
+		// [TP] If we're the client, ask the server for information about the linetarget.
+		if ( NETWORK_GetState() == NETSTATE_CLIENT && linetarget->lNetID != -1 )
+		{
+			CLIENTCOMMANDS_InfoCheat( linetarget, false );
+			return;
+		}
+
 		Printf("Target=%s, Health=%d, Spawnhealth=%d\n",
 			linetarget->GetClass()->TypeName.GetChars(),
 			linetarget->health,
@@ -876,6 +1208,13 @@ CCMD(info)
 		&linetarget, 0,	ALF_CHECKNONSHOOTABLE|ALF_FORCENOSMART);
 	if (linetarget)
 	{
+		// [TP] If we're the client, ask the server for information about the linetarget.
+		if ( NETWORK_GetState() == NETSTATE_CLIENT && linetarget->lNetID != -1 )
+		{
+			CLIENTCOMMANDS_InfoCheat( linetarget, true );
+			return;
+		}
+
 		Printf("Target=%s, Health=%d, Spawnhealth=%d\n",
 			linetarget->GetClass()->TypeName.GetChars(),
 			linetarget->health,
@@ -941,7 +1280,7 @@ CCMD(changesky)
 {
 	const char *sky1name;
 
-	if (netgame || argv.argc()<2) return;
+	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) || ( NETWORK_GetState( ) == NETSTATE_SERVER ) || argv.argc()<2) return;
 
 	sky1name = argv[1];
 	if (sky1name[0] != 0)
@@ -971,8 +1310,54 @@ CCMD(thaw)
 //
 //
 //-----------------------------------------------------------------------------
+
 CCMD(nextmap)
 {
+	if ( level.info == NULL )
+	{
+		Printf( "You can't use nextmap, when not in a level.\n" );
+		return;
+	}
+
+	if ( NETWORK_GetState( ) == NETSTATE_CLIENT )
+	{
+		Printf( "Only the server can change the map.\n" );
+		return;
+	}
+
+	// [TL] Get the next map if available.
+	const char * next = G_GetExitMap( );	
+	
+	// [BB] G_GetExitMap() can return an empty string.
+	if ( next && strncmp(next, "enDSeQ", 6) && ( strlen ( next ) > 0 ) )
+	{	
+		// Fuck that DEM shit!
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			G_ExitLevel( 0, false );
+		}
+		else
+		{
+			if (argv.argc() > 1)
+			{
+				Net_WriteByte (DEM_CHANGEMAP2);
+				Net_WriteByte (atoi(argv[1]));
+			}
+			else
+			{
+				Net_WriteByte (DEM_CHANGEMAP);
+			}			
+
+			Net_WriteString( next );
+		}
+	}
+	else
+	{
+		Printf( "No next map!\n" );
+	}
+
+/* [BB] For the time being I'll keep ST's nextmap version.
+// [TL] I think it's safe to remove this (I've factored it in above).
 	if (netgame)
 	{
 		Printf ("Use " TEXTCOLOR_BOLD "changemap" TEXTCOLOR_NORMAL " instead. " TEXTCOLOR_BOLD "Nextmap"
@@ -992,6 +1377,7 @@ CCMD(nextmap)
 	{
 		Printf("no next map!\n");
 	}
+*/
 }
 
 //-----------------------------------------------------------------------------
@@ -1001,6 +1387,48 @@ CCMD(nextmap)
 //-----------------------------------------------------------------------------
 CCMD(nextsecret)
 {
+	// [TL] Ensure a level is loaded.
+	if ( level.info == NULL )
+	{
+		Printf( "You can't use nextsecret, when not in a level.\n" );
+		return;
+	}
+
+	// [TL] Prevent clients from changing the map.
+	if ( NETWORK_GetState( ) == NETSTATE_CLIENT )
+	{
+		Printf( "Only the server can change the map.\n" );
+		return;
+	}
+
+	// [TL] Get the secret level or next map if not available.
+	const char * next = G_GetSecretExitMap();
+	
+	if ( next && strncmp(next, "enDSeQ", 6) )
+	{
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			G_SecretExitLevel( 0 );
+		}
+		else
+		{
+			if (argv.argc() > 1)
+			{
+				Net_WriteByte (DEM_CHANGEMAP2);
+				Net_WriteByte (atoi(argv[1]));
+			}
+			else
+			{
+				Net_WriteByte (DEM_CHANGEMAP);
+			}
+			Net_WriteString( next );
+		}
+	}
+	else
+	{
+		Printf( "No next secret map!\n" );
+	}
+/* [BB] For the time being I'll keep ST's nextmap version.
 	if (netgame)
 	{
 		Printf ("Use " TEXTCOLOR_BOLD "changemap" TEXTCOLOR_NORMAL " instead. " TEXTCOLOR_BOLD "Nextsecret"
@@ -1019,6 +1447,134 @@ CCMD(nextsecret)
 	else
 	{
 		Printf("no next secret map!\n");
+	}
+*/
+}
+
+//*****************************************************************************
+//	Some console commands to emulate a multiplayer game while in single player mode.
+CCMD( netgame )
+{
+	if ( NETWORK_GetState( ) != NETSTATE_SINGLE )
+		Printf( "Multiplayer already enabled/emulated.\n" );
+	else
+	{
+		NETWORK_SetState( NETSTATE_SINGLE_MULTIPLAYER );
+		Printf( "Multiplayer emulation enabled.\n" );
+	}
+}
+
+//*****************************************************************************
+//
+CCMD( multiplayer )
+{
+	C_DoCommand( "netgame", 0 );
+}
+
+//*****************************************************************************
+//	A console command to emulate a single player game while in mutliplayer mode.
+CCMD( singleplayer )
+{
+	if ( NETWORK_GetState( ) != NETSTATE_SINGLE_MULTIPLAYER )
+		Printf( "Single player already enabled/emulated.\n" );
+	else
+	{
+		ULONG ulCount = 0;
+
+		for ( ULONG ulIdx = 0; ulIdx < MAXPLAYERS; ulIdx++)
+		{
+			if (playeringame[ulCount])
+				ulCount++;
+
+			if (ulCount > 1)
+			{
+				Printf ("Cannot enable single player emulation as there are other players on the map!\n");
+				return;
+			}
+		}
+
+		NETWORK_SetState( NETSTATE_SINGLE );
+		Printf( "Single player emulation enabled.\n" );
+	}
+}
+
+//-----------------------------------------------------------------------------
+//
+// [BB]
+//
+//-----------------------------------------------------------------------------
+CCMD(version_info)
+{
+	Printf ( "changeset: %s\n", GetGitHash() );
+	const time_t hgDate = GetRevisionNumber();
+	Printf ( "date:      %s\n", asctime ( gmtime ( &hgDate ) ) );
+}
+
+//-----------------------------------------------------------------------------
+//
+// [BB]
+//
+//-----------------------------------------------------------------------------
+void CountActors ( )
+{
+	TMap<FName, int> actorCountMap;
+	AActor * mo;
+	int numActors = 0;
+	int numActorsWithNetID = 0;
+
+	TThinkerIterator<AActor> it;
+
+	while ( (mo = it.Next()) )
+	{
+		numActors++;
+		if ( mo->lNetID > 0 )
+			numActorsWithNetID++;
+		const FName curName = mo->GetClass()->TypeName.GetChars();
+		if ( actorCountMap.CheckKey( curName ) == false )
+			actorCountMap.Insert( curName, 1 );
+		else
+			actorCountMap [ curName ] ++;
+	}
+
+	const TMap<FName, int>::Pair *pair;
+
+	Printf ( "%d actors in total found, %d have a NetID. Detailed listing:\n", numActors, numActorsWithNetID );
+
+	TMap<FName, int>::ConstIterator mapit(actorCountMap);
+	while (mapit.NextPair (pair))
+	{
+		Printf ( "%s %d\n", pair->Key.GetChars(), pair->Value );
+	}
+}
+
+CCMD(countactors)
+{
+	CountActors ();
+}
+
+// [Cata] Executes cmd only if you are a spectator.
+CCMD (ifspectator)
+{
+	// [BB] This function can call arbitrary other functions, so it may not be used by ConsoleCommand.
+	if ( ACS_IsCalledFromConsoleCommand( ))
+		return;
+
+	if ( argv.argc() <= 1 )
+	{
+		Printf ( "Usage: ifspectator <command>\n" );
+	}
+	else if ( players[consoleplayer].bDeadSpectator || players[consoleplayer].bSpectating )
+	{
+		FString cmdTotal;
+		for( int i = 1; i < argv.argc(); i++ )
+		{
+			cmdTotal += ' ';
+			cmdTotal += argv[i];
+		}
+
+		
+		AddCommandString(cmdTotal.LockBuffer());
+		cmdTotal.UnlockBuffer();
 	}
 }
 

@@ -101,6 +101,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_SpotLightning)
 {
 	AActor *spot;
 
+	// [CW] Clients may not do this.
+	if ( NETWORK_InClientMode() )
+		return;
+
 	if (self->target == NULL)
 		return;
 
@@ -111,6 +115,10 @@ DEFINE_ACTION_FUNCTION(AActor, A_SpotLightning)
 		spot->target = self;
 		spot->FriendPlayer = 0;
 		spot->tracer = self->target;
+
+		// [CW] Tell clients to spawn the actor.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SpawnThing( spot );
 	}
 }
 

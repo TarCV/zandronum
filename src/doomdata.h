@@ -429,6 +429,21 @@ struct FPlayerStart
 // Player spawn spots for deathmatch.
 extern TArray<FPlayerStart> deathmatchstarts;
 
+// [BC] Temporary team spawn spots.
+extern	TArray<FPlayerStart>	TemporaryTeamStarts;
+
+// [RC] Possession starts
+extern	TArray<FPlayerStart>	PossessionStarts;
+
+// [RC] Terminator starts
+extern	TArray<FPlayerStart>	TerminatorStarts;
+
+// [BC] Generic invasion spawn spots.
+extern	TArray<FPlayerStart>	GenericInvasionStarts;
+
+// [BB] All player starts, including those for voodoo dolls.
+extern	TArray<FPlayerStart>	AllStartsOfPlayer[MAXPLAYERS];
+
 // Player spawn spots.
 extern FPlayerStart playerstarts[MAXPLAYERS];
 extern TArray<FPlayerStart> AllPlayerStarts;

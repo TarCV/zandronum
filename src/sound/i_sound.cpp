@@ -49,10 +49,20 @@ extern HINSTANCE g_hInst;
 #include <stdlib.h>
 #include <stdarg.h>
 
+// [RC] We need this include this before networkshared.h (and the time.h reference there).
+#include <time.h>
+
+// [BB] This fixes a weird include problem under Linux and FreeBSD.
+#ifndef _WIN32
+#include "networkheaders.h"
+#endif
+
 #include "doomtype.h"
 #include <math.h>
 
+#ifndef NO_SOUND
 #include "fmodsound.h"
+#endif
 
 #include "m_swap.h"
 #include "stats.h"
@@ -238,9 +248,13 @@ public:
 
 void I_InitSound ()
 {
+#ifdef NO_SOUND
+	GSnd = new NullSoundRenderer;
+	I_InitMusic ();
+#else
 	/* Get command line options: */
-	nosound = !!Args->CheckParm ("-nosound");
-	nosfx = !!Args->CheckParm ("-nosfx");
+	nosound = !!Args->CheckParm ("-nosound") || !!Args->CheckParm("-host"); // [BB] No sound for the server
+	nosfx = !!Args->CheckParm ("-nosfx") || !!Args->CheckParm("-host"); // [BB]
 
 	if (nosound)
 	{
@@ -259,6 +273,7 @@ void I_InitSound ()
 	}
 	I_InitMusic ();
 	snd_sfxvolume.Callback ();
+#endif
 }
 
 

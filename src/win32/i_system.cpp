@@ -39,7 +39,7 @@
 #include <io.h>
 #include <direct.h>
 #include <string.h>
-#include <process.h>
+//#include <process.h>
 #include <time.h>
 
 #include <stdarg.h>
@@ -51,6 +51,9 @@
 #include <mmsystem.h>
 #include <richedit.h>
 #include <wincrypt.h>
+// [BB] New #includes.
+#include <shellapi.h>
+#include <shlobj.h>
 
 #define USE_WINDOWS_DWORD
 #include "hardware.h"
@@ -85,6 +88,12 @@
 #include "stats.h"
 #include "textures/bitmap.h"
 #include "textures/textures.h"
+// [BC] New #includes.
+#include "announcer.h"
+#include "network.h"
+#include "cl_demo.h"
+#include "cl_main.h"
+#include "campaign.h"
 
 // MACROS ------------------------------------------------------------------
 
@@ -126,6 +135,11 @@ static void DestroyCustomCursor();
 EXTERN_CVAR(String, language);
 EXTERN_CVAR (Bool, queryiwad);
 
+// Used on welcome/IWAD screen.
+EXTERN_CVAR (Int, vid_renderer)
+EXTERN_CVAR (Bool, fullscreen)
+
+
 extern HWND Window, ConWindow, GameTitleWindow;
 extern HANDLE StdOut;
 extern bool FancyStdOut;
@@ -143,6 +157,9 @@ UINT TimerEventID;
 UINT MillisecondsPerTic;
 HANDLE NewTicArrived;
 uint32 LanguageIDs[4];
+
+// [K6/BB]
+extern FString g_VersionWithOS;
 
 int (*I_GetTime) (bool saveMS);
 int (*I_WaitForTic) (int);
@@ -340,6 +357,35 @@ static int I_GetTimePolled(bool saveMS)
 	}
 
 	return ((tm-basetime)*TICRATE)/1000;
+}
+
+float I_GetTimeFloat( void )
+{
+	DWORD tm;
+
+	tm = timeGetTime();
+	if (!basetime)
+		basetime = tm;
+
+	return (( (float)tm - (float)basetime ) * (float)TICRATE ) / 1000.0f;
+}
+
+/*
+int I_GetMSElapsed( void )
+{
+	DWORD tm;
+
+	tm = timeGetTime();
+	if (!basetime)
+		basetime = tm;
+
+	return ( tm - basetime );
+}
+*/
+
+void I_Sleep( int iMS )
+{
+	Sleep( iMS );
 }
 
 //==========================================================================
@@ -608,6 +654,10 @@ void I_DetectOS(void)
 				osname,
 				info.dwMajorVersion, info.dwMinorVersion,
 				info.dwBuildNumber & 0xffff, info.szCSDVersion);
+		// [K6/BB]
+		g_VersionWithOS.Format ( "%s on Windows %s (%lu.%lu.%lu)", GetVersionStringRev(), osname,
+				info.dwMajorVersion, info.dwMinorVersion,
+				info.dwBuildNumber & 0xffff);
 	}
 	else
 	{
@@ -615,6 +665,10 @@ void I_DetectOS(void)
 				osname,
 				info.dwMajorVersion, info.dwMinorVersion,
 				info.dwBuildNumber, info.szCSDVersion);
+		// [K6/BB]
+		g_VersionWithOS.Format ( "%s on Windows %s (%lu.%lu.%lu)", GetVersionStringRev(), osname,
+				info.dwMajorVersion, info.dwMinorVersion,
+				info.dwBuildNumber);
 	}
 
 	if (OSPlatform == os_unknown)
@@ -751,6 +805,17 @@ void I_Init()
 	CalculateCPUSpeed();
 	DumpCPUInfo(&CPU);
 
+	// [BB] CalculateCPUSpeed() messes with the priority, so I think it's a good place
+	// to set the server priority afterwards.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS);
+
+		// [BB] The server doesn't call I_SelectTimer, so we have to set basetime manually.
+		if (!basetime)
+			basetime = timeGetTime();
+	}
+
 	I_GetTime = I_GetTimeSelect;
 	I_WaitForTic = I_WaitForTicSelect;
 
@@ -781,6 +846,10 @@ void I_Quit()
 	{
 		G_CheckDemoStatus();
 	}
+
+	// [BC] Support for client-side demos.
+	if ( CLIENTDEMO_IsRecording( ))
+		CLIENTDEMO_FinishRecording( );
 }
 
 
@@ -812,6 +881,10 @@ void STACK_ARGS I_FatalError(const char *error, ...)
 			fprintf(Logfile, "\n**** DIED WITH FATAL ERROR:\n%s\n", errortext);
 			fflush(Logfile);
 		}
+
+		// [BB] Tell the server we're leaving the game.
+		if ( NETWORK_GetState( ) == NETSTATE_CLIENT )
+			CLIENT_QuitNetworkGame( NULL );
 
 		throw CFatalError(errortext);
 	}
@@ -1072,16 +1145,6 @@ static void SetQueryIWad(HWND dialog)
 	HWND checkbox = GetDlgItem(dialog, IDC_DONTASKIWAD);
 	int state = (int)SendMessage(checkbox, BM_GETCHECK, 0, 0);
 	bool query = (state != BST_CHECKED);
-
-	if (!query && queryiwad)
-	{
-		MessageBox(dialog,
-			"You have chosen not to show this dialog box in the future.\n"
-			"If you wish to see it again, hold down SHIFT while starting " GAMENAME ".",
-			"Don't ask me this again",
-			MB_OK | MB_ICONINFORMATION);
-	}
-
 	queryiwad = query;
 }
 
@@ -1101,16 +1164,20 @@ BOOL CALLBACK IWADBoxCallback(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPa
 	switch (message)
 	{
 	case WM_INITDIALOG:
-		// Add our program name to the window title
-		{
-			TCHAR label[256];
-			FString newlabel;
+		char	szString[256];
 
-			GetWindowText(hDlg, label, countof(label));
-			newlabel.Format(GAMESIG " %s: %s", GetVersionString(), label);
-			SetWindowText(hDlg, newlabel.GetChars());
-		}
-		// Populate the list with all the IWADs found
+		// Set up our version string.
+		sprintf(szString, "Version %s.", GetVersionStringRev());
+		SetDlgItemText (hDlg, IDC_WELCOME_VERSION, szString);
+
+		// Check the current video settings.
+		SendDlgItemMessage( hDlg, vid_renderer ? IDC_WELCOME_OPENGL : IDC_WELCOME_SOFTWARE, BM_SETCHECK, BST_CHECKED, 0 );
+		SendDlgItemMessage( hDlg, IDC_WELCOME_FULLSCREEN, BM_SETCHECK, fullscreen ? BST_CHECKED : BST_UNCHECKED, 0 );
+
+		// Set the state of the "Don't ask me again" checkbox.
+		SendDlgItemMessage ( hDlg, IDC_DONTASKIWAD, BM_SETCHECK, queryiwad ? BST_UNCHECKED : BST_CHECKED, 0);
+				
+		// Populate the list with all the IWADs found.
 		ctrl = GetDlgItem(hDlg, IDC_IWADLIST);
 		for (i = 0; i < NumWads; i++)
 		{
@@ -1124,13 +1191,12 @@ BOOL CALLBACK IWADBoxCallback(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPa
 			SendMessage(ctrl, LB_ADDSTRING, 0, (LPARAM)work.GetChars());
 			SendMessage(ctrl, LB_SETITEMDATA, i, (LPARAM)i);
 		}
+
+		// Select the current IWAD in the list.
 		SendMessage(ctrl, LB_SETCURSEL, DefaultWad, 0);
 		SetFocus(ctrl);
-		// Set the state of the "Don't ask me again" checkbox
-		ctrl = GetDlgItem(hDlg, IDC_DONTASKIWAD);
-		SendMessage(ctrl, BM_SETCHECK, queryiwad ? BST_UNCHECKED : BST_CHECKED, 0);
-		// Make sure the dialog is in front. If SHIFT was pressed to force it visible,
-		// then the other window will normally be on top.
+
+		// Make sure the dialog is in front. If SHIFT was pressed to force it visible, then the main window will normally be on top.
 		SetForegroundWindow(hDlg);
 		break;
 
@@ -1139,10 +1205,40 @@ BOOL CALLBACK IWADBoxCallback(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPa
 		{
 			EndDialog (hDlg, -1);
 		}
-		else if (LOWORD(wParam) == IDOK ||
-			(LOWORD(wParam) == IDC_IWADLIST && HIWORD(wParam) == LBN_DBLCLK))
+		else if(LOWORD(wParam) == IDC_DONTASKIWAD)
+		{
+			char	szString[256];
+			char	szKey[6];
+
+			// Determine the curent setting.
+			I_GetWelcomeScreenKeyString( szKey );
+
+			// If checked, show the label indicating which key to press.
+			if(SendDlgItemMessage( hDlg, IDC_DONTASKIWAD, BM_GETCHECK, 0, 0 ) == BST_CHECKED)
+				sprintf(szString, "Hold <%s> on startup to show this screen.", szKey);
+			else
+				strcpy(szString, "");	// Hide it.
+
+			SetDlgItemText (hDlg, IDC_WELCOME_SHIFTLABEL, szString);
+		}
+		else if(LOWORD(wParam) == IDC_WELCOME_COMPAT)
+		{
+			// Tell the user about this setting.
+			if(SendDlgItemMessage( hDlg, IDC_WELCOME_COMPAT, BM_GETCHECK, 0, 0 ) == BST_CHECKED)
+				strcpy(szString, "This setting should only be used if you're having problems.");
+			else
+				strcpy(szString, "");	// Hide it.
+
+			SetDlgItemText (hDlg, IDC_WELCOME_SHIFTLABEL, szString);
+		}
+
+
+		else if (LOWORD(wParam) == IDOK
+			/* [RC] No longer the primary control. > || (LOWORD(wParam) == IDC_IWADLIST && HIWORD(wParam) == LBN_DBLCLK)<*/)
 		{
 			SetQueryIWad(hDlg);
+			vid_renderer = SendDlgItemMessage( hDlg, IDC_WELCOME_OPENGL, BM_GETCHECK, 0, 0 ) == BST_CHECKED;
+			fullscreen = SendDlgItemMessage( hDlg, IDC_WELCOME_FULLSCREEN, BM_GETCHECK, 0, 0 ) == BST_CHECKED;
 			ctrl = GetDlgItem (hDlg, IDC_IWADLIST);
 			EndDialog(hDlg, SendMessage (ctrl, LB_GETCURSEL, 0, 0));
 		}
@@ -1159,22 +1255,233 @@ BOOL CALLBACK IWADBoxCallback(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPa
 //
 //==========================================================================
 
-int I_PickIWad(WadStuff *wads, int numwads, bool showwin, int defaultiwad)
+int I_GetWelcomeScreenKeyCode( void )
 {
-	int vkey;
+	int vkey = 0;
 
 	if (stricmp(queryiwad_key, "shift") == 0)
-	{
 		vkey = VK_SHIFT;
-	}
 	else if (stricmp(queryiwad_key, "control") == 0 || stricmp (queryiwad_key, "ctrl") == 0)
-	{
 		vkey = VK_CONTROL;
-	}
-	else
+
+	return vkey;
+}
+
+
+void I_GetWelcomeScreenKeyString( char *pszString )
+{
+	switch(I_GetWelcomeScreenKeyCode())
 	{
-		vkey = 0;
+		case VK_CONTROL:
+			strcpy(pszString, "CTRL");
+			break;
+		default:
+		case VK_SHIFT:
+			strcpy(pszString, "SHIFT");
 	}
+}
+
+//==========================================================================
+// "No IWAD" setup dialog
+//==========================================================================
+
+static	HWND		g_hDlg_NoIWAD;
+static	HWND		g_hDlg_NoIWAD_Welcome;
+static	HWND		g_hDlg_NoIWAD_NoDoom;
+static	HWND		g_hDlg_NoIWAD_Redirect;
+static	HBRUSH		g_hWhiteBrush;
+
+//==========================================================================
+//
+// I_ShowDirectoryBrowser
+//
+// Shows the Windows "select a directory" dialog.
+// Returns whether successful; if so, copies the path into pszBuffer.
+//
+//==========================================================================
+
+bool I_ShowDirectoryBrowser( HWND hDlg, char *pszBuffer, const char *pszDisplayTitle )
+{
+	BROWSEINFO   bi;
+	ZeroMemory( &bi, sizeof( bi )); 
+	TCHAR   szDisplayName[MAX_PATH]; 
+	szDisplayName[0] = 0;  
+
+	bi.hwndOwner        =   hDlg; 
+	bi.pidlRoot         =   NULL; 
+	bi.pszDisplayName   =   szDisplayName; 
+	bi.lpszTitle        =   pszDisplayTitle; 
+	bi.ulFlags          =   BIF_RETURNONLYFSDIRS;
+	bi.lParam           =   NULL; 
+	bi.iImage           =   0;  
+
+	LPITEMIDLIST pidl = SHBrowseForFolder( &bi );
+	if ( pidl && SHGetPathFromIDList( pidl, pszBuffer ))
+		return true;
+	else
+		return false;
+}
+
+//*****************************************************************************
+//
+BOOL CALLBACK NoIWADBox_Welcome_Callback (HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	// "I don't have Doom!" clicked. Advance to the next screen.
+	if ( message == WM_COMMAND && LOWORD( wParam ) == IDC_NODOOM )
+	{
+		SetWindowPos( g_hDlg_NoIWAD_Welcome, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_HIDEWINDOW );			
+		SetWindowPos( g_hDlg_NoIWAD_NoDoom, NULL, 0, 55, 450, 200, SWP_NOZORDER );
+		return FALSE; 
+	}
+	// "Browse" button clicked.
+	else if ( message == WM_COMMAND && LOWORD( wParam ) == IDC_BROWSE )
+	{
+		char szPathName[MAX_PATH]; 
+		if ( !I_ShowDirectoryBrowser( hDlg, szPathName, "Please select the folder where Doom is installed.\nWe're looking for doom.wad or doom2.wad." ))
+			return FALSE;
+
+		// See if this directory contains any IWADs.
+		FIWadManager *iwad_man = new FIWadManager;
+		const bool haveIWADs = iwad_man->DoesDirectoryHaveIWADs( szPathName );
+		delete iwad_man;
+		if ( haveIWADs )
+		{
+			// Add this directory to the user's profile, restart, and play!
+			if ( GameConfig->SetSection ("IWADSearch.Directories"))
+			{
+				GameConfig->SetValueForKey ("Path", szPathName, true);
+				GameConfig->WriteConfigFile();
+
+				FString arguments = "";
+				for ( int i = 1; i < Args->NumArgs(); i++ )
+					arguments.AppendFormat( "%s ", Args->GetArg(i) );
+				ShellExecute( hDlg, "open", Args->GetArg( 0 ), arguments.GetChars( ), NULL, SW_SHOW );
+
+				exit( 0 );
+			}
+		}
+		else
+			MessageBox( hDlg, "No IWADs were found in that folder.\n\nPlease select the folder that contains your copy of doom.wad or doom2.wad.", "Couldn't find Doom", MB_ICONEXCLAMATION );
+	}
+	return FALSE;
+}
+
+//*****************************************************************************
+//
+BOOL CALLBACK NoIWADBox_NoDoom_Callback (HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	if ( message == WM_COMMAND && (( LOWORD( wParam ) == IDC_USESTEAM ) || ( LOWORD( wParam ) == IDC_USEFREEDOOM )))
+	{
+		if ( LOWORD( wParam ) == IDC_USESTEAM )
+		{
+			I_RunProgram( "http://" DOMAIN_NAME "/go/buydoom/" );
+			SetDlgItemText( g_hDlg_NoIWAD_Redirect, IDC_REDIRECTING2, "After you've downloaded Doom 2, simply restart " GAMENAME "." );
+		}
+		else if ( LOWORD( wParam ) == IDC_USEFREEDOOM )
+		{
+			I_RunProgram( "http://" DOMAIN_NAME "/go/freedoom/" );
+			SetDlgItemText( g_hDlg_NoIWAD_Redirect, IDC_REDIRECTING2, "After downloading, simply extract doom2.wad into the " GAMENAME " directory." );
+			SetDlgItemText( g_hDlg_NoIWAD_Redirect, IDC_RESTART, "Done" );
+		}
+
+		// Advance to the redirect page.
+		SendMessage( GetDlgItem( g_hDlg_NoIWAD_Redirect, IDC_REDIRECTING1 ), WM_SETFONT, (WPARAM) CreateFont( 13, 0, 0, 0, 600, 0, 0, 0, 0, 0, 0, 0, 0, "Tahoma" ), (LPARAM) 1 );
+		SetWindowPos( g_hDlg_NoIWAD_NoDoom, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_HIDEWINDOW );			
+		SetWindowPos( g_hDlg_NoIWAD_Redirect, NULL, 0, 55, 450, 200, SWP_NOZORDER );
+	}
+	return FALSE; 
+}
+
+//*****************************************************************************
+//
+BOOL CALLBACK NoIWADBox_Redirect_Callback (HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	// "Restart" button clicked.
+	if ( message == WM_COMMAND && LOWORD( wParam ) == IDC_RESTART )
+	{
+		FString arguments = "";
+		for ( int i = 1; i < Args->NumArgs(); i++ )
+			arguments.AppendFormat( "%s ", Args->GetArg(i) );
+		ShellExecute( hDlg, "open", Args->GetArg( 0 ), arguments.GetChars( ), NULL, SW_SHOW );
+		exit( 0 );
+	}
+	return FALSE;
+}
+
+//*****************************************************************************
+//
+void main_PaintRectangle( HDC hDC, RECT *rect, COLORREF color )
+{
+	COLORREF oldcr = SetBkColor( hDC, color );
+	ExtTextOut( hDC, 0, 0, ETO_OPAQUE, rect, "", 0, 0 );
+	SetBkColor( hDC, oldcr );
+}
+
+//*****************************************************************************
+//
+BOOL CALLBACK NoIWADBoxCallback (HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	switch (message)
+	{
+	case WM_CLOSE:
+
+		EndDialog( hDlg, -1 );
+		break;
+	case WM_INITDIALOG:
+		{
+			g_hDlg_NoIWAD = hDlg;
+
+			// Format the top of the dialog.
+			SendMessage( GetDlgItem( hDlg, IDC_STTITLE ), WM_SETFONT, (WPARAM) CreateFont( 19, 0, 0, 0, 600, 0, 0, 0, 0, 0, 0, 0, 0, "Tahoma" ), (LPARAM) 1 );
+			LOGBRUSH LogBrush;
+			LogBrush.lbStyle = BS_SOLID;
+			LogBrush.lbColor = RGB( 255, 255, 255 );
+			g_hWhiteBrush = CreateBrushIndirect( &LogBrush );
+
+			// Create the child dialogs.
+			if ( g_hDlg_NoIWAD_Welcome == NULL )
+			{
+				g_hDlg_NoIWAD_Welcome = CreateDialogParam( g_hInst, MAKEINTRESOURCE( IDD_NOIWADS_WELCOME ), hDlg, (DLGPROC)NoIWADBox_Welcome_Callback, NULL );
+				g_hDlg_NoIWAD_NoDoom = CreateDialogParam( g_hInst, MAKEINTRESOURCE( IDD_NOIWADS_NODOOM ), hDlg, (DLGPROC)NoIWADBox_NoDoom_Callback, NULL );
+				g_hDlg_NoIWAD_Redirect = CreateDialogParam( g_hInst, MAKEINTRESOURCE( IDD_NOIWADS_REDIRECT ), hDlg, (DLGPROC)NoIWADBox_Redirect_Callback, NULL );
+				SetParent( g_hDlg_NoIWAD_Welcome, hDlg );
+				SetParent( g_hDlg_NoIWAD_NoDoom, hDlg );
+				SetParent( g_hDlg_NoIWAD_Redirect, hDlg );
+				SetWindowPos( g_hDlg_NoIWAD_Welcome, NULL, 0, 55, 450, 250, SWP_NOZORDER );
+			}
+		}
+		break;
+	case WM_CTLCOLORSTATIC:
+
+		if ( GetDlgCtrlID( (HWND)lParam ) == IDC_STTITLE || GetDlgCtrlID( (HWND)lParam ) == IDI_ICONST ) // Paint the title label's background white.
+			return (LRESULT) g_hWhiteBrush;			
+		else
+			return NULL;
+	case WM_PAINT:
+		{
+			// Paint the top of the form white.
+			PAINTSTRUCT Ps;
+			RECT r;
+			r.left = 0;
+			r.top = 0;
+			r.bottom = 55;
+			r.right = 500;
+			main_PaintRectangle( BeginPaint(hDlg, &Ps), &r, RGB(255, 255, 255));
+		}
+	}
+	return FALSE;
+}
+
+//*****************************************************************************
+//
+void I_ShowNoIWADsScreen( void )
+{
+	DialogBox( g_hInst, MAKEINTRESOURCE(IDD_NOIWADS), NULL, (DLGPROC)NoIWADBoxCallback );
+}
+
+int I_PickIWad (WadStuff *wads, int numwads, bool showwin, int defaultiwad)
+{
+	int vkey = I_GetWelcomeScreenKeyCode();
 	if (showwin || (vkey != 0 && GetAsyncKeyState(vkey)))
 	{
 		WadList = wads;
@@ -1608,4 +1915,10 @@ FString I_GetLongPathName(FString shortpath)
 	FString longpath(buff, buffsize2);
 	delete[] buff;
 	return longpath;
+}
+
+// [RC] Lunches the path given. This was encapsulated to make wrangling with #includes easier.
+void I_RunProgram( const char *szPath )
+{
+	ShellExecute( NULL, "open", szPath, NULL, NULL, SW_SHOW );
 }

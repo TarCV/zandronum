@@ -25,7 +25,7 @@
 void BlastActor (AActor *victim, fixed_t strength, fixed_t speed, AActor * Owner, const PClass * blasteffect, bool dontdamage)
 {
 	angle_t angle,ang;
-	AActor *mo;
+	AActor *mo = NULL; // [BB] Initialize with NULL.
 	fixed_t x,y,z;
 
 	if (!victim->SpecialBlastHandling (Owner, strength))
@@ -76,6 +76,22 @@ void BlastActor (AActor *victim, fixed_t strength, fixed_t speed, AActor * Owner
 		victim->flags6 &= ~MF6_ARMED; // Disarm
 		P_DamageMobj(victim, Owner, Owner, victim->health, NAME_Melee, DMG_FORCED);
 	}
+
+	// [BB] If we're the server, tell clients about all they need to know here.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		SERVERCOMMANDS_MoveThingExact( victim, CM_MOMX|CM_MOMY|CM_MOMZ );
+		// [BB] Non-players got the blasted flag above.
+		if ( victim->player == false )
+			SERVERCOMMANDS_SetThingFlags( victim, FLAGSET_FLAGS2 );
+		// [BB] Spawn the blast effect if necessary.
+		if ( mo )
+		{
+			SERVERCOMMANDS_SpawnThing( mo );
+			// [BB] Possibly set mo's momentum.
+			SERVER_SetThingNonZeroAngleAndMomentum( mo );
+		}
+	}
 }
 
 enum
@@ -117,6 +133,10 @@ DEFINE_ACTION_FUNCTION_PARAMS (AActor, A_Blast)
 
 	S_Sound (self, CHAN_AUTO, blastsound, 1, ATTN_NORM);
 
+	// [BB] The server handles anything except for the sound.
+	if ( NETWORK_InClientMode() )
+		return;
+
 	if (!(blastflags & BF_DONTWARN)) P_NoiseAlert (self, self);
 
 	while ( (mo = iterator.Next ()) )
@@ -141,6 +161,11 @@ DEFINE_ACTION_FUNCTION_PARAMS (AActor, A_Blast)
 		{	// Must be monster, player, missile, touchy or vulnerable
 			continue;
 		}
+
+		// [BB] Don't affect spectators.
+		if ( mo->player && mo->player->bSpectating )
+			continue;
+
 		dist = P_AproxDistance (self->x - mo->x, self->y - mo->y);
 		if (dist > radius)
 		{ // Out of range
