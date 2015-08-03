@@ -61,7 +61,6 @@
 #include "d_protocol.h"
 #include "v_text.h"
 #include "s_sndseq.h"
-#include "b_bot.h"
 #include "sc_man.h"
 #include "sbar.h"
 #include "a_lightning.h"
@@ -83,8 +82,31 @@
 #include "r_data/colormaps.h"
 #include "farchive.h"
 #include "r_renderer.h"
-
+// [BB] New #includes.
+#include "cl_main.h"
+#include "deathmatch.h"
+#include "network.h"
+#include "sv_commands.h"
+#include "sv_rcon.h"
+#include "team.h"
+#include "maprotation.h"
+#include "campaign.h"
+#include "duel.h"
+#include "lastmanstanding.h"
+#include "scoreboard.h"
+#include "campaign.h"
+#include "joinqueue.h"
+#include "sv_save.h"
+#include "cooperative.h"
+#include "invasion.h"
+#include "possession.h"
+#include "cl_demo.h"
+#include "callvote.h"
+#include "win32/g15/g15.h"
 #include "gi.h"
+#include "survival.h"
+#include "network/nettraffic.h"
+#include <set> // [CK] For CCMD listmusic
 
 #include "g_hub.h"
 
@@ -108,6 +130,7 @@ void G_VerifySkill();
 
 
 static FRandom pr_classchoice ("RandomPlayerClassChoice");
+static	FRandom		g_RandomMapSeed( "MapSeed" );
 
 extern level_info_t TheDefaultLevelInfo;
 extern bool timingdemo;
@@ -163,12 +186,6 @@ void G_DeferedInitNew (FGameStartup *gs)
 
 CCMD (map)
 {
-	if (netgame)
-	{
-		Printf ("Use " TEXTCOLOR_BOLD "changemap" TEXTCOLOR_NORMAL " instead. " TEXTCOLOR_BOLD "Map"
-				TEXTCOLOR_NORMAL " is for single-player only.\n");
-		return;
-	}
 	if (argv.argc() > 1)
 	{
 		try
@@ -179,6 +196,30 @@ CCMD (map)
 			}
 			else
 			{
+				if ( sv_maprotation )
+					MAPROTATION_SetPositionToMap( argv[1] );
+
+				// Tell the clients about the mapchange.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+					SERVER_ReconnectNewLevel( argv[1] );
+
+				// Tell the server we're leaving the game.
+				if ( NETWORK_GetState( ) == NETSTATE_CLIENT )
+					CLIENT_QuitNetworkGame( NULL );
+
+				// Turn campaign mode back on.
+				CAMPAIGN_EnableCampaign( );
+
+				// Reset the duel and LMS modules.
+				if ( duel )
+					DUEL_SetState( DS_WAITINGFORPLAYERS );
+				if ( lastmanstanding || teamlms )
+					LASTMANSTANDING_SetState( LMSS_WAITINGFORPLAYERS );
+				if ( possession || teampossession )
+					POSSESSION_SetState( PSNS_WAITINGFORPLAYERS );
+				if ( invasion )
+					INVASION_SetState( IS_WAITINGFORPLAYERS );
+
 				G_DeferedInitNew (argv[1]);
 			}
 		}
@@ -201,7 +242,8 @@ CCMD (map)
 
 CCMD (open)
 {
-	if (netgame)
+	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
+		( NETWORK_GetState( ) == NETSTATE_SERVER ))
 	{
 		Printf ("You cannot use open in multiplayer games.\n");
 		return;
@@ -238,13 +280,17 @@ void G_NewInit ()
 
 	G_ClearSnapshots ();
 	ST_SetNeedRefresh();
-	netgame = false;
-	multiplayer = false;
 	if (demoplayback)
 	{
 		C_RestoreCVars ();
 		demoplayback = false;
 		D_SetupUserInfo ();
+	}
+	// [BC] Support for client-side demos.
+	if ( CLIENTDEMO_IsPlaying( ))
+	{
+		CLIENTDEMO_FinishPlaying( );
+		D_SetupUserInfo( );
 	}
 	for (i = 0; i < MAXPLAYERS; ++i)
 	{
@@ -261,7 +307,18 @@ void G_NewInit ()
 	}
 	BackupSaveName = "";
 	consoleplayer = 0;
+
+	// [BC] Potentially need to reset userinfo if we left a server.
+	D_SetupUserInfo( );
+
 	NextSkill = -1;
+
+	// [BB] For certain game modes, we need to reset the current state,
+	// since it's possible that we were in the middle of a game when
+	// deciding to start a new game.
+	// TODO: Check if this needs to be done for other game modes.
+	if ( survival )
+		SURVIVAL_SetState( SURVS_WAITINGFORPLAYERS );
 }
 
 //==========================================================================
@@ -272,7 +329,11 @@ void G_NewInit ()
 void G_DoNewGame (void)
 {
 	G_NewInit ();
-	playeringame[consoleplayer] = 1;
+
+	// [BC] Don't do this for the server.
+	if ( NETWORK_GetState( ) != NETSTATE_SERVER )
+		playeringame[consoleplayer] = 1;
+
 	if (d_skill != -1)
 	{
 		gameskill = d_skill;
@@ -281,6 +342,7 @@ void G_DoNewGame (void)
 	gameaction = ga_nothing;
 }
 
+void SERVERCONSOLE_SetupColumns( void );
 //==========================================================================
 //
 // Initializes player classes in case they are random.
@@ -320,7 +382,15 @@ void G_InitNew (const char *mapname, bool bTitleLevel)
 	int i;
 
 	G_ClearHubInfo();
-	if (!savegamerestore)
+
+	// [BB] If there is a free spectator player from the last map, be sure to get rid of it.
+	if ( CLIENTDEMO_IsPlaying() )
+		CLIENTDEMO_ClearFreeSpectatorPlayer();
+
+	// [BC] Clients need to keep their snapshots around for hub purposes, and since
+	// they always use G_InitNew (which they probably shouldn't).
+	if ((!savegamerestore) &&
+		( NETWORK_InClientMode() == false ))
 	{
 		G_ClearSnapshots ();
 		P_RemoveDefereds ();
@@ -330,9 +400,16 @@ void G_InitNew (const char *mapname, bool bTitleLevel)
 			wadlevelinfos[i].flags = wadlevelinfos[i].flags & ~LEVEL_VISITED;
 	}
 
-	UnlatchCVars ();
+	if ( NETWORK_InClientMode() == false )
+	{
+		UnlatchCVars ();
+	}
+	
 	G_VerifySkill();
-	UnlatchCVars ();
+	if ( NETWORK_InClientMode() == false )
+	{
+		UnlatchCVars ();
+	}
 
 	if (paused)
 	{
@@ -340,51 +417,68 @@ void G_InitNew (const char *mapname, bool bTitleLevel)
 		S_ResumeSound (false);
 	}
 
+	// [BC] Reset the end level delay.
+	GAME_SetEndLevelDelay( 0 );
+
+	// [BC] Clear out the botspawn table.
+	BOTSPAWN_ClearTable( );
+
+	// [BC] Clear out the called vote if one is taking place.
+	CALLVOTE_ClearVote( );
+
 	if (StatusBar != NULL)
 	{
 		StatusBar->Destroy();
 		StatusBar = NULL;
 	}
-	if (bTitleLevel)
+	// Server has no status bar.
+	if ( NETWORK_GetState( ) != NETSTATE_SERVER )
 	{
-		StatusBar = new DBaseStatusBar (0);
-	}
-	else if (SBarInfoScript[SCRIPT_CUSTOM] != NULL)
-	{
-		int cstype = SBarInfoScript[SCRIPT_CUSTOM]->GetGameType();
-
-		//Did the user specify a "base"
-		if(cstype == GAME_Strife)
+		if (bTitleLevel)
 		{
-			StatusBar = CreateStrifeStatusBar();
+			StatusBar = new DBaseStatusBar (0);
 		}
-		else if(cstype == GAME_Any) //Use the default, empty or custom.
+		else
+			StatusBar = CreateStatusBar ();
+		/*  [BB] Moved to CreateStatusBar()
+		else if (SBarInfoScript[SCRIPT_CUSTOM] != NULL)
 		{
-			StatusBar = CreateCustomStatusBar(SCRIPT_CUSTOM);
+			int cstype = SBarInfoScript[SCRIPT_CUSTOM]->GetGameType();
+
+			//Did the user specify a "base"
+			if(cstype == GAME_Strife)
+			{
+				StatusBar = CreateStrifeStatusBar();
+			}
+			else if(cstype == GAME_Any) //Use the default, empty or custom.
+			{
+				StatusBar = CreateCustomStatusBar(SCRIPT_CUSTOM);
 		}
 		else
 		{
 			StatusBar = CreateCustomStatusBar(SCRIPT_DEFAULT);
+			}
 		}
+		if (StatusBar == NULL)
+		{
+			if (gameinfo.gametype & (GAME_DoomChex|GAME_Heretic|GAME_Hexen))
+			{
+				StatusBar = CreateCustomStatusBar (SCRIPT_DEFAULT);
+			}
+			else if (gameinfo.gametype == GAME_Strife)
+			{
+				StatusBar = CreateStrifeStatusBar ();
+			}
+			else
+			{
+				StatusBar = new DBaseStatusBar (0);
+			}
+		}
+		GC::WriteBarrier(StatusBar);
+		*/
+		StatusBar->AttachToPlayer (&players[consoleplayer]);
+		StatusBar->NewGame ();
 	}
-	if (StatusBar == NULL)
-	{
-		if (gameinfo.gametype & (GAME_DoomChex|GAME_Heretic|GAME_Hexen))
-		{
-			StatusBar = CreateCustomStatusBar (SCRIPT_DEFAULT);
-		}
-		else if (gameinfo.gametype == GAME_Strife)
-		{
-			StatusBar = CreateStrifeStatusBar ();
-		}
-		else
-		{
-			StatusBar = new DBaseStatusBar (0);
-		}
-	}
-	GC::WriteBarrier(StatusBar);
-	StatusBar->AttachToPlayer (&players[consoleplayer]);
-	StatusBar->NewGame ();
 	setsizeneeded = true;
 
 	if (gameinfo.gametype == GAME_Strife || (SBarInfoScript[SCRIPT_CUSTOM] != NULL && SBarInfoScript[SCRIPT_CUSTOM]->GetGameType() == GAME_Strife))
@@ -408,20 +502,29 @@ void G_InitNew (const char *mapname, bool bTitleLevel)
 
 	if (!savegamerestore)
 	{
-		if (!netgame)
-		{ // [RH] Change the random seed for each new single player game
-			rngseed = rngseed + 1;
+		// [BC] Support for client-side demos.
+		if (!demoplayback && ( CLIENTDEMO_IsPlaying( ) == false ))
+		{
+			// [BB] Change the random seed also for multiplayer 'map' changes
+			if ( NETWORK_GetState( ) != NETSTATE_CLIENT )
+			{ // [RH] Change the random seed for each new single player game
+				rngseed = rngseed + 1;
+			}
+			FRandom::StaticClearRandom ();
 		}
-		FRandom::StaticClearRandom ();
 		P_ClearACSVars(true);
 		level.time = 0;
 		level.maptime = 0;
 		level.totaltime = 0;
 
-		if (!multiplayer || !deathmatch)
+		// [BC] Changed multiplayer, added teamgame.
+		if ( NETWORK_GetState( ) == NETSTATE_SINGLE || !( deathmatch || teamgame ))
 		{
 			InitPlayerClasses ();
 		}
+
+		// Reset timer for "Welcome" messages.
+		GAME_SetLevelIntroTicks( 0 );
 
 		// force players to be initialized upon first level load
 		for (i = 0; i < MAXPLAYERS; i++)
@@ -430,18 +533,31 @@ void G_InitNew (const char *mapname, bool bTitleLevel)
 		STAT_StartNewGame(mapname);
 	}
 
-	usergame = !bTitleLevel;		// will be set false if a demo
+	usergame = !bTitleLevel;				// will be set false if a demo
 	paused = 0;
 	demoplayback = false;
 	automapactive = false;
-	viewactive = true;
+	// [BC] Support for client-side demos.
+	CLIENTDEMO_SetPlaying( false );
+
+	// [BC] If we're a client receiving a snapshot, don't make the view active just yet.
+	if (( NETWORK_GetState( ) != NETSTATE_CLIENT ) ||
+		( CLIENT_GetConnectionState( ) != CTS_RECEIVINGSNAPSHOT ))
+	{
+		viewactive = true;
+	}
+	else
+		viewactive = false;
+
 	V_SetBorderNeedRefresh();
 
+	/* [BB] Zandronum treats bots differently.
 	//Added by MC: Initialize bots.
 	if (!deathmatch)
 	{
 		bglobal.Init ();
 	}
+	*/
 
 	if (mapname != level.mapname)
 	{
@@ -455,7 +571,11 @@ void G_InitNew (const char *mapname, bool bTitleLevel)
 	{
 		gamestate = GS_LEVEL;
 	}
+	// [BB] Somehow G_DoLoadLevel alters the contents of mapname. This causes the "Frags" bug.
 	G_DoLoadLevel (0, false);
+
+//	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+//		SERVERCONSOLE_SetupColumns( );
 }
 
 //
@@ -544,12 +664,23 @@ void G_ChangeLevel(const char *levelname, int position, int flags, int nextSkill
 	}
 	changeflags = flags;
 
-	bglobal.End();	//Added by MC:
-
 	// [RH] Give scripts a chance to do something
 	unloading = true;
 	FBehavior::StaticStartTypedScripts (SCRIPT_Unloading, NULL, false, 0, true);
 	unloading = false;
+
+	// [BC] If we're the server, tell clients that the map has finished.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		SERVERCOMMANDS_MapExit( position, nextlevel.GetChars() );
+
+		// [BB] It's possible that the selected next map doesn't coincide with the next map
+		// in the rotation, e.g. exiting to a secret map allows to leave the rotation.
+		// In this case, we may not advance to the next map in the rotation.
+		if ( ( MAPROTATION_GetNextMap( ) != NULL )
+			&& ( stricmp ( MAPROTATION_GetNextMap( )->mapname, nextlevel.GetChars() ) == 0 ) )
+			MAPROTATION_AdvanceMap();
+	}
 
 	STAT_ChangeLevel(nextlevel);
 
@@ -569,9 +700,16 @@ void G_ChangeLevel(const char *levelname, int position, int flags, int nextSkill
 			// Un-crouch all players here.
 			player->Uncrouch();
 
+			// [BB] sv_maxlives is meant to specify the number of lives per map.
+			// So restore ulLivesLeft after a map change.
+			if ( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode( )) & GMF_USEMAXLIVES )
+			{
+				PLAYER_SetLivesLeft ( player, GAMEMODE_GetMaxLives() - 1 );
+			}
+
 			// If this is co-op, respawn any dead players now so they can
 			// keep their inventory on the next map.
-			if ((multiplayer || level.flags2 & LEVEL2_ALLOWRESPAWN) && !deathmatch && player->playerstate == PST_DEAD)
+			if (((NETWORK_GetState( ) != NETSTATE_SINGLE) || level.flags2 & LEVEL2_ALLOWRESPAWN) && !deathmatch && player->playerstate == PST_DEAD)
 			{
 				// Copied from the end of P_DeathThink [[
 				player->cls = NULL;		// Force a new class if the player is using a random class
@@ -587,19 +725,60 @@ void G_ChangeLevel(const char *levelname, int position, int flags, int nextSkill
 	}
 }
 
-//==========================================================================
+//=============================================================================
 //
+//	[BC] G_GetExitMap
 //
-//==========================================================================
-
+//	Returns what the name of the next level should be. Takes into account
+//	dmflags and map rotation.
+//
+//=============================================================================
 const char *G_GetExitMap()
 {
+	if ( level.flags & LEVEL_CHANGEMAPCHEAT )
+	{
+		// [BB] We need to update the maprotation if the changemap cheat is used.
+		if ( sv_maprotation )
+			MAPROTATION_SetPositionToMap( level.nextmap );
+
+		return ( level.nextmap );
+	}
+
+	// If we failed a campaign, just stay on the current map.
+	if (( CAMPAIGN_InCampaign( )) &&
+		( invasion == false ) &&
+		( CAMPAIGN_DidPlayerBeatMap( ) == false ))
+	{
+		return ( level.mapname );
+	}
+	// If using the same level dmflag, just stay on the current map.
+	else if (( dmflags & DF_SAME_LEVEL ) &&
+		( deathmatch || teamgame ))
+	{
+		return ( level.mapname );
+	}
+	// If we're using the lobby cvar and we're not in the lobby already, the lobby is the next map.
+	else if ( GAMEMODE_IsNextMapCvarLobby( ) )
+	{
+		return lobby;
+	}
+	// Check to see if we're using map rotation.
+	else if (( sv_maprotation ) &&
+			 ( NETWORK_GetState( ) == NETSTATE_SERVER ) &&
+			 ( MAPROTATION_GetNumEntries( ) != 0 ))
+	{
+		// [BB] It's possible that G_GetExitMap() is called multiple times before a map change.
+		// Therefore we may not advance the map, but just peek at it.
+		return ( MAPROTATION_GetNextMap( )->mapname );
+	}
+
 	return level.nextmap;
 }
 
 const char *G_GetSecretExitMap()
 {
-	const char *nextmap = level.nextmap;
+	// [TL] No need to fetch a reference to level.nextmap anymore.
+	const char *nextmap = NULL;
 
 	if (level.secretmap[0] != 0)
 	{
@@ -608,7 +787,9 @@ const char *G_GetSecretExitMap()
 			nextmap = level.secretmap;
 		}
 	}
-	return nextmap;
+	
+	// [TL] Advance to the next map in the rotation if no secret level.
+	return (nextmap) ? nextmap : G_GetExitMap( );
 }
 
 //==========================================================================
@@ -618,12 +799,30 @@ const char *G_GetSecretExitMap()
 
 void G_ExitLevel (int position, bool keepFacing)
 {
-	G_ChangeLevel(G_GetExitMap(), position, keepFacing ? CHANGELEVEL_KEEPFACING : 0);
+	// [BC] We cannot end the map during survival's countdown.
+	if (( survival ) &&
+		( SURVIVAL_GetState( ) == SURVS_COUNTDOWN ))
+	{
+		return;
+	}
+
+	// [BB] We need to pass ( (dmflags & DF_NO_MONSTERS) == DF_NO_MONSTERS ) as last
+	// argument, otherwise this flag will be cleared by G_ChangeLevel, no matter if
+	// it is set or not.
+	G_ChangeLevel(G_GetExitMap(), position, ( keepFacing ? CHANGELEVEL_KEEPFACING : 0 ) | ( (dmflags & DF_NO_MONSTERS) == DF_NO_MONSTERS ) ? CHANGELEVEL_NOMONSTERS : 0 ); 
 }
 
 void G_SecretExitLevel (int position) 
 {
-	G_ChangeLevel(G_GetSecretExitMap(), position, 0);
+	// [TL] Prevent ending a map during survival countdown.
+	if (( survival ) &&
+		( SURVIVAL_GetState( ) == SURVS_COUNTDOWN ))
+	{
+		return;
+	}
+	
+	// [TL] Pass additional parameters to make "nextsecret" CCMD work online.
+	G_ChangeLevel(G_GetSecretExitMap(), position, ( (dmflags & DF_NO_MONSTERS) == DF_NO_MONSTERS ) ? CHANGELEVEL_NOMONSTERS : 0 );
 }
 
 //==========================================================================
@@ -631,6 +830,7 @@ void G_SecretExitLevel (int position)
 //
 //==========================================================================
 
+void SERVERCONSOLE_UpdateScoreboard( void );
 void G_DoCompleted (void)
 {
 	int i; 
@@ -699,8 +899,6 @@ void G_DoCompleted (void)
 		wminfo.plyr[i].sitems = players[i].itemcount;
 		wminfo.plyr[i].ssecret = players[i].secretcount;
 		wminfo.plyr[i].stime = level.time;
-		memcpy (wminfo.plyr[i].frags, players[i].frags
-				, sizeof(wminfo.plyr[i].frags));
 		wminfo.plyr[i].fragcount = players[i].fragcount;
 	}
 
@@ -767,13 +965,16 @@ void G_DoCompleted (void)
 		level.maptime = 0;
 	}
 
-	if (!deathmatch &&
-		((level.flags & LEVEL_NOINTERMISSION) ||
-		((nextcluster == thiscluster) && (thiscluster->flags & CLUSTER_HUB))))
+	// [BB] LEVEL_NOINTERMISSION is also respected in deathmatch games
+	if ( ((level.flags & LEVEL_NOINTERMISSION) ||
+		 ( !deathmatch && (nextcluster == thiscluster) && (thiscluster->flags & CLUSTER_HUB))))
 	{
 		G_WorldDone ();
 		return;
 	}
+
+	// Clear out the in level notify text.
+	C_FlushDisplay( );
 
 	gamestate = GS_INTERMISSION;
 	viewactive = false;
@@ -784,6 +985,10 @@ void G_DoCompleted (void)
 //		memcpy (statcopy, &wminfo, sizeof(wminfo));
 
 	WI_Start (&wminfo);
+
+	// [BB] If we're server, update the scoreboard on the server console.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCONSOLE_UpdateScoreboard( );
 }
 
 //==========================================================================
@@ -814,11 +1019,277 @@ void DAutosaver::Tick ()
 
 extern gamestate_t 	wipegamestate; 
  
+void SERVERCONSOLE_SetCurrentMapname( const char *pszString );
+void SERVERCONSOLE_UpdatePlayerInfo( LONG lPlayer, ULONG ulUpdateFlags );
 void G_DoLoadLevel (int position, bool autosave)
-{ 
+{
 	static int lastposition = 0;
 	gamestate_t oldgs = gamestate;
-	int i;
+	unsigned int i;
+	// [BC]
+	char				szString[256];
+	CAMPAIGNINFO_s		*pInfo;
+	UCVarValue			Val;
+
+	// [BB] Make sure that dead spectators are respawned before moving to the next map.
+	if ( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode( )) & GMF_DEADSPECTATORS )
+		GAMEMODE_RespawnDeadSpectatorsAndPopQueue( );
+	// [BB] If we don't have dead spectators, still pop the queue. Possibly somone tried to join during intermission or the server admin increased sv_maxplayers during intermission.
+	else if ( NETWORK_InClientMode() == false )
+		JOINQUEUE_PopQueue( -1 );
+
+	// [BB] Going to a new level automatically stops any active vote.
+	if ( CALLVOTE_GetVoteState() == VOTESTATE_INVOTE )
+		CALLVOTE_ClearVote();
+
+	// [BB] Reset the net traffic measurements when a new map starts.
+	NETTRAFFIC_Reset();
+
+	// Loop through the teams, and reset the scores.
+	for ( i = 0; i < teams.Size( ); i++ )
+	{
+		TEAM_SetFragCount( i, 0, false );
+		TEAM_SetDeathCount( i, 0 );
+		TEAM_SetWinCount( i, 0, false );
+		TEAM_SetScore( i, 0, false );
+		TEAM_SetAnnouncedLeadState( i, false );
+
+		// Also, reset the return ticks.
+		TEAM_SetReturnTicks( i, 0 );
+	}
+
+	// [BB] Clear the bUnarmed flag, it got invalid by loading the level.
+	// Probably here is not the best place to do this, but we may not do it any later
+	// because PLAYER_SetTeam (called directly below) will hand out inventory if bUnarmed
+	// is true. Something we certainly don't want here. Furthermore, because of this
+	// PLAYER_SetTeam crashes if bUnarmed is true for a player that doesn't have a body.
+	for (i = 0; i < MAXPLAYERS; i++)
+		players[i].bUnarmed = false;
+
+	// [BB] Clients shouldn't mess with the team settings on their own.
+	if ( NETWORK_InClientMode() == false )
+	{
+		// [BB] We clear the teams if either ZADF_YES_KEEP_TEAMS is not on or if the new level is a lobby.
+		const bool bClearTeams = ( !(zadmflags & ZADF_YES_KEEP_TEAMS) || GAMEMODE_IsLobbyMap( level.mapname ) );
+
+		if ( bClearTeams )
+		{
+			// Clear everyone's team.
+			for (i = 0; i < MAXPLAYERS; i++)
+			{
+				players[i].ulTeam = teams.Size( );
+				players[i].bOnTeam = false;
+			}
+		}
+
+		// [BB] Only assign players to a team on a game mode that has teams.
+		if ( ( dmflags2 & DF2_NO_TEAM_SELECT ) && ( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode( )) & GMF_PLAYERSONTEAMS ) )
+		{
+			LONG	lNumNeedingTeam;
+			LONG	lRand;
+
+			do
+			{
+				lNumNeedingTeam = 0;
+				for ( i = 0; i < MAXPLAYERS; i++ )
+				{
+					if ( playeringame[i] == false )
+						continue;
+
+					// [BB] Don't put spectators on a team.
+					if ( players[i].bSpectating )
+						continue;
+
+					if (( players[i].bOnTeam == false ) && ( players[i].ulTeam == teams.Size( ) ))
+						lNumNeedingTeam++;
+				}
+
+				if ( lNumNeedingTeam > 0 )
+				{
+					do
+					{
+						lRand = ( M_Random( ) % MAXPLAYERS );
+					} while (( playeringame[lRand] == false ) || ( players[lRand].bSpectating ) || ( players[lRand].bOnTeam ) || ( players[lRand].ulTeam != teams.Size( ) ));
+
+
+					// [BB] Note: The team starts for the new map are not initialized yet, so we can't take them into account when selecting the team here.
+					PLAYER_SetTeam( &players[lRand], TEAM_ChooseBestTeamForPlayer( true ), true );
+				}
+
+			} while ( lNumNeedingTeam != 0 );
+		}
+		// Reset their team.
+		else
+		{
+			if ( bClearTeams )
+			{
+				for (i = 0; i < MAXPLAYERS; i++)
+					PLAYER_SetTeam( &players[i], teams.Size( ), true );
+			}
+		}
+	}
+
+	// If a campaign is allowed, see if there is one for this map.
+	if ( CAMPAIGN_AllowCampaign( ) && ( savegamerestore == false ))
+	{
+		pInfo = CAMPAIGN_GetCampaignInfo( level.mapname );
+		if ( pInfo )
+		{
+			Val.Int = pInfo->lFragLimit;
+			fraglimit.ForceSet( Val, CVAR_Int );
+			Val.Float = pInfo->fTimeLimit;
+			timelimit.ForceSet( Val, CVAR_Float );
+			Val.Int = pInfo->lPointLimit;
+			pointlimit.ForceSet( Val, CVAR_Int );
+			Val.Int = pInfo->lDuelLimit;
+			duellimit.ForceSet( Val, CVAR_Int );
+			Val.Int = pInfo->lWinLimit;
+			winlimit.ForceSet( Val, CVAR_Int );
+			Val.Int = pInfo->lWaveLimit;
+			wavelimit.ForceSet( Val, CVAR_Int );
+			if ( pInfo->lDMFlags != -1 )
+			{
+				Val.Int = pInfo->lDMFlags;
+				dmflags.ForceSet( Val, CVAR_Int );
+			}
+			if ( pInfo->lDMFlags2 != -1 )
+			{
+				Val.Int = pInfo->lDMFlags2;
+				dmflags2.ForceSet( Val, CVAR_Int );
+			}
+			if ( pInfo->lCompatFlags != -1 )
+			{
+				Val.Int = pInfo->lCompatFlags;
+				compatflags.ForceSet( Val, CVAR_Int );
+			}
+
+			Val.Bool = false;
+			deathmatch.ForceSet( Val, CVAR_Bool );
+			teamgame.ForceSet( Val, CVAR_Bool );
+
+			Val.Bool = true;
+			switch ( pInfo->GameMode )
+			{
+			case GAMEMODE_COOPERATIVE:
+
+				cooperative.ForceSet( Val, CVAR_Bool );
+				break;
+			case GAMEMODE_SURVIVAL:
+
+				survival.ForceSet( Val, CVAR_Bool );
+				break;
+			case GAMEMODE_INVASION:
+
+				invasion.ForceSet( Val, CVAR_Bool );
+				break;
+			case GAMEMODE_DEATHMATCH:
+
+				deathmatch.ForceSet( Val, CVAR_Bool );
+				break;
+			case GAMEMODE_TEAMPLAY:
+
+				teamplay.ForceSet( Val, CVAR_Bool );
+				break;
+			case GAMEMODE_DUEL:
+
+				duel.ForceSet( Val, CVAR_Bool );
+				break;
+			case GAMEMODE_TERMINATOR:
+
+				terminator.ForceSet( Val, CVAR_Bool );
+				break;
+			case GAMEMODE_LASTMANSTANDING:
+
+				lastmanstanding.ForceSet( Val, CVAR_Bool );
+				break;
+			case GAMEMODE_TEAMLMS:
+
+				teamlms.ForceSet( Val, CVAR_Bool );
+				break;
+			case GAMEMODE_POSSESSION:
+
+				possession.ForceSet( Val, CVAR_Bool );
+				break;
+			case GAMEMODE_TEAMPOSSESSION:
+
+				teampossession.ForceSet( Val, CVAR_Bool );
+				break;
+			case GAMEMODE_TEAMGAME:
+
+				teamgame.ForceSet( Val, CVAR_Bool );
+				break;
+			case GAMEMODE_CTF:
+
+				ctf.ForceSet( Val, CVAR_Bool );
+				break;
+			case GAMEMODE_ONEFLAGCTF:
+
+				oneflagctf.ForceSet( Val, CVAR_Bool );
+				break;
+			case GAMEMODE_SKULLTAG:
+
+				skulltag.ForceSet( Val, CVAR_Bool );
+				break;
+			case GAMEMODE_DOMINATION:
+
+				domination.ForceSet( Val, CVAR_Bool );
+				break;	
+			default:
+
+				I_Error( "G_DoLoadLevel: Invalid campaign game type, %d!", pInfo->GameMode );
+				break;
+			}
+
+			// Set buckshot/instagib.
+			Val.Bool = pInfo->bInstagib;
+			instagib.ForceSet( Val, CVAR_Bool );
+			Val.Bool = pInfo->bBuckshot;
+			buckshot.ForceSet( Val, CVAR_Bool );
+
+			for ( i = 0; i < MAXPLAYERS; i++ )
+			{
+				// [BB] If this is not a team game, there is no need to check or pass BotTeamName.
+				if ( !( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode( )) & GMF_PLAYERSONTEAMS ) )
+					BOTSPAWN_AddToTable( pInfo->BotSpawn[i].szBotName, NULL );
+				else if ( pInfo->BotSpawn[i].BotTeamName.IsNotEmpty() && TEAM_ShouldUseTeam ( TEAM_GetTeamNumberByName (  pInfo->BotSpawn[i].BotTeamName.GetChars() ) ) )
+					BOTSPAWN_AddToTable( pInfo->BotSpawn[i].szBotName, pInfo->BotSpawn[i].BotTeamName.GetChars() );
+			}
+
+			// Also, clear out existing bots.
+			BOTS_RemoveAllBots( false );
+
+			// We're now in a campaign.
+			CAMPAIGN_SetInCampaign( true );
+
+			// [BB] To properly handle limitedtoteam in single player campaigns
+			// we need to put the game into a "fake multiplayer" mode.
+			if ( NETWORK_GetState( ) == NETSTATE_SINGLE )
+				NETWORK_SetState( NETSTATE_SINGLE_MULTIPLAYER );
+
+			if (( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode( )) & GMF_PLAYERSONTEAMS ) && ( pInfo->PlayerTeamName.IsNotEmpty() ))
+			{
+				ULONG ulTeam = TEAM_GetTeamNumberByName ( pInfo->PlayerTeamName.GetChars() );
+
+				if ( TEAM_CheckIfValid ( ulTeam ) )
+				{
+					players[consoleplayer].ulTeam = ulTeam;
+					players[consoleplayer].bOnTeam = true;
+				}
+				else
+					I_Error( "G_DoLoadLevel: Invalid player team, \"%s\"!", pInfo->PlayerTeamName.GetChars() );
+			}
+		}
+		else
+		{
+			// We're now NOT in a campaign.
+			CAMPAIGN_SetInCampaign( false );
+		}
+	}
+	else
+	{
+			// We're now NOT in a campaign.
+			CAMPAIGN_SetInCampaign( false );
+	}
 
 	if (NextSkill >= 0)
 	{
@@ -834,7 +1305,9 @@ void G_DoLoadLevel (int position, bool autosave)
 		lastposition = position;
 
 	G_InitLevelLocals ();
-	StatusBar->DetachAllMessages ();
+	// [BC] The server doesn't have a status bar.
+	if ( StatusBar )
+		StatusBar->DetachAllMessages ();
 
 	// Force 'teamplay' to 'true' if need be.
 	if (level.flags2 & LEVEL2_FORCETEAMPLAYON)
@@ -844,11 +1317,29 @@ void G_DoLoadLevel (int position, bool autosave)
 	if (level.flags2 & LEVEL2_FORCETEAMPLAYOFF)
 		teamplay = false;
 
-	Printf (
-			"\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36"
-			"\36\36\36\36\36\36\36\36\36\36\36\36\37\n\n"
-			TEXTCOLOR_BOLD "%s - %s\n\n",
-			level.mapname, level.LevelName.GetChars());
+	// [Dusk] Clear keys found
+	g_keysFound.Clear();
+
+	// [BC] In server mode, display the level name slightly differently.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		Printf( "\n*** %s: %s ***\n\n", level.mapname, level.LevelName.GetChars() );
+
+		// [RC] Update clients using the RCON utility.
+		SERVER_RCON_UpdateInfo( SVRCU_MAP );
+	}
+	else
+	{
+
+		Printf (
+				"\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36"
+				"\36\36\36\36\36\36\36\36\36\36\36\36\37\n\n"
+				TEXTCOLOR_BOLD "%s - %s\n\n",
+				level.mapname, level.LevelName.GetChars());
+		
+		// [RC] Update the G15 display.
+		G15_NextLevel( level.mapname, level.LevelName.GetChars() );
+	}
 
 	if (wipegamestate == GS_LEVEL)
 		wipegamestate = GS_FORCEWIPE;
@@ -876,11 +1367,40 @@ void G_DoLoadLevel (int position, bool autosave)
 
 	for (i = 0; i < MAXPLAYERS; i++)
 	{ 
-		if (playeringame[i] && (deathmatch || players[i].playerstate == PST_DEAD))
+		// [BC] Added teamgame, invasion.
+		if (playeringame[i] && ((deathmatch || teamgame || invasion) || players[i].playerstate == PST_DEAD))
 			players[i].playerstate = PST_ENTER;	// [BC]
-		memset (players[i].frags,0,sizeof(players[i].frags));
-		if (!(dmflags2 & DF2_YES_KEEPFRAGS) && (alwaysapplydmflags || deathmatch))
+
+		// [BB] Added teamgame.
+		if (!(dmflags2 & DF2_YES_KEEPFRAGS) && (alwaysapplydmflags || deathmatch || teamgame))
 			players[i].fragcount = 0;
+
+		// Reset the number of medals each player has.
+		memset( players[i].ulMedalCount, 0, sizeof( players[i].ulMedalCount ));
+		MEDAL_ClearMedalQueue( i );
+
+		// Reset "ready to go on" flag.
+		players[i].bReadyToGoOn = false;
+
+		// Reset a bunch of other stuff too.
+		players[i].ulDeathCount = 0;
+		players[i].ulWins = 0;
+		players[i].lPointCount = 0;
+		players[i].ulTime = 0;
+		PLAYER_ResetSpecialCounters ( &players[i] );
+//		players[i].bDeadSpectator = false;
+
+		// If we're the server, update the console.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		{
+			SERVERCONSOLE_UpdatePlayerInfo( i, UDF_FRAGS|UDF_PING|UDF_TIME );
+			// [BB] Since the map was changed, the players who are already spawned need to reauthenticate.
+			if ( SERVER_GetClient( i )->State == CLS_SPAWNED )
+				SERVER_GetClient( i )->State = CLS_SPAWNED_BUT_NEEDS_AUTHENTICATION;
+		}
+
+//		if (( NETWORK_GetState( ) != NETSTATE_CLIENT ) && ( PLAYER_ShouldSpawnAsSpectator( &players[i] )))
+//			players[i].bSpectating = true;
 	}
 
 	if (changeflags & CHANGELEVEL_NOMONSTERS)
@@ -897,6 +1417,37 @@ void G_DoLoadLevel (int position, bool autosave)
 	}
 
 	level.maptime = 0;
+
+	// Refresh the HUD.
+	SCOREBOARD_RefreshHUD( );
+
+	// Set number of duels to 0.
+	DUEL_SetNumDuels( 0 );
+
+	// Erase any saved player information.
+	SERVER_SAVE_ClearList( );
+
+	// Clear out the join queue.
+//	if ( NETWORK_GetState( ) != NETSTATE_SERVER )
+//		JOINQUEUE_ClearList( );
+
+	// Make sure the game isn't frozen.
+	level.flags2 &= ~LEVEL2_FROZEN;
+
+	// [BB] Initialize/clear the free network ID list, but only if there are no level snapshots.
+	// The actors stored in these snapshots still have their NetIDs, so as long as snapshots exist,
+	// we may not clear the NetID list.
+	{
+		bool bSnapshotFound = false;
+		for (unsigned int i = 0; i < wadlevelinfos.Size(); i++)
+		{
+			if ( wadlevelinfos[i].snapshot )
+				bSnapshotFound = true;
+		}
+		if ( bSnapshotFound == false )
+			g_NetIDList.clear( );
+	}
+
 	P_SetupLevel (level.mapname, position);
 
 	AM_LevelInit();
@@ -920,12 +1471,6 @@ void G_DoLoadLevel (int position, bool autosave)
 	LocalViewPitch = 0;
 	paused = 0;
 
-	//Added by MC: Initialize bots.
-	if (deathmatch)
-	{
-		bglobal.Init ();
-	}
-
 	if (timingdemo)
 	{
 		static bool firstTime = true;
@@ -939,7 +1484,42 @@ void G_DoLoadLevel (int position, bool autosave)
 
 	level.starttime = gametic;
 	G_UnSnapshotLevel (!savegamerestore);	// [RH] Restore the state of the level.
+
+	// [BB] If the snapshot was taken with less players than we have now (possible due to ingame joining),
+	// the new ones don't have a body. Just give them one.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		for ( int i = 0; i < MAXPLAYERS; ++i )
+		{
+			if ( playeringame[i] && ( players[i].mo == NULL ) )
+			{
+				players[i].playerstate = PST_ENTER;
+				GAMEMODE_SpawnPlayer ( i, false );
+			}
+		}
+	}
+
 	G_FinishTravel ();
+
+	// [BB] If anybody doesn't have any inventory at all by now (players should always have the Hexen Armor stuff for instance),
+	// something went wrong. Make sure that they have at least their default inventory.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		for ( int i = 0; i < MAXPLAYERS; ++i )
+		{
+			if ( playeringame[i] && ( players[i].bSpectating == false ) && ( players[i].mo ) && ( players[i].mo->Inventory == NULL ) )
+			{
+				players[i].mo->GiveDefaultInventory();
+				// [BB] GiveDefaultInventory() also restores the default health, but we don't want to revive dead players.
+				if ( players[i].playerstate == PST_DEAD )
+				{
+					players[i].health = 0;
+					players[i].mo->health = 0;
+				}
+			}
+		}
+	}
+
 	// For each player, if they are viewing through a player, make sure it is themselves.
 	for (int ii = 0; ii < MAXPLAYERS; ++ii)
 	{
@@ -947,19 +1527,69 @@ void G_DoLoadLevel (int position, bool autosave)
 		{
 			players[ii].camera = players[ii].mo;
 		}
+
 	}
-	StatusBar->AttachToPlayer (&players[consoleplayer]);
+	if ( StatusBar )
+		StatusBar->AttachToPlayer (&players[consoleplayer]);
 	P_DoDeferedScripts ();	// [RH] Do script actions that were triggered on another map.
 	
-	if (demoplayback || oldgs == GS_STARTUP || oldgs == GS_TITLELEVEL)
+	// [BC] Support for client-side demos.
+	if (demoplayback || ( CLIENTDEMO_IsPlaying( )) || oldgs == GS_STARTUP || oldgs == GS_TITLELEVEL)
 		C_HideConsole ();
 
 	C_FlushDisplay ();
 
+	// [BC/BB] Spawn various necessary game objects at the start of the map.
+	GAMEMODE_SpawnSpecialGamemodeThings();
+
+	// [BC] If we're the server, potentially check if we should use some campaign settings
+	// for this map.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		if (( invasion ) &&
+			( sv_usemapsettingswavelimit ))
+		{
+			pInfo = CAMPAIGN_GetCampaignInfo( level.mapname );
+			if ( pInfo )
+			{
+				Val.Int = pInfo->lWaveLimit;
+				wavelimit.ForceSet( Val, CVAR_Int );
+			}
+		}
+
+		if (( possession || teampossession ) &&
+			( sv_usemapsettingspossessionholdtime ))
+		{
+			pInfo = CAMPAIGN_GetCampaignInfo( level.mapname );
+			if (( pInfo ) && ( pInfo->lPossessionHoldTime > 0 ))
+			{
+				Val.Int = pInfo->lPossessionHoldTime;
+				sv_possessionholdtime.ForceSet( Val, CVAR_Int );
+			}
+		}
+	}
+
 	// [RH] Always save the game when entering a new level.
-	if (autosave && !savegamerestore && disableautosave < 1)
+	// [BC] No need to autosave during deathmatch/teamgame mode.
+	if (autosave && !savegamerestore && disableautosave < 1 && ( deathmatch == false ) && ( teamgame == false ))
 	{
 		DAutosaver GCCNOWARN *dummy = new DAutosaver;
+	}
+
+	// [BC] If we're server, update the map name and scoreboard on the server console.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		// Now that we're in a new level, update the mapname/scoreboard.
+		sprintf( szString, "%s: %s", level.mapname, level.LevelName.GetChars() );
+		SERVERCONSOLE_SetCurrentMapname( szString );
+		SERVERCONSOLE_UpdateScoreboard( );
+
+		// Reset the columns.
+		SERVERCONSOLE_SetupColumns( );
+
+		// Also, update the level for all clients.
+		SERVER_LoadNewLevel( level.mapname );
+
 	}
 }
 
@@ -975,7 +1605,11 @@ void G_WorldDone (void)
 	cluster_info_t *nextcluster;
 	cluster_info_t *thiscluster;
 
-	gameaction = ga_worlddone; 
+	// [BC] Clients don't need to do this, otherwise they'll try to load the map on their end.
+	if ( NETWORK_InClientMode() == false )
+	{
+		gameaction = ga_worlddone; 
+	}
 
 	if (level.flags & LEVEL_CHANGEMAPCHEAT)
 		return;
@@ -1011,10 +1645,10 @@ void G_WorldDone (void)
 	{
 		nextcluster = FindClusterInfo (FindLevelInfo (nextlevel)->cluster);
 
-		if (nextcluster->cluster != level.cluster && !deathmatch)
+		if (nextcluster->cluster != level.cluster && NETWORK_GetState( ) == NETSTATE_SINGLE )
 		{
 			// Only start the finale if the next level's cluster is different
-			// than the current one and we're not in deathmatch.
+			// than the current one and we're not in deathmatch. [BC] And we're not in multiplayer
 			if (nextcluster->EnterText.IsNotEmpty())
 			{
 				F_StartFinale (nextcluster->MessageMusic, nextcluster->musicorder,
@@ -1045,7 +1679,9 @@ void G_WorldDone (void)
 //==========================================================================
 
 void G_DoWorldDone (void) 
-{		 
+{
+	ULONG	ulIdx;
+
 	gamestate = GS_LEVEL;
 	if (wminfo.next[0] == 0)
 	{
@@ -1060,9 +1696,28 @@ void G_DoWorldDone (void)
 	G_DoLoadLevel (startpos, true);
 	startpos = 0;
 	gameaction = ga_nothing;
-	viewactive = true; 
-}
+	viewactive = true;
 
+	// Tell the bots that we're now on the new map.
+	for ( ulIdx = 0; ulIdx < MAXPLAYERS; ulIdx++ )
+	{
+		if ( playeringame[ulIdx] == false )
+			continue;
+
+		if ( players[ulIdx].pSkullBot )
+		{
+			players[ulIdx].pSkullBot->PostEvent( BOTEVENT_NEWMAP );
+
+			// Also, clear out their goals.
+			players[ulIdx].pSkullBot->m_ulPathType = BOTPATHTYPE_NONE;
+			players[ulIdx].pSkullBot->m_PathGoalPos.x = 0;
+			players[ulIdx].pSkullBot->m_PathGoalPos.y = 0;
+			players[ulIdx].pSkullBot->m_pGoalActor = NULL;
+//			ASTAR_ClearPath( ulIdx );
+		}
+	}
+} 
+ 
 //==========================================================================
 //
 // G_StartTravel
@@ -1075,7 +1730,8 @@ void G_DoWorldDone (void)
 
 void G_StartTravel ()
 {
-	if (deathmatch)
+	// [BC] Changed this to a function.
+	if ( G_AllowTravel( ) == false )
 		return;
 
 	for (int i = 0; i < MAXPLAYERS; ++i)
@@ -1087,8 +1743,13 @@ void G_StartTravel ()
 			players[i].camera = NULL;
 
 			// Only living players travel. Dead ones get a new body on the new level.
-			if (players[i].health > 0)
+			// [BC] Same goes for spectators.
+			if ((players[i].health > 0) && ( players[i].bSpectating == false ))
 			{
+				// [BB] The server saves whatever weapon this player had here.
+				if ( ( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( players[i].ReadyWeapon ) )
+					players[i].StartingWeaponName = players[i].ReadyWeapon->GetClass()->TypeName;
+
 				pawn->UnlinkFromWorld ();
 				P_DelSector_List ();
 				int tid = pawn->tid;	// Save TID
@@ -1118,11 +1779,15 @@ void G_StartTravel ()
 //
 //==========================================================================
 
+// [BC]
+bool	P_OldAdjustFloorCeil (AActor *thing);
 void G_FinishTravel ()
 {
 	TThinkerIterator<APlayerPawn> it (STAT_TRAVELLING);
 	APlayerPawn *pawn, *pawndup, *oldpawn, *next;
 	AInventory *inv;
+	// [BC]
+	LONG	lSavedNetID;
 
 	next = it.Next ();
 	while ( (pawn = next) != NULL)
@@ -1140,9 +1805,25 @@ void G_FinishTravel ()
 		{
 			oldpawn = pawndup;
 
+			// [BB] On a map with fewer player starts than players, some player already
+			// will be telefragged here. To ensure that they can respawn properly
+			// and don't end up in a zombie state, let them be reborn when respawn
+			// the next time.
+			if ( pawn->player->health <= 0 )
+				pawn->player->playerstate = PST_REBORN;
+
+			// [TP] Unlike P_SpawnPlayer, G_CooperativeSpawnPlayer causes the dummy player to eat
+			// items that occupy its spawn spot and and we don't want that.
+			pawndup->flags &= ~MF_PICKUP;
+
 			// The player being spawned here is a short lived dummy and
 			// must not start any ENTER script or big problems will happen.
-			pawndup = P_SpawnPlayer (&playerstarts[pawn->player - players], int(pawn->player - players), SPF_TEMPPLAYER);
+			//pawndup = P_SpawnPlayer (&playerstarts[pawn->player - players], int(pawn->player - players), SPF_TEMPPLAYER);
+			G_CooperativeSpawnPlayer( pawn->player - players, false, true );
+
+			// [BC]
+			lSavedNetID = pawndup->lNetID;
+			pawndup = pawn->player->mo;
 			if (!(changeflags & CHANGELEVEL_KEEPFACING))
 			{
 				pawn->angle = pawndup->angle;
@@ -1176,11 +1857,19 @@ void G_FinishTravel ()
 			pawn->SetState(pawn->SpawnState);
 			pawn->player->SendPitchLimits();
 
+			// [BC]
+			pawn->lNetID = lSavedNetID;
+			g_NetIDList.useID ( pawn->lNetID, pawn );
+
 			for (inv = pawn->Inventory; inv != NULL; inv = inv->Inventory)
 			{
 				inv->ChangeStatNum (STAT_INVENTORY);
 				inv->LinkToWorld ();
 				inv->Travelled ();
+				// [BC] This is necessary, otherwise all the sector links for the inventory
+				// end up being off. This is a problem if the object tries to move or
+				// something, which is the case with bobbing objects.
+				P_OldAdjustFloorCeil( inv );
 			}
 			if (ib_compatflags & BCOMPATF_RESETPLAYERSPEED)
 			{
@@ -1194,6 +1883,22 @@ void G_FinishTravel ()
 	}
 }
  
+//==========================================================================
+//
+// [BC] G_AllowTravel
+//
+// Returns whether or not travelling should be allowed.
+//
+//==========================================================================
+
+bool G_AllowTravel( void )
+{
+	if ( deathmatch || teamgame || invasion || NETWORK_InClientMode() )
+		return ( false );
+
+	return ( true );
+}
+
 //==========================================================================
 //
 //
@@ -1214,6 +1919,8 @@ void G_InitLevelLocals ()
 	level.teamdamage = teamdamage;
 	level.flags = 0;
 	level.flags2 = 0;
+	// [BB]
+	level.flagsZA = 0;
 
 	info = FindLevelInfo (level.mapname);
 
@@ -1266,6 +1973,8 @@ void G_InitLevelLocals ()
 	level.clusterflags = clus ? clus->flags : 0;
 	level.flags |= info->flags;
 	level.flags2 |= info->flags2;
+	// [BB]
+	level.flagsZA |= info->flagsZA;
 	level.levelnum = info->levelnum;
 	level.Music = info->Music;
 	level.musicorder = info->musicorder;
@@ -1281,7 +1990,9 @@ void G_InitLevelLocals ()
 		strncpy (level.skypic2, level.skypic1, 8);
 	level.skypic2[8] = 0;
 
-	compatflags.Callback();
+	// [BC] Why do we need to do this? For now, just don't do it in server mode.
+	if ( NETWORK_GetState( ) != NETSTATE_SERVER )
+		compatflags.Callback();
 	compatflags2.Callback();
 
 	NormalLight.ChangeFade (level.fadeto);
@@ -1381,7 +2092,16 @@ void G_SerializeLevel (FArchive &arc, bool hubLoad)
 {
 	int i = level.totaltime;
 	
-	Renderer->StartSerialize(arc);
+	// [BC] In client mode, we just want to save the lines we've seen.
+	if ( NETWORK_InClientMode() )
+	{
+		P_SerializeWorld( arc );
+		return;
+	}
+
+	// [BB] The server doesn't have a Renderer.
+	if ( NETWORK_GetState( ) != NETSTATE_SERVER )
+		Renderer->StartSerialize(arc);
 
 	arc << level.flags
 		<< level.flags2
@@ -1449,7 +2169,9 @@ void G_SerializeLevel (FArchive &arc, bool hubLoad)
 	P_SerializeWorld (arc);
 	P_SerializePolyobjs (arc);
 	P_SerializeSubsectors(arc);
-	StatusBar->Serialize (arc);
+	// [BB]: Server has no status bar.
+	if ( NETWORK_GetState( ) != NETSTATE_SERVER )
+		StatusBar->Serialize (arc);
 
 	if (SaveVersion >= 4222)
 	{ // This must be done *after* thinkers are serialized.
@@ -1510,7 +2232,9 @@ void G_SerializeLevel (FArchive &arc, bool hubLoad)
 			}
 		}
 	}
-	Renderer->EndSerialize(arc);
+	// [BB] The server doesn't have a Renderer.
+	if ( NETWORK_GetState( ) != NETSTATE_SERVER )
+		Renderer->EndSerialize(arc);
 }
 
 //==========================================================================
@@ -1673,7 +2397,7 @@ void G_WriteSnapshots (FILE *file)
 	}
 
 	// Store player classes to be used when spawning a random class
-	if (multiplayer)
+	if ( NETWORK_GetState( ) != NETSTATE_SINGLE )
 	{
 		FPNGChunkArchive arc2 (file, RCLS_ID);
 		for (i = 0; i < MAXPLAYERS; ++i)
@@ -1935,6 +2659,39 @@ CCMD(listmaps)
 	}
 }
 
+// [CK] Lists all the music loaded in the wad
+CCMD( listmusic )
+{
+	std::set<FString> musicNames;
 
+	for ( unsigned int i = 0; i < wadlevelinfos.Size(); i++ )
+	{
+		level_info_t *info = &wadlevelinfos[i];
+		if ( info != NULL )
+		{
+			musicNames.insert( info->Music );
+		}
+	}
+	
+	if ( musicNames.size() <= 0 )
+	{
+		Printf( "No music lumps loaded." );
+		return;
+	}
 
-
+	Printf( "Loaded music:\n" );
+	for ( std::set<FString>::iterator it = musicNames.begin(); it != musicNames.end(); it++ )
+	{
+		if ( it->Len() <= 0)
+			continue;
+		
+		if ( (*it)[0] == '$' )
+		{
+			Printf( "   D_%s\n", GStrings( it->GetChars() + 1 ) );
+		} 
+		else
+		{
+			Printf( "  %s\n", it->GetChars() );
+		}
+	}
+}

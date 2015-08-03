@@ -73,7 +73,8 @@ DEFINE_ACTION_FUNCTION(AActor, A_BrainExplode)
 DEFINE_ACTION_FUNCTION(AActor, A_BrainDie)
 {
 	// [RH] If noexit, then don't end the level.
-	if ((deathmatch || alwaysapplydmflags) && (dmflags & DF_NO_EXIT))
+	// [BC] teamgame
+	if ((deathmatch || teamgame || alwaysapplydmflags) && (dmflags & DF_NO_EXIT))
 		return;
 
 	// New dmflag: Kill all boss spawned monsters before ending the level.
@@ -106,6 +107,12 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_BrainSpit)
 	AActor *targ;
 	AActor *spit;
 	bool isdefault = false;
+
+	// [BC] Brain spitting is server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
 
 	ACTION_PARAM_START(1);
 	ACTION_PARAM_CLASS(spawntype, 0);
@@ -149,16 +156,28 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_BrainSpit)
 			// [GZ] Calculates when the projectile will have reached destination
 			spit->special2 += level.maptime;
 			spit->flags6 |= MF6_BOSSCUBE;
+
+			// [BC] If we're the server, tell clients to spawn the actor.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SpawnMissile( spit );
 		}
 
 		if (!isdefault)
 		{
 			S_Sound(self, CHAN_WEAPON, self->AttackSound, 1, ATTN_NONE);
+
+			// [BC] If we're the server, tell clients create the sound.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SoundPoint( self->x, self->y, self->z, CHAN_WEAPON, self->AttackSound, 1, ATTN_NONE );
 		}
 		else
 		{
 			// compatibility fallback
 			S_Sound (self, CHAN_WEAPON, "brain/spit", 1, ATTN_NONE);
+
+			// [BC] If we're the server, tell clients create the sound.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SoundPoint( self->x, self->y, self->z, CHAN_WEAPON, "brain/spit", 1, ATTN_NONE );
 		}
 	}
 }
@@ -166,11 +185,17 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_BrainSpit)
 static void SpawnFly(AActor *self, const PClass *spawntype, FSoundID sound)
 {
 	AActor *newmobj;
-	AActor *fog;
+	AActor *fog = NULL;
 	AActor *eye = self->master; // The eye is the spawnshot's master, not the target!
 	AActor *targ = self->target; // Unlike other projectiles, the target is the intended destination.
 	int r;
 		
+	// [BC] Brain spitting is server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	// [GZ] Should be more viable than a countdown...
 	if (self->special2 != 0)
 	{
@@ -187,6 +212,13 @@ static void SpawnFly(AActor *self, const PClass *spawntype, FSoundID sound)
 	{
 		fog = Spawn (spawntype, targ->x, targ->y, targ->z, ALLOW_REPLACE);
 		if (fog != NULL) S_Sound (fog, CHAN_BODY, sound, 1, ATTN_NORM);
+	}
+
+	// [BC] If we're the server, spawn the fire, and tell clients to play the sound.
+	if (( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( fog ))
+	{
+		SERVERCOMMANDS_SpawnThing( fog );
+		SERVERCOMMANDS_SoundPoint( fog->x, fog->y, fog->z, CHAN_BODY, "brain/spawn", 1, ATTN_NORM );
 	}
 
 	FName SpawnName;
@@ -276,10 +308,22 @@ static void SpawnFly(AActor *self, const PClass *spawntype, FSoundID sound)
 			{
 				// telefrag anything in this spot
 				P_TeleportMove (newmobj, newmobj->x, newmobj->y, newmobj->z, true);
+
+				// [BC] If we're the server, tell clients to spawn the new monster.
+				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				{
+					SERVERCOMMANDS_SpawnThing( newmobj );
+					if ( newmobj->state == newmobj->SeeState )
+						SERVERCOMMANDS_SetThingState( newmobj, STATE_SEE );
+				}
 			}
 			newmobj->flags4 |= MF4_BOSSSPAWNED;
 		}
 	}
+
+	// [BC] Tell clients to destroy the cube.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_DestroyThing( self );
 
 	// remove self (i.e., cube).
 	self->Destroy ();

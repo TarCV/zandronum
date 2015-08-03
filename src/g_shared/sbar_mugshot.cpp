@@ -41,6 +41,8 @@
 #include "sbarinfo.h"
 #include "templates.h"
 #include "r_utility.h"
+// [BB] New #includes.
+#include "sv_main.h"
 
 #define ST_RAMPAGEDELAY 		(2*TICRATE)
 #define ST_MUCHPAIN 			20
@@ -435,7 +437,8 @@ int FMugShot::UpdateState(player_t *player, StateFlags stateflags)
 			}
 		}
 
-		if (RampageTimer == ST_RAMPAGEDELAY && !(stateflags & DISABLERAMPAGE))
+		// [CW] If we are spectating, then don't show the 'pissed off' face.
+		if (RampageTimer == ST_RAMPAGEDELAY && !(stateflags & DISABLERAMPAGE) && !player->bSpectating )
 		{
 			SetState("rampage", !bNormal); //If we have nothing better to show, use the rampage face.
 			return 0;
@@ -448,6 +451,10 @@ int FMugShot::UpdateState(player_t *player, StateFlags stateflags)
 			{
 				good = SetState((stateflags & ANIMATEDGODMODE) ? "godanimated" : "god");
 			}
+			// [BB] Quad damage!
+			else if (( player->cheats2 & CF2_TERMINATORARTIFACT ) ||
+				(( player->mo != NULL ) && ( player->mo->FindInventory( PClass::FindClass( "PowerQuadDamage" )))))
+				good = SetState("quad");
 			else
 			{
 				good = SetState("normal");
@@ -496,7 +503,8 @@ FTexture *FMugShot::GetFace(player_t *player, const char *default_face, int accu
 	{
 		max = 100;
 	}
-	while (player->health < (accuracy - 1 - level) * (max / accuracy))
+	// [BB] If the consoleplayer isn't allowed to know this player's healt, pretend he is at full health for the mugshot.
+	while ( ( SERVER_IsPlayerAllowedToKnowHealth( consoleplayer, static_cast<ULONG>( player - players )) ? player->health : max ) < (accuracy - 1 - level) * (max / accuracy))
 	{
 		level++;
 	}

@@ -27,18 +27,32 @@ bool InquisitorCheckDistance (AActor *self)
 
 DEFINE_ACTION_FUNCTION(AActor, A_InquisitorDecide)
 {
+	// [BC] This is handled server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	if (self->target == NULL)
 		return;
 
 	A_FaceTarget (self);
 	if (!InquisitorCheckDistance (self))
 	{
+		// [BC] Set the thing's state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingFrame( self, self->FindState("Grenade") );
+
 		self->SetState (self->FindState("Grenade"));
 	}
 	if (self->target->z != self->z)
 	{
 		if (self->z + self->height + 54*FRACUNIT < self->ceilingz)
 		{
+			// [BC] Set the thing's state.
+			if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+				SERVERCOMMANDS_SetThingFrame( self, self->FindState("Jump") );
+
 			self->SetState (self->FindState("Jump"));
 		}
 	}
@@ -47,6 +61,12 @@ DEFINE_ACTION_FUNCTION(AActor, A_InquisitorDecide)
 DEFINE_ACTION_FUNCTION(AActor, A_InquisitorAttack)
 {
 	AActor *proj;
+
+	// [BC] This is handled server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
 
 	if (self->target == NULL)
 		return;
@@ -59,12 +79,20 @@ DEFINE_ACTION_FUNCTION(AActor, A_InquisitorAttack)
 	if (proj != NULL)
 	{
 		proj->velz += 9*FRACUNIT;
+
+		// [BC] Tell clients to spawn the missile.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SpawnMissile( proj );
 	}
 	self->angle += ANGLE_45/16;
 	proj = P_SpawnMissileZAimed (self, self->z, self->target, PClass::FindClass("InquisitorShot"));
 	if (proj != NULL)
 	{
 		proj->velz += 16*FRACUNIT;
+
+		// [BC] Tell clients to spawn the missile.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SpawnMissile( proj );
 	}
 	self->z -= 32*FRACUNIT;
 }
@@ -74,6 +102,12 @@ DEFINE_ACTION_FUNCTION(AActor, A_InquisitorJump)
 	fixed_t dist;
 	fixed_t speed;
 	angle_t an;
+
+	// [BC] This is handled server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
 
 	if (self->target == NULL)
 		return;
@@ -94,16 +128,35 @@ DEFINE_ACTION_FUNCTION(AActor, A_InquisitorJump)
 	self->velz = (self->target->z - self->z) / dist;
 	self->reactiontime = 60;
 	self->flags |= MF_NOGRAVITY;
+
+	// [BC] If we're the server, update the thing's position.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+	{
+		SERVERCOMMANDS_MoveThingExact( self, CM_Z|CM_MOMX|CM_MOMY|CM_MOMZ );
+
+		// [CW] Also, set the flags to ensure the actor can fly.
+		SERVERCOMMANDS_SetThingFlags( self, FLAGSET_FLAGS );
+	}
 }
 
 DEFINE_ACTION_FUNCTION(AActor, A_InquisitorCheckLand)
 {
+	// [BC] This is handled server-side.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
+
 	self->reactiontime--;
 	if (self->reactiontime < 0 ||
 		self->velx == 0 ||
 		self->vely == 0 ||
 		self->z <= self->floorz)
 	{
+		// [BC] Set the thing's state.
+		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+			SERVERCOMMANDS_SetThingState( self, STATE_SEE );
+
 		self->SetState (self->SeeState);
 		self->reactiontime = 0;
 		self->flags &= ~MF_NOGRAVITY;

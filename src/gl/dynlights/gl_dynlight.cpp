@@ -60,6 +60,8 @@
 #include "gl/textures/gl_skyboxtexture.h"
 #include "gl/utility/gl_clock.h"
 #include "gl/utility/gl_convert.h"
+// [BB] New #includes.
+#include "network.h"
 
 EXTERN_CVAR (Float, gl_lights_intensity);
 EXTERN_CVAR (Float, gl_lights_size);
@@ -751,7 +753,9 @@ void gl_ParseFrame(FScanner &sc, FString name)
 				break;
 			case LIGHTTAG_LIGHT:
 				gl_ParseString(sc);
-				gl_AddLightAssociation(name, frameName, sc.String);
+				// [BB] The server just ignores all light associations.
+				if ( NETWORK_GetState( ) != NETSTATE_SERVER )
+					gl_AddLightAssociation(name, frameName, sc.String);
 				break;
 			default:
 				sc.ScriptError("Unknown tag: %s\n", sc.String);

@@ -112,6 +112,7 @@
 
 #include "basictypes.h"
 
+
 // Bounding box coordinate storage.
 enum
 {
@@ -140,7 +141,10 @@ enum
 	PRINT_MEDIUM,	// death messages
 	PRINT_HIGH,		// critical messages
 	PRINT_CHAT,		// chat messages
-	PRINT_TEAMCHAT	// chat messages from a teammate
+	PRINT_TEAMCHAT,	// chat messages from a teammate
+		
+	// [BC] Output for OpenGL messages.
+	PRINT_OPENGL,
 };
 #define PRINT_LOW				0				// pickup messages
 #define PRINT_MEDIUM			1				// death messages
@@ -149,6 +153,15 @@ enum
 #define PRINT_TEAMCHAT			4				// chat messages from a teammate
 #define PRINT_LOG				5				// only to logfile
 #define PRINT_BOLD				200				// What Printf_Bold used
+
+// [BC] heh, why did I define this here?
+typedef struct
+{
+	fixed_t	x;
+	fixed_t	y;
+	fixed_t	z;
+
+} POS_t;
 
 struct PalEntry
 {

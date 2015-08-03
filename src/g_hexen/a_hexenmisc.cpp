@@ -20,6 +20,10 @@
 #include "farchive.h"
 #include "v_palette.h"
 #include "g_game.h"
+// [BB] New #includes.
+#include "cl_demo.h"
+#include "deathmatch.h"
+#include "sv_commands.h"
 
 // Include all the Hexen stuff here to reduce compile time
 #include "a_bats.cpp"

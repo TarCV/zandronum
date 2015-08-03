@@ -1,10 +1,9 @@
 //{{NO_DEPENDENCIES}}
-// Microsoft Visual C++ generated include file.
+// Microsoft Developer Studio generated include file.
 // Used by zdoom.rc
 //
 #define IDC_SAVEREPORT                  8
 #define IDNO2                           9
-#define IDI_ICON1                       101
 #define IDD_MIDASINITERROR              108
 #define IDD_IWADDIALOG                  112
 #define IDC_INVISIBLECURSOR             114
@@ -17,8 +16,8 @@
 #define IDD_DIALOG3                     127
 #define IDD_DIALOG4                     128
 #define IDD_SAVEEAX                     128
-#define IDB_BITMAP1                     131
 #define IDB_DEADGUY                     131
+#define IDB_SETUP			            132
 #define IDD_CRASHDETAILS                133
 #define IDI_BOING1                      137
 #define IDI_BOING2                      138
@@ -30,8 +29,34 @@
 #define IDI_BOING8                      144
 #define IDD_BOING                       145
 #define IDD_CRASHOVERVIEW               147
+#define IDB_DMFLAGS                     149
+#define IDB_GENERALSETTINGS             150
+#define IDI_ICONST                      151
+#define IDR_MAINMENU                    152
+#define IDD_ADDBOT                      153
+#define IDD_BANIP                       154
+#define IDD_BANLIST                     155
+#define IDD_KICKBAN		                156
+#define IDD_CHANGEMAP                   157
+#define IDD_EDITBAN                     159
+#define IDD_GENERALSETTINGS             160
+
+// 161 was the old kick dialog, which
+// was merged with the ban dialog. [RC]
+
+#define IDD_LMSSETTINGS                 162
+#define IDD_MAPROTATION                 163
+#define IDD_MESSAGES                    164
+#define IDD_REMOVEBOT                   165
+#define IDD_SERVERDIALOG                166
+#define IDD_SERVERINFO                  167
+#define IDD_SERVERSTATISTICS            168
 #define IDD_ERRORPANE                   148
 #define IDD_NETSTARTPANE                149
+#define IDD_NOIWADS_WELCOME             170
+#define IDD_NOIWADS_NODOOM              171
+#define IDD_NOIWADS			            172
+#define IDD_NOIWADS_REDIRECT            173
 #define IDC_ERRORMESSAGE                1004
 #define IDQUIT                          1005
 #define IDC_IWADLIST                    1006
@@ -66,6 +91,14 @@
 #define IDC_NEWENVNAME                  1049
 #define IDC_CRASHFILECONTENTS           1049
 #define IDC_BOINGEDIT                   1049
+#define IDC_IPADDRESS                   1049
+#define IDC_BANFILE                     1049
+#define IDC_REASON                      1049
+#define IDC_MAPNAME                     1049
+#define IDC_BANBOX                      1049
+#define IDC_INPUTBOX                    1049
+#define IDC_LOGFILE                     1049
+#define IDC_PASSWORD                    1049
 #define IDC_EDITID1                     1050
 #define IDC_EDITID2                     1051
 #define IDC_HOTKEY1                     1053
@@ -82,10 +115,13 @@
 #define IDC_PLEASETELLUS                1061
 #define IDC_BUTTON2                     1062
 #define IDC_CRASHDETAILS                1062
+#define IDC_REMOVE                      1062
 #define IDC_DEADGUYVIEWER               1063
 #define IDC_BOING                       1065
 #define IDC_CRASHFILESIZE               1066
 #define IDC_BUTTON1                     1071
+#define IDC_EDIT                        1071
+#define IDC_SEND                        1071
 #define IDC_BOINGSTATUS                 1072
 #define IDC_BOINGPROGRESS               1073
 #define IDC_TAB1                        1074
@@ -152,15 +188,59 @@
 #define IDCE_ROOMROLLOFFFACTOR          1133
 #define IDCS_ROOMROLLOFFFACTOR          1134
 #define IDCS_REFLECTIONSDELAY2          1135
-#define IDCE_MODULATIONTIME2            1135
+#define IDC_SPIN4                       1200
+#define IDC_SPIN5                       1201
+#define IDC_SPIN7                       1202
+#define IDC_SPIN8                       1203
+#define IDC_SPIN9                       1232
+#define UWM_TRAY_TRAYID                 32769
+#define UWM_TRAY_NOP                    32770
+#define IDC_WELCOME_VERSION				4019 // [RC] "Welcome" screen.
+#define IDC_WELCOME_OPENGL				4020
+#define IDC_WELCOME_SOFTWARE			4021
+#define IDC_WELCOME_FULLSCREEN			4022
+#define IDC_WELCOME_COMPAT				4023
+#define IDC_WELCOME_SHIFTLABEL			4024
+#define IDC_SPIN2                       4043
+#define IDC_SPIN3                       4044
+#define G15_ICON_ORION					4045 // [RC] G15 LCD console.
+#define G15_ICON_ARMOR					4046
+#define G15_ICON_STIMPACK				4047
+#define G15_ICON_SHELLS					4048
+#define IDC_HISTORY_MENU				4050 // [RC] "No IWADs" setup screen.
+#define IDC_SERVER_STATUSBAR			4051
+#define IDC_STTITLE                     4052
+#define IDC_BROWSE                      4053
+#define IDC_USESTEAM                    4054
+#define IDC_USEFREEDOOM                 4055
+#define IDC_NODOOM		                4056
+#define IDC_REDIRECTING1                4057
+#define IDC_REDIRECTING2	            4058
+#define IDC_RESTART		                4059
+
+// [RC] Dynamic IDs.
+#define IDR_BOT_ADD                              109
+#define IDR_BOT_CLONE                            110
+#define IDR_BOT_REMOVE                           111
+#define IDR_BOT_REMOVEALL                        112
+#define IDR_PLAYER_KICK                          113
+#define IDR_PLAYER_BAN_10MINS                    114
+#define IDR_PLAYER_BAN_30MINS                    115
+#define IDR_PLAYER_BAN_4HRS                      116
+#define IDR_PLAYER_BAN_1WEEK					 117
+#define IDR_PLAYER_BAN_1MONTH					 118
+#define IDR_PLAYER_BAN_1YEAR					 119
+#define IDR_PLAYER_BAN_DIALOG					 120
+#define IDR_PLAYER_BAN_PERM						 121
+#define IDR_PLAYER_GETIP                         122
 
 // Next default values for new objects
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        150
-#define _APS_NEXT_COMMAND_VALUE         40001
-#define _APS_NEXT_CONTROL_VALUE         1084
-#define _APS_NEXT_SYMED_VALUE           101
+#define _APS_NEXT_RESOURCE_VALUE        169
+#define _APS_NEXT_COMMAND_VALUE         40025
+#define _APS_NEXT_CONTROL_VALUE         1224
+#define _APS_NEXT_SYMED_VALUE           103
 #endif
 #endif
