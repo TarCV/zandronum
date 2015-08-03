@@ -95,6 +95,8 @@ The FON2 header is followed by variable length data:
 #include "r_data/r_translate.h"
 #include "colormatcher.h"
 #include "v_palette.h"
+// [BC] New #includes.
+#include "network.h"
 
 // MACROS ------------------------------------------------------------------
 
@@ -348,6 +350,10 @@ FFont *V_GetFont(const char *name)
 
 FArchive &SerializeFFontPtr (FArchive &arc, FFont* &font)
 {
+	// [BC] The server doesn't have fonts.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		return ( arc );
+
 	if (arc.IsStoring ())
 	{
 		arc << font->Name;

@@ -357,7 +357,7 @@ bool P_CheckFor3DFloorHit(AActor * mo)
 {
 	sector_t * sector = mo->Sector;
 
-	if ((mo->player && (mo->player->cheats & CF_PREDICTING))) return false;
+	//if ((mo->player && (mo->player->cheats & CF_PREDICTING))) return false;
 
 	for(unsigned i=0;i<sector->e->XFloor.ffloors.Size();i++)
 	{
@@ -387,7 +387,7 @@ bool P_CheckFor3DCeilingHit(AActor * mo)
 {
 	sector_t * sector = mo->Sector;
 
-	if ((mo->player && (mo->player->cheats & CF_PREDICTING))) return false;
+	//if ((mo->player && (mo->player->cheats & CF_PREDICTING))) return false;
 
 	for(unsigned i=0;i<sector->e->XFloor.ffloors.Size();i++)
 	{
@@ -822,6 +822,7 @@ void P_Spawn3DFloors (void)
 		line->args[0] = line->args[1] = line->args[2] = line->args[3] = line->args[4] = 0;
 	}
 	// kg3D - do it in software
+	if(vid_renderer == 0)
 	for (i = 0; i < numsectors; i++)
 	{
 		P_Recalculate3DFloors(&sectors[i]);

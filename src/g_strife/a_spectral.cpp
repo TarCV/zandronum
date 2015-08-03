@@ -55,11 +55,19 @@ DEFINE_ACTION_FUNCTION(AActor, A_SpectralLightning)
 	AActor *flash;
 	fixed_t x, y;
 
+	// [CW] Clients may not do this.
+	if ( NETWORK_InClientMode() )
+		return;
+
 	if (self->threshold != 0)
 		--self->threshold;
 
 	self->velx += pr_zap5.Random2(3) << FRACBITS;
 	self->vely += pr_zap5.Random2(3) << FRACBITS;
+
+	// [CW] Tell clients to spawn the actor.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_MoveThingExact( self, CM_MOMX|CM_MOMY );
 
 	x = self->x + pr_zap5.Random2(3) * FRACUNIT * 50;
 	y = self->y + pr_zap5.Random2(3) * FRACUNIT * 50;
@@ -73,11 +81,19 @@ DEFINE_ACTION_FUNCTION(AActor, A_SpectralLightning)
 
 	flash = Spawn(NAME_SpectralLightningV2, self->x, self->y, ONCEILINGZ, ALLOW_REPLACE);
 
+	// [CW] Tell clients to spawn the actor.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SpawnMissile( flash );
+
+
 	flash->target = self->target;
 	flash->velz = -18*FRACUNIT;
 	flash->FriendPlayer = self->FriendPlayer;
-}
 
+	// [CW] Tell clients to spawn the missile.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_SpawnMissile( flash );
+}
 // In Strife, this number is stored in the data segment, but it doesn't seem to be
 // altered anywhere.
 #define TRACEANGLE (0xe000000)
@@ -88,6 +104,12 @@ DEFINE_ACTION_FUNCTION(AActor, A_Tracer2)
 	angle_t exact;
 	fixed_t dist;
 	fixed_t slope;
+
+	// [BC] Server takes care of movement.
+	if ( NETWORK_InClientMode() )
+	{
+		return;
+	}
 
 	dest = self->tracer;
 
@@ -144,4 +166,8 @@ DEFINE_ACTION_FUNCTION(AActor, A_Tracer2)
 			self->velz += FRACUNIT/8;
 		}
 	}
+
+	// [BC] Update the thing's position, angle and momentum.
+	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
+		SERVERCOMMANDS_MoveThingExact( self, CM_X|CM_Y|CM_Z|CM_ANGLE|CM_MOMX|CM_MOMY|CM_MOMZ );
 }

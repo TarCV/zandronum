@@ -33,9 +33,12 @@
  **
  */
 
+#include <Cocoa/Cocoa.h>
+
+#define BOOL BOOL_CPP_TYPE
 #include "d_main.h"
 #include "version.h"
-#include <Cocoa/Cocoa.h>
+#undef BOOL
 
 enum
 {
@@ -166,7 +169,7 @@ static const char* const tableHeaders[NUM_COLUMNS] = { "IWAD", "Game" };
 	[window setTitle:windowTitle];
 
 	NSTextField *description = [[NSTextField alloc] initWithFrame:NSMakeRect(22, 379, 412, 50)];
-	[self makeLabel:description withString:"GZDoom found more than one IWAD\nSelect from the list below to determine which one to use:"];
+	[self makeLabel:description withString:"Zandronum found more than one IWAD\nSelect from the list below to determine which one to use:"];
 	[[window contentView] addSubview:description];
 	[description release];
 

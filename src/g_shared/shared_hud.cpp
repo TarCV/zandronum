@@ -51,11 +51,19 @@
 
 #include <time.h>
 
+// [BB] New #includes.
+#include <algorithm>
+#include "deathmatch.h"
+#include "network.h"
+#include "gamemode.h"
+#include "sv_main.h"
+#include "scoreboard.h"
+#include "team.h"
 
 #define HUMETA_AltIcon 0x10f000
 
 EXTERN_CVAR(Bool,am_follow)
-EXTERN_CVAR (Int, con_scaletext)
+EXTERN_CVAR (Bool, con_scaletext)
 EXTERN_CVAR (Bool, idmypos)
 
 EXTERN_CVAR (Bool, am_showtime)
@@ -72,6 +80,7 @@ CVAR (Bool,  hud_showstats,		false,	CVAR_ARCHIVE);	// for stamina and accuracy.
 CVAR (Bool,  hud_showscore,		false,	CVAR_ARCHIVE);	// for user maintained score
 CVAR (Int ,  hud_showtime,		0,	    CVAR_ARCHIVE);	// Show time on HUD
 CVAR (Int ,  hud_timecolor,		CR_GOLD,CVAR_ARCHIVE);	// Color of in-game time on HUD
+CVAR ( Bool, hud_showdmstats,	true,	CVAR_ARCHIVE );	// [TP] Draw the rank of the player
 
 CVAR (Int, hud_ammo_red, 25, CVAR_ARCHIVE)					// ammo percent less than which status is red    
 CVAR (Int, hud_ammo_yellow, 50, CVAR_ARCHIVE)				// ammo percent less is yellow more green        
@@ -243,27 +252,54 @@ static void DrawStatus(player_t * CPlayer, int x, int y)
 		DrawStatLine(x, y, "St:", tempstr);
 	}
 	
-	if (!deathmatch)
+	// [TP] Zandronum needs a different check here.
+	//if (!deathmatch)
+	if ( GAMEMODE_GetCurrentFlags() & GMF_COOPERATIVE )
 	{
 		// FIXME: ZDoom doesn't preserve the player's stat counters across hubs so this doesn't
 		// work in cooperative hub games
 		if (hud_showsecrets)
 		{
-			mysnprintf(tempstr, countof(tempstr), "%i/%i ", multiplayer? CPlayer->secretcount : level.found_secrets, level.total_secrets);
+			mysnprintf(tempstr, countof(tempstr), "%i/%i ", (NETWORK_GetState( ) != NETSTATE_SINGLE) ? CPlayer->secretcount : level.found_secrets, level.total_secrets);
 			DrawStatLine(x, y, "S:", tempstr);
 		}
 		
 		if (hud_showitems)
 		{
-			mysnprintf(tempstr, countof(tempstr), "%i/%i ", multiplayer? CPlayer->itemcount : level.found_items, level.total_items);
+			mysnprintf(tempstr, countof(tempstr), "%i/%i ", (NETWORK_GetState( ) != NETSTATE_SINGLE ) ? CPlayer->itemcount : level.found_items, level.total_items);
 			DrawStatLine(x, y, "I:", tempstr);
 		}
 		
 		if (hud_showmonsters)
 		{
-			mysnprintf(tempstr, countof(tempstr), "%i/%i ", multiplayer? CPlayer->killcount : level.killed_monsters, level.total_monsters);
+			mysnprintf(tempstr, countof(tempstr), "%i/%i ", (NETWORK_GetState( ) != NETSTATE_SINGLE) ? CPlayer->killcount : level.killed_monsters, level.total_monsters);
 			DrawStatLine(x, y, "K:", tempstr);
 		}
+	}
+
+	// [TP] Draw rank and spread
+	if (( hud_showdmstats ) && ( SCOREBOARD_ShouldDrawRank( CPlayer - players )))
+	{
+		FString stat;
+
+		// [TP] Let's use the scoreboard's color here, I guess?
+		// I suppose the scoreboard and hud should always show the same player.
+		switch ( SCOREBOARD_GetRank() )
+		{
+			case 0: stat = TEXTCOLOR_BLUE; break;
+			case 1: stat = TEXTCOLOR_RED; break;
+			case 2: stat = TEXTCOLOR_GREEN; break;
+		}
+
+		stat += SCOREBOARD_SpellOrdinal( SCOREBOARD_GetRank() );
+
+		// [TP] Indicate tied status with an asterisk
+		if ( SCOREBOARD_IsTied( CPlayer - players ))
+			stat += "*";
+
+		stat.AppendFormat (" (%s%ld)", ( SCOREBOARD_GetSpread() > 0 ? "+" : "" ),
+			SCOREBOARD_GetSpread() );
+		DrawStatLine( x, y, "", stat );
 	}
 }
 
@@ -534,6 +570,9 @@ static void AddAmmoToList(AWeapon * weapdef)
 
 static int DrawAmmo(player_t *CPlayer, int x, int y)
 {
+	// [TP] Spectators don't have ammo so don't bother.
+	if ( CPlayer->bSpectating )
+		return false;
 
 	int i,j,k;
 	char buf[256];
@@ -784,11 +823,85 @@ static void DrawInventory(player_t * CPlayer, int x,int y)
 
 static void DrawFrags(player_t * CPlayer, int x, int y)
 {
+	// [TP] If we're spectating, we don't have any frags to draw.
+	if ( CPlayer->bSpectating )
+		return;
+
+	// [TP] Depending on the gamemode, we may need to draw something else than frags
+	int stat = CPlayer->fragcount;
+
+	if( GAMEMODE_GetCurrentFlags() & GMF_PLAYERSEARNWINS )
+		stat = CPlayer->ulWins;
+	else if ( GAMEMODE_GetCurrentFlags() & GMF_PLAYERSEARNPOINTS )
+		stat = CPlayer->lPointCount;
+
 	DrawImageToBox(fragpic, x, y, 31, 17);
-	DrawHudNumber(HudFont, CR_GRAY, CPlayer->fragcount, x + 33, y + 17);
+	DrawHudNumber(HudFont, CR_GRAY, stat /*CPlayer->fragcount*/, x + 33, y + 17);
 }
 
+//---------------------------------------------------------------------------
+//
+// [TP] Draws team scores
+//
+//---------------------------------------------------------------------------
 
+static int GetScoreForTeam( int t )
+{
+	if ( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode() ) & GMF_PLAYERSEARNFRAGS )
+		return TEAM_GetFragCount( t );
+	else if ( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode() ) & GMF_PLAYERSEARNWINS )
+		return TEAM_GetWinCount( t );
+
+	return TEAM_GetScore( t );
+}
+
+static bool TeamScoreSorter( const int& t1, const int& t2 )
+{
+	return GetScoreForTeam( t2 ) < GetScoreForTeam( t1 );
+}
+
+static void DrawTeamScores( int x, int y )
+{
+	if (( GAMEMODE_GetCurrentFlags() & GMF_PLAYERSONTEAMS ) == 0 )
+		return;
+
+	int numteams = TEAM_GetNumAvailableTeams();
+	FString text;
+
+	// [TP] Common case
+	if ( numteams == 2 )
+	{
+		int scores[2] = { GetScoreForTeam( 0 ), GetScoreForTeam( 1 ) };
+		int leadingTeam = !!( scores[1] > scores[0] );
+		int losingTeam = 1 - leadingTeam;
+
+		text.Format ("\\c%c%d\\cC - \\c%c%d",
+			V_GetColorChar( TEAM_GetTextColor( leadingTeam )), scores[leadingTeam],
+			V_GetColorChar( TEAM_GetTextColor( losingTeam )), scores[losingTeam] );
+	}
+	else
+	{
+		int teams[MAX_TEAMS] = { 0, 1, 2, 3 };
+		std::sort( teams, teams + countof( teams ), TeamScoreSorter );
+
+		for ( int i = 0; i < numteams; ++i )
+		{
+			if ( i > 0 )
+				text += "\\cC - ";
+
+			text += "\\c";
+			text += V_GetColorChar( TEAM_GetTextColor( teams[i] ));
+			text.AppendFormat( "%d", GetScoreForTeam( teams[i] ));
+		}
+	}
+
+	V_ColorizeString( text );
+	screen->DrawText( HudFont, CR_UNTRANSLATED, x, y + 17, text.GetChars(),
+		DTA_KeepRatio, true,
+		DTA_VirtualWidth, hudwidth,
+		DTA_VirtualHeight, hudheight,
+		DTA_Alpha, 0xc000, TAG_DONE );
+}
 
 //---------------------------------------------------------------------------
 //
@@ -836,6 +949,25 @@ static void DrawCoordinates(player_t * CPlayer)
 	screen->DrawText(SmallFont, hudcolor_xyco, xpos, ypos+2*h, coordstr,
 		DTA_KeepRatio, true,
 		DTA_VirtualWidth, vwidth, DTA_VirtualHeight, vheight, TAG_DONE);
+}
+
+//---------------------------------------------------------------------------
+//
+// [TP]
+//
+//---------------------------------------------------------------------------
+static bool ShouldDrawHealth( player_t* CPlayer )
+{
+	if ( CPlayer->bSpectating )
+		return false;
+
+	if ( NETWORK_InClientMode()
+		&& ( SERVER_IsPlayerAllowedToKnowHealth( consoleplayer, CPlayer - players )) == false )
+	{
+		return false;
+	}
+
+	return true;
 }
 
 //---------------------------------------------------------------------------
@@ -927,6 +1059,10 @@ void DrawHUD()
 {
 	player_t * CPlayer = StatusBar->CPlayer;
 
+	// [BB] The player may not have a body while connecting.
+	if ( CPlayer->mo == NULL )
+		return;
+
 	players[consoleplayer].inventorytics = 0;
 	if (hud_althudscale && SCREENWIDTH>640) 
 	{
@@ -965,11 +1101,24 @@ void DrawHUD()
 		else
 		{
 			DrawStatus(CPlayer, 5, hudheight-75);
-			DrawFrags(CPlayer, 5, hudheight-70);
+
+			// [TP] Only draw frags if not playing in teams
+			if (( GAMEMODE_GetCurrentFlags() & GMF_PLAYERSONTEAMS ) == 0 )
+				DrawFrags(CPlayer, 5, hudheight-70);
 		}
-		DrawHealth(CPlayer, 5, hudheight-45);
-		DrawArmor(CPlayer->mo->FindInventory<ABasicArmor>(), 
-			CPlayer->mo->FindInventory<AHexenArmor>(),	5, hudheight-20);
+
+		// [TP] Only draw health and armor if we are allowed to know those stats. Also don't
+		// draw spectator's health/armor stats.
+		if ( ShouldDrawHealth( CPlayer ))
+		{
+			DrawHealth(CPlayer, 5, hudheight-45);
+			DrawArmor(CPlayer->mo->FindInventory<ABasicArmor>(), 
+				CPlayer->mo->FindInventory<AHexenArmor>(),	5, hudheight-20);
+		}
+
+		// [TP] Draw team stuff.
+		DrawTeamScores( 10, hudheight - 90 );
+
 		i=DrawKeys(CPlayer, hudwidth-4, hudheight-10);
 		i=DrawAmmo(CPlayer, hudwidth-5, i);
 		DrawWeapons(CPlayer, hudwidth-5, i);

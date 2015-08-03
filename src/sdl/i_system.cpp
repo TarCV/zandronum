@@ -38,6 +38,8 @@
 #include <gdk/gdkkeysyms.h>
 #endif
 
+#include "networkheaders.h"
+
 #include "doomerrors.h"
 #include <math.h>
 
@@ -70,6 +72,10 @@
 
 #include "m_fixed.h"
 #include "g_level.h"
+
+#include "cl_demo.h"
+#include "cl_main.h"
+#include "v_text.h"
 
 #ifdef USE_XCURSOR
 // Xlib has its own GC, so don't let it interfere.
@@ -283,7 +289,8 @@ void I_SelectTimer()
 	itv.it_interval.tv_sec = itv.it_value.tv_sec = 0;
 	itv.it_interval.tv_usec = itv.it_value.tv_usec = 1000000/TICRATE;
 
-	if (setitimer(ITIMER_REAL, &itv, NULL) != 0)
+	// [BB] For now I_WaitForTicSignaled doesn't work on the client.
+	if ( NETWORK_InClientMode() || ( setitimer(ITIMER_REAL, &itv, NULL) != 0 ) )
 	{
 		I_GetTime = I_GetTimePolled;
 		I_FreezeTime = I_FreezeTimePolled;
@@ -350,10 +357,13 @@ static int has_exited;
 
 void I_Quit (void)
 {
-    has_exited = 1;		/* Prevent infinitely recursive exits -- killough */
+	has_exited = 1;		/* Prevent infinitely recursive exits -- killough */
 
-    if (demorecording)
+	if (demorecording)
 		G_CheckDemoStatus();
+	// [BC] Support for client-side demos.
+	if ( CLIENTDEMO_IsRecording( ))
+		CLIENTDEMO_FinishRecording( );
 }
 
 
@@ -392,6 +402,11 @@ void STACK_ARGS I_FatalError (const char *error, ...)
 			fprintf (Logfile, "\n**** DIED WITH FATAL ERROR:\n%s\n", errortext);
 			fflush (Logfile);
 		}
+
+		// [BB] Tell the server we're leaving the game.
+		if ( NETWORK_GetState( ) == NETSTATE_CLIENT )
+			CLIENT_QuitNetworkGame( NULL );
+
 //		throw CFatalError (errortext);
 		fprintf (stderr, "%s\n", errortext);
 		exit (-1);
@@ -406,14 +421,14 @@ void STACK_ARGS I_FatalError (const char *error, ...)
 
 void STACK_ARGS I_Error (const char *error, ...)
 {
-    va_list argptr;
-    char errortext[MAX_ERRORTEXT];
+	va_list argptr;
+	char errortext[MAX_ERRORTEXT];
 
-    va_start (argptr, error);
-    vsprintf (errortext, error, argptr);
-    va_end (argptr);
+	va_start (argptr, error);
+	vsprintf (errortext, error, argptr);
+	va_end (argptr);
 
-    throw CRecoverableError (errortext);
+	throw CRecoverableError (errortext);
 }
 
 void I_SetIWADInfo ()
@@ -718,7 +733,8 @@ bool I_WriteIniFailed ()
 
 static const char *pattern;
 
-#if defined(__APPLE__) && MAC_OS_X_VERSION_MAX_ALLOWED < 1080
+// [BB] Added FreeBSD checks
+#if ( defined(__APPLE__) && MAC_OS_X_VERSION_MAX_ALLOWED < 1080 ) || ( defined ( __FreeBSD__ ) && ( __FreeBSD__ < 8 ) )
 static int matchfile (struct dirent *ent)
 #else
 static int matchfile (const struct dirent *ent)
