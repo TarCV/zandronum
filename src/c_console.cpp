@@ -42,6 +42,7 @@
 
 #include "version.h"
 #include "g_game.h"
+#include "c_bind.h"
 #include "c_console.h"
 #include "c_cvars.h"
 #include "c_dispatch.h"
@@ -54,8 +55,6 @@
 #include "v_video.h"
 #include "v_text.h"
 #include "w_wad.h"
-#include "r_main.h"
-#include "r_draw.h"
 #include "sbar.h"
 #include "s_sound.h"
 #include "s_sndseq.h"
@@ -66,6 +65,7 @@
 #include "d_net.h"
 #include "g_level.h"
 #include "d_event.h"
+#include "d_player.h"
 // [BC] New #includes.
 #include "chat.h"
 #include "cl_demo.h"
@@ -103,7 +103,7 @@ extern FBaseCVar *CVars;
 extern FConsoleCommand *Commands[FConsoleCommand::HASH_SIZE];
 
 int			ConCols, PhysRows;
-bool		vidactive = false, gotconback = false;
+bool		vidactive = false;
 bool		cursoron = false;
 int			ConBottom, ConScroll, RowAdjust;
 int			CursorTicker;
@@ -301,7 +301,7 @@ CUSTOM_CVAR (Int, msgmidcolor2, 4, CVAR_ARCHIVE)
 static void maybedrawnow (bool tick, bool force)
 {
 	// FIXME: Does not work right with hw2d
-	if (ConsoleDrawing || !gotconback || screen == NULL || screen->IsLocked () || screen->Accel2D)
+	if (ConsoleDrawing || screen == NULL || screen->IsLocked () || screen->Accel2D || ConFont == NULL)
 	{
 		return;
 	}
@@ -366,7 +366,7 @@ void DequeueConsoleText ()
 	EnqueuedTextTail = &EnqueuedText;
 }
 
-void C_InitConsole (int width, int height, bool ingame)
+void C_InitConback()
 {
 	// [BC] Initialize the name of the logfile.
 	g_szDesiredLogFilename[0] = 0;
@@ -376,30 +376,26 @@ void C_InitConsole (int width, int height, bool ingame)
 	if ( Args->CheckParm( "-host" ))
 		return;
 
-	if ( (vidactive = ingame) )
+	conback = TexMan.CheckForTexture ("CONBACK", FTexture::TEX_MiscPatch);
+
+	if (!conback.isValid())
 	{
-		if (!gotconback)
-		{
-			conback = TexMan.CheckForTexture ("CONBACK", FTexture::TEX_MiscPatch);
-
-			if (!conback.isValid())
-			{
-				conback = TexMan.GetTexture (gameinfo.titlePage, FTexture::TEX_MiscPatch);
-				conshade = MAKEARGB(175,0,0,0);
-				conline = true;
-			}
-			else
-			{
-				conshade = 0;
-				conline = false;
-			}
-
-			gotconback = true;
-		}
+		conback = TexMan.GetTexture (gameinfo.titlePage, FTexture::TEX_MiscPatch);
+		conshade = MAKEARGB(175,0,0,0);
+		conline = true;
 	}
+	else
+	{
+		conshade = 0;
+		conline = false;
+	}
+}
 
+void C_InitConsole (int width, int height, bool ingame)
+{
 	int cwidth, cheight;
 
+	vidactive = ingame;
 	if (ConFont != NULL)
 	{
 		cwidth = ConFont->GetCharWidth ('M');
@@ -721,8 +717,6 @@ static int FlushLines (const char *start, const char *stop)
 			break;
 		}
 	}
-	if (i != TopLine)
-		i = i;
 	return i;
 }
 
@@ -883,7 +877,7 @@ void AddToConsole (int printlevel, const char *text)
 						// The line start is outside the buffer. 
 						// Make space for the newly inserted stuff.
 						size_t movesize = work-linestart;
-						memmove(work + movesize, work, strlen(work));
+						memmove(work + movesize, work, strlen(work)+1);
 						work_p += movesize;
 						linestart = work;
 					}
@@ -1119,7 +1113,7 @@ void C_AdjustBottom ()
 
 	// [Leo] Keep the fullconsole if we are requesting/receiving a snapshot.
 	if ( gamestate == GS_FULLCONSOLE || gamestate == GS_STARTUP || 
-		(( NETWORK_InClientMode( ) == true ) && ( CLIENT_GetConnectionState() != CTS_ACTIVE )) )
+		( NETWORK_InClientMode() && ( CLIENT_GetConnectionState() != CTS_ACTIVE )) )
 		ConBottom = SCREENHEIGHT;
 	else if (ConBottom > SCREENHEIGHT / 2 || ConsoleState == c_down)
 		ConBottom = SCREENHEIGHT / 2;
@@ -1334,7 +1328,7 @@ void C_DrawConsole (bool hw2d)
 		(viewwindowx || viewwindowy) &&
 		viewactive)
 	{
-		BorderNeedRefresh = screen->GetPageCount ();
+		V_SetBorderNeedRefresh();
 	}
 
 	oldbottom = ConBottom;
@@ -1430,8 +1424,8 @@ void C_DrawConsole (bool hw2d)
 			{
 				screen->Dim (PalEntry ((unsigned char)(player->BlendR*255), (unsigned char)(player->BlendG*255), (unsigned char)(player->BlendB*255)),
 					player->BlendA, 0, ConBottom, screen->GetWidth(), screen->GetHeight() - ConBottom);
-				SB_state = screen->GetPageCount ();
-				BorderNeedRefresh = screen->GetPageCount ();
+				ST_SetNeedRefresh();
+				V_SetBorderNeedRefresh();
 			}
 		}
 	}
@@ -1538,7 +1532,7 @@ void C_ToggleConsole ()
 {
 	// [Leo] Don't let the console close while requesting/receiving a snapshot.
 	if (( NETWORK_GetState( ) == NETSTATE_SERVER ) ||
-		(( NETWORK_InClientMode( ) == true ) && ( CLIENT_GetConnectionState() != CTS_ACTIVE )))
+		( NETWORK_InClientMode() && ( CLIENT_GetConnectionState() != CTS_ACTIVE )))
 		return;
 
 	if (gamestate == GS_DEMOSCREEN || demoplayback)
@@ -1580,7 +1574,7 @@ void C_HideConsole ()
 {
 	// [Leo] Don't let the console close while requesting/receiving a snapshot.
 	if (( NETWORK_GetState( ) == NETSTATE_SERVER ) ||
-		(( NETWORK_InClientMode( ) == true ) && ( CLIENT_GetConnectionState() != CTS_ACTIVE )))
+		( NETWORK_InClientMode() && ( CLIENT_GetConnectionState() != CTS_ACTIVE )))
 		return;
 
 	if (gamestate != GS_FULLCONSOLE)
@@ -1953,6 +1947,12 @@ static bool C_HandleKey (event_t *ev, BYTE *buffer, int len)
 			break;
 		
 		case '`':
+			// Check to see if we have ` bound to the console before accepting
+			// it as a way to close the console.
+			if (Bindings.GetBinding(KEY_GRAVE).CompareNoCase("toggleconsole"))
+			{
+				break;
+			}
 		case GK_ESCAPE:
 			// Close console and clear command line. But if we're in the
 			// fullscreen console mode, there's nothing to fall back on
@@ -1962,7 +1962,7 @@ static bool C_HandleKey (event_t *ev, BYTE *buffer, int len)
 				return false;
 			}
 			else if ((gamestate == GS_FULLCONSOLE) ||
-				((( NETWORK_GetState( ) == NETSTATE_CLIENT ) || ( CLIENTDEMO_IsPlaying( ))) &&
+				( NETWORK_InClientMode() &&
 				( CLIENT_GetConnectionState( ) != CTS_ACTIVE )))
 			{
 				C_DoCommand ("menu_main");
@@ -1999,7 +1999,7 @@ static bool C_HandleKey (event_t *ev, BYTE *buffer, int len)
 		}
 		break;
 
-#ifdef unix
+#ifdef __unix__
 	case EV_GUI_MButtonDown:
 		C_PasteText(I_GetFromClipboard(true), buffer, len);
 		break;
@@ -2399,7 +2399,20 @@ static bool C_TabCompleteList ()
 		Printf (TEXTCOLOR_BLUE "Completions for %s:\n", CmdLine+2);
 		for (i = TabPos; nummatches > 0; ++i, --nummatches)
 		{
-			Printf ("%-*s", int(maxwidth), TabCommands[i].TabName.GetChars());
+			// [Dusk] Print console commands blue, CVars green, aliases red.
+			const char* colorcode = "";
+			FConsoleCommand* ccmd;
+			if (FindCVar (TabCommands[i].TabName, NULL))
+				colorcode = TEXTCOLOR_GREEN;
+			else if ((ccmd = FConsoleCommand::FindByName (TabCommands[i].TabName)) != NULL)
+			{
+				if (ccmd->IsAlias())
+					colorcode = TEXTCOLOR_RED;
+				else
+					colorcode = TEXTCOLOR_LIGHTBLUE;
+			}
+
+			Printf ("%s%-*s", colorcode, int(maxwidth), TabCommands[i].TabName.GetChars());
 			x += maxwidth;
 			if (x > ConCols - maxwidth)
 			{

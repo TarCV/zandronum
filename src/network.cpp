@@ -95,12 +95,10 @@ enum LumpAuthenticationMode {
 	ALL_LUMPS
 };
 
-// [BB] Implement the string table and the conversion functions for the SVC and SVC2 enums (so far only needed in debug mode).
-#ifdef _DEBUG
+// [BB] Implement the string table and the conversion functions for the SVC and SVC2 enums.
 #define GENERATE_ENUM_STRINGS  // Start string generation
 #include "network_enums.h"
 #undef GENERATE_ENUM_STRINGS   // Stop string generation
-#endif
 
 void SERVERCONSOLE_UpdateIP( NETADDRESS_s LocalAddress );
 
@@ -147,6 +145,9 @@ static	TArray<const PClass*> g_ActorNetworkIndexClassPointerMap;
 // [BB]
 static GeoIP * g_GeoIPDB = NULL;
 
+// [BB]
+extern int restart;
+
 //*****************************************************************************
 //	PROTOTYPES
 
@@ -169,94 +170,110 @@ void NETWORK_Construct( USHORT usPort, bool bAllocateLANSocket )
 	// Initialize the Huffman buffer.
 	HUFFMAN_Construct( );
 
+	if ( !restart )
+	{
 #ifdef __WIN32__
-	// [BB] Linux doesn't know WSADATA, so this may not be moved outside the ifdef.
-	WSADATA			WSAData;
-	if ( WSAStartup( 0x0101, &WSAData ))
-		network_Error( "Winsock initialization failed!\n" );
+		// [BB] Linux doesn't know WSADATA, so this may not be moved outside the ifdef.
+		WSADATA			WSAData;
+		if ( WSAStartup( 0x0101, &WSAData ))
+			network_Error( "Winsock initialization failed!\n" );
 
-	Printf( "Winsock initialization succeeded!\n" );
+		Printf( "Winsock initialization succeeded!\n" );
 #endif
 
-	ULONG ulInAddr = INADDR_ANY;
-	const char* pszIPAddress = Args->CheckValue( "-useip" );
-	// [BB] An IP was specfied. Check if it's valid and if it is, try to bind our socket to it.
-	if ( pszIPAddress )
-	{
-		ULONG requestedIP = inet_addr( pszIPAddress );
-		if ( requestedIP == INADDR_NONE )
+		ULONG ulInAddr = INADDR_ANY;
+		const char* pszIPAddress = Args->CheckValue( "-useip" );
+		// [BB] An IP was specfied. Check if it's valid and if it is, try to bind our socket to it.
+		if ( pszIPAddress )
 		{
-			sprintf( szString, "NETWORK_Construct: %s is not a valid IP address\n", pszIPAddress );
-			network_Error( szString );
-		}
-		else
-			ulInAddr = requestedIP;
-	}
-
-	g_usLocalPort = usPort;
-
-	// Allocate a socket, and attempt to bind it to the given port.
-	g_NetworkSocket = network_AllocateSocket( );
-	// [BB] If we can't allocate a socket, sending / receiving net packets won't work.
-	if ( g_NetworkSocket == INVALID_SOCKET )
-		network_Error( "NETWORK_Construct: Couldn't allocate socket. You will not be able to host or join servers.\n" );
-	else if ( network_BindSocketToPort( g_NetworkSocket, ulInAddr, g_usLocalPort, false ) == false )
-	{
-		bSuccess = true;
-		bool bSuccessIP = true;
-		usNewPort = g_usLocalPort;
-		while ( network_BindSocketToPort( g_NetworkSocket, ulInAddr, ++usNewPort, false ) == false )
-		{
-			// Didn't find an available port. Oh well...
-			if ( usNewPort == g_usLocalPort )
+			ULONG requestedIP = inet_addr( pszIPAddress );
+			if ( requestedIP == INADDR_NONE )
 			{
-				// [BB] We couldn't use the specified IP, so just try any.
-				if ( ulInAddr != INADDR_ANY )
+				sprintf( szString, "NETWORK_Construct: %s is not a valid IP address\n", pszIPAddress );
+				network_Error( szString );
+			}
+			else
+				ulInAddr = requestedIP;
+		}
+
+		g_usLocalPort = usPort;
+
+		// Allocate a socket, and attempt to bind it to the given port.
+		g_NetworkSocket = network_AllocateSocket( );
+		// [BB] If we can't allocate a socket, sending / receiving net packets won't work.
+		if ( g_NetworkSocket == INVALID_SOCKET )
+			network_Error( "NETWORK_Construct: Couldn't allocate socket. You will not be able to host or join servers.\n" );
+		else if ( network_BindSocketToPort( g_NetworkSocket, ulInAddr, g_usLocalPort, false ) == false )
+		{
+			bSuccess = true;
+			bool bSuccessIP = true;
+			usNewPort = g_usLocalPort;
+			while ( network_BindSocketToPort( g_NetworkSocket, ulInAddr, ++usNewPort, false ) == false )
+			{
+				// Didn't find an available port. Oh well...
+				if ( usNewPort == g_usLocalPort )
 				{
-					ulInAddr = INADDR_ANY;
-					bSuccessIP = false;
-					continue;
+					// [BB] We couldn't use the specified IP, so just try any.
+					if ( ulInAddr != INADDR_ANY )
+					{
+						ulInAddr = INADDR_ANY;
+						bSuccessIP = false;
+						continue;
+					}
+					bSuccess = false;
+					break;
 				}
-				bSuccess = false;
-				break;
+			}
+
+			if ( bSuccess == false )
+			{
+				sprintf( szString, "NETWORK_Construct: Couldn't bind socket to port: %d\n", g_usLocalPort );
+				network_Error( szString );
+			}
+			else if ( bSuccessIP == false )
+			{
+				sprintf( szString, "NETWORK_Construct: Couldn't bind socket to IP %s, using the default IP instead:\n", pszIPAddress );
+				network_Error( szString );
+			}
+			else
+			{
+				Printf( "NETWORK_Construct: Couldn't bind to %d. Binding to %d instead...\n", g_usLocalPort, usNewPort );
+				g_usLocalPort = usNewPort;
 			}
 		}
 
-		if ( bSuccess == false )
+		ulArg = true;
+		if ( ioctlsocket( g_NetworkSocket, FIONBIO, &ulArg ) == -1 )
+			printf( "network_AllocateSocket: ioctl FIONBIO: %s", strerror( errno ));
+
+		// If we're not starting a server, setup a socket to listen for LAN servers.
+		if ( bAllocateLANSocket )
 		{
-			sprintf( szString, "NETWORK_Construct: Couldn't bind socket to port: %d\n", g_usLocalPort );
-			network_Error( szString );
+			g_LANSocket = network_AllocateSocket( );
+			if ( network_BindSocketToPort( g_LANSocket, ulInAddr, DEFAULT_BROADCAST_PORT, true ) == false )
+			{
+				sprintf( szString, "network_BindSocketToPort: Couldn't bind LAN socket to port: %d. You will not be able to see LAN servers in the browser.", DEFAULT_BROADCAST_PORT );
+				network_Error( szString );
+				// [BB] The socket won't work in this case, make sure not to use it.
+				g_bLANSocketInvalid = true;
+			}
+
+			if ( ioctlsocket( g_LANSocket, FIONBIO, &ulArg ) == -1 )
+				printf( "network_AllocateSocket: ioctl FIONBIO: %s", strerror( errno ));
 		}
-		else if ( bSuccessIP == false )
-		{
-			sprintf( szString, "NETWORK_Construct: Couldn't bind socket to IP %s, using the default IP instead:\n", pszIPAddress );
-			network_Error( szString );
-		}
+
+		// [BB] Get and save our local IP.
+		if ( ( ulInAddr == INADDR_ANY ) || ( pszIPAddress == NULL ) )
+			g_LocalAddress = NETWORK_GetLocalAddress( );
+		// [BB] We are using a specified IP, so we don't need to figure out what IP we have, but just use the specified one.
 		else
 		{
-			Printf( "NETWORK_Construct: Couldn't bind to %d. Binding to %d instead...\n", g_usLocalPort, usNewPort );
-			g_usLocalPort = usNewPort;
-		}
-	}
-
-	ulArg = true;
-	if ( ioctlsocket( g_NetworkSocket, FIONBIO, &ulArg ) == -1 )
-		printf( "network_AllocateSocket: ioctl FIONBIO: %s", strerror( errno ));
-
-	// If we're not starting a server, setup a socket to listen for LAN servers.
-	if ( bAllocateLANSocket )
-	{
-		g_LANSocket = network_AllocateSocket( );
-		if ( network_BindSocketToPort( g_LANSocket, ulInAddr, DEFAULT_BROADCAST_PORT, true ) == false )
-		{
-			sprintf( szString, "network_BindSocketToPort: Couldn't bind LAN socket to port: %d. You will not be able to see LAN servers in the browser.", DEFAULT_BROADCAST_PORT );
-			network_Error( szString );
-			// [BB] The socket won't work in this case, make sure not to use it.
-			g_bLANSocketInvalid = true;
+			NETWORK_StringToAddress ( pszIPAddress, &g_LocalAddress );
+			g_LocalAddress.usPort = htons ( NETWORK_GetLocalPort() );
 		}
 
-		if ( ioctlsocket( g_LANSocket, FIONBIO, &ulArg ) == -1 )
-			printf( "network_AllocateSocket: ioctl FIONBIO: %s", strerror( errno ));
+		// Print out our local IP address.
+		Printf( "IP address %s\n", NETWORK_AddressToString( g_LocalAddress ));
 	}
 
 	// Init our read buffer.
@@ -266,19 +283,6 @@ void NETWORK_Construct( USHORT usPort, bool bAllocateLANSocket )
 	// the incoming UDP packet.
 	NETWORK_InitBuffer( &g_NetworkMessage, ((MAX_UDP_PACKET * 8) / 3 + 1), BUFFERTYPE_READ );
 	NETWORK_ClearBuffer( &g_NetworkMessage );
-
-	// [BB] Get and save our local IP.
-	if ( ( ulInAddr == INADDR_ANY ) || ( pszIPAddress == NULL ) )
-		g_LocalAddress = NETWORK_GetLocalAddress( );
-	// [BB] We are using a specified IP, so we don't need to figure out what IP we have, but just use the specified one.
-	else
-	{
-		NETWORK_StringToAddress ( pszIPAddress, &g_LocalAddress );
-		g_LocalAddress.usPort = htons ( NETWORK_GetLocalPort() );
-	}
-
-	// Print out our local IP address.
-	Printf( "IP address %s\n", NETWORK_AddressToString( g_LocalAddress ));
 
 	// If hosting, update the server GUI.
 	if( NETWORK_GetState() == NETSTATE_SERVER )
@@ -460,7 +464,7 @@ void NETWORK_Construct( USHORT usPort, bool bAllocateLANSocket )
 		// "'THINGS' not found in'. I don't think this is the case in recent ZDoom versions?
 		try
 		{
-			if (( mdata = P_OpenMapData( info.mapname )) != NULL )
+			if (( mdata = P_OpenMapData( info.mapname, false )) != NULL )
 			{
 				// [TP] The wad that had this map is no longer optional.
 				Wads.LumpIsMandatory( mdata->lumpnum );
@@ -495,6 +499,10 @@ void NETWORK_Destruct( void )
 
 	// [BB] Delete the GeoIP database.
 	GeoIP_delete ( g_GeoIPDB );
+	g_GeoIPDB = NULL;
+
+	// [BB] This needs to be cleared since we assume it to be empty during a restart.
+	g_LumpNumsToAuthenticate.Clear();
 }
 
 //*****************************************************************************
@@ -822,7 +830,7 @@ NETADDRESS_s NETWORK_GetLocalAddress( void )
 #ifdef unix
 	// [BB] The "gethostname -> gethostbyname" trick didn't reveal the local IP.
 	// Now we need to resort to something more complicated.
-	if ( stringToAddress == false );
+	if ( stringToAddress == false )
 	{
 #ifndef __FreeBSD__
 		unsigned char      *u;
@@ -1061,7 +1069,7 @@ FString NETWORK_MapCollectionChecksum( )
 		if ( P_CheckIfMapExists ( mname ) == false )
 			continue;
 
-		MapData* mdata = P_OpenMapData( mname );
+		MapData* mdata = P_OpenMapData( mname, false );
 		if ( !mdata )
 			continue;
 
@@ -1166,7 +1174,7 @@ bool NETWORK_IsActorClientHandled( const AActor *pActor )
 //
 bool NETWORK_InClientModeAndActorNotClientHandled( const AActor *pActor )
 {
-	return ( NETWORK_InClientMode( ) && ( NETWORK_IsActorClientHandled ( pActor ) == false ) );
+	return ( NETWORK_InClientMode() && ( NETWORK_IsActorClientHandled ( pActor ) == false ) );
 }
 
 //*****************************************************************************
