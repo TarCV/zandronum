@@ -137,33 +137,34 @@ void CLIENTCOMMANDS_UserInfo( ULONG ulFlags )
 
 	if ( ulFlags & USERINFO_NAME )
 	{ // [RC] Clean the name before we use it
-		V_CleanPlayerName(players[consoleplayer].userinfo.netname);
-		NETWORK_WriteString( &CLIENT_GetLocalBuffer( )->ByteStream, players[consoleplayer].userinfo.netname );
+		// [BB] the name is already checked when storing it, so this shouldn't be necessary.
+		players[consoleplayer].userinfo.NameChanged ( players[consoleplayer].userinfo.GetName() );
+		NETWORK_WriteString( &CLIENT_GetLocalBuffer( )->ByteStream, players[consoleplayer].userinfo.GetName() );
 	}
 	if ( ulFlags & USERINFO_GENDER )
-		NETWORK_WriteByte( &CLIENT_GetLocalBuffer( )->ByteStream, players[consoleplayer].userinfo.gender );
+		NETWORK_WriteByte( &CLIENT_GetLocalBuffer( )->ByteStream, players[consoleplayer].userinfo.GetGender() );
 	if ( ulFlags & USERINFO_COLOR )
-		NETWORK_WriteLong( &CLIENT_GetLocalBuffer( )->ByteStream, players[consoleplayer].userinfo.color );
+		NETWORK_WriteLong( &CLIENT_GetLocalBuffer( )->ByteStream, players[consoleplayer].userinfo.GetColor() );
 	if ( ulFlags & USERINFO_AIMDISTANCE )
-		NETWORK_WriteLong( &CLIENT_GetLocalBuffer( )->ByteStream, players[consoleplayer].userinfo.aimdist );
+		NETWORK_WriteLong( &CLIENT_GetLocalBuffer( )->ByteStream, players[consoleplayer].userinfo.GetAimDist() );
 	if ( ulFlags & USERINFO_SKIN )
-		NETWORK_WriteString( &CLIENT_GetLocalBuffer( )->ByteStream, skins[players[consoleplayer].userinfo.skin].name );
+		NETWORK_WriteString( &CLIENT_GetLocalBuffer( )->ByteStream, skins[players[consoleplayer].userinfo.GetSkin()].name );
 	if ( ulFlags & USERINFO_RAILCOLOR )
-		NETWORK_WriteLong( &CLIENT_GetLocalBuffer( )->ByteStream, players[consoleplayer].userinfo.lRailgunTrailColor );
+		NETWORK_WriteLong( &CLIENT_GetLocalBuffer( )->ByteStream, players[consoleplayer].userinfo.GetRailColor() );
 	if ( ulFlags & USERINFO_HANDICAP )
-		NETWORK_WriteByte( &CLIENT_GetLocalBuffer( )->ByteStream, players[consoleplayer].userinfo.lHandicap );
+		NETWORK_WriteByte( &CLIENT_GetLocalBuffer( )->ByteStream, players[consoleplayer].userinfo.GetHandicap() );
 	if ( ulFlags & USERINFO_TICSPERUPDATE )
-		NETWORK_WriteByte( &CLIENT_GetLocalBuffer( )->ByteStream, players[consoleplayer].userinfo.ulTicsPerUpdate );
+		NETWORK_WriteByte( &CLIENT_GetLocalBuffer( )->ByteStream, players[consoleplayer].userinfo.GetTicsPerUpdate() );
 	if ( ulFlags & USERINFO_CONNECTIONTYPE )
-		NETWORK_WriteByte( &CLIENT_GetLocalBuffer( )->ByteStream, players[consoleplayer].userinfo.ulConnectionType );
+		NETWORK_WriteByte( &CLIENT_GetLocalBuffer( )->ByteStream, players[consoleplayer].userinfo.GetConnectionType() );
 	if ( ulFlags & USERINFO_CLIENTFLAGS )
-		NETWORK_WriteByte( &CLIENT_GetLocalBuffer( )->ByteStream, players[consoleplayer].userinfo.clientFlags ); // [CK] Bitfields are used now.
+		NETWORK_WriteByte( &CLIENT_GetLocalBuffer( )->ByteStream, players[consoleplayer].userinfo.GetClientFlags() ); // [CK] Bitfields are used now.
 	if (( PlayerClasses.Size( ) > 1 ) && ( ulFlags & USERINFO_PLAYERCLASS ))
 	{
-		if ( players[consoleplayer].userinfo.PlayerClass == -1 )
+		if ( players[consoleplayer].userinfo.GetPlayerClassNum() == -1 )
 			NETWORK_WriteString( &CLIENT_GetLocalBuffer( )->ByteStream, "random" );
 		else
-			NETWORK_WriteString( &CLIENT_GetLocalBuffer( )->ByteStream, PlayerClasses[players[consoleplayer].userinfo.PlayerClass].Type->Meta.GetMetaString( APMETA_DisplayName ));
+			NETWORK_WriteString( &CLIENT_GetLocalBuffer( )->ByteStream, PlayerClasses[players[consoleplayer].userinfo.GetPlayerClassNum()].Type->Meta.GetMetaString( APMETA_DisplayName ));
 	}
 }
 
@@ -553,21 +554,22 @@ void CLIENTCOMMANDS_RequestInventoryDrop( AInventory *pItem )
 
 //*****************************************************************************
 //
-void CLIENTCOMMANDS_Puke ( LONG lScript, int args[3] )
+void CLIENTCOMMANDS_Puke ( int script, int args[4], bool always )
 {
-	// [Dusk] Calculate argn from args.
-	int argn = ( args[2] != 0 ) ? 3 :
+	// [TP] Calculate argn from args.
+	int argn = ( args[3] != 0 ) ? 4 :
+	           ( args[2] != 0 ) ? 3 :
 	           ( args[1] != 0 ) ? 2 :
 	           ( args[0] != 0 ) ? 1 : 0;
 
 	NETWORK_WriteByte( &CLIENT_GetLocalBuffer( )->ByteStream, CLC_PUKE );
-	NETWORK_WriteShort( &CLIENT_GetLocalBuffer( )->ByteStream, (lScript < 0) ? -lScript : lScript );
+	NETWORK_WriteLong( &CLIENT_GetLocalBuffer( )->ByteStream, script );
 	NETWORK_WriteByte( &CLIENT_GetLocalBuffer( )->ByteStream, argn );
 
-	for ( int Idx = 0; Idx < argn; ++Idx )
-		NETWORK_WriteLong ( &CLIENT_GetLocalBuffer( )->ByteStream, args[Idx] );
+	for ( int i = 0; i < argn; ++i )
+		NETWORK_WriteLong ( &CLIENT_GetLocalBuffer( )->ByteStream, args[i] );
 
-	NETWORK_WriteByte( &CLIENT_GetLocalBuffer( )->ByteStream, (lScript < 0) );
+	NETWORK_WriteByte( &CLIENT_GetLocalBuffer( )->ByteStream, always );
 }
 
 //*****************************************************************************

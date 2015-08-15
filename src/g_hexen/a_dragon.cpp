@@ -35,8 +35,7 @@ static void DragonSeek (AActor *actor, angle_t thresh, angle_t turnMax)
 	AActor *mo;
 
 	// [BB] Let the server do this.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -100,8 +99,8 @@ static void DragonSeek (AActor *actor, angle_t thresh, angle_t turnMax)
 			if (actor->CheckMeleeRange ())
 			{
 				int damage = pr_dragonseek.HitDice (10);
-				P_DamageMobj (actor->target, actor, actor, damage, NAME_Melee);
-				P_TraceBleed (damage, actor->target, actor);
+				int newdam = P_DamageMobj (actor->target, actor, actor, damage, NAME_Melee);
+				P_TraceBleed (newdam > 0 ? newdam : damage, actor->target, actor);
 				S_Sound (actor, CHAN_WEAPON, actor->AttackSound, 1, ATTN_NORM);
 
 				// [BB] If we're the server, tell the clients to play the sound.
@@ -190,8 +189,7 @@ static void DragonSeek (AActor *actor, angle_t thresh, angle_t turnMax)
 DEFINE_ACTION_FUNCTION(AActor, A_DragonInitFlight)
 {
 	// [BB] Let the server do this.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -225,8 +223,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_DragonFlight)
 	angle_t angle;
 
 	// [BB] Let the server do this.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -244,8 +241,8 @@ DEFINE_ACTION_FUNCTION(AActor, A_DragonFlight)
 		if (abs(self->angle-angle) < ANGLE_45/2 && self->CheckMeleeRange())
 		{
 			int damage = pr_dragonflight.HitDice (8);
-			P_DamageMobj (self->target, self, self, damage, NAME_Melee);
-			P_TraceBleed (damage, self->target, self);
+			int newdam = P_DamageMobj (self->target, self, self, damage, NAME_Melee);
+			P_TraceBleed (newdam > 0 ? newdam : damage, self->target, self);
 			S_Sound (self, CHAN_WEAPON, self->AttackSound, 1, ATTN_NORM);
 
 			// [BB] If we're the server, tell the clients to play the sound.
@@ -299,8 +296,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_DragonFlap)
 DEFINE_ACTION_FUNCTION(AActor, A_DragonAttack)
 {
 	// [BB] Let the server do this.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -351,8 +347,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_DragonPain)
 	CALL_ACTION(A_Pain, self);
 
 	// [BB] Let the server do this.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
