@@ -39,6 +39,7 @@
 #include "i_system.h"
 #include "thingdef/thingdef.h"
 #include "doomstat.h"
+#include "farchive.h"
 // [BB] New #includes.
 #include "deathmatch.h"
 #include "gamemode.h"
@@ -402,8 +403,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_SpawnSingleItem)
 		return;
 
 	// [BC] Let the server respawn this in client mode.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}

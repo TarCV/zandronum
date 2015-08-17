@@ -90,7 +90,6 @@
 #include "possession.h"
 #include "s_sndseq.h"
 #include "version.h"
-#include "m_menu.h"
 #include "v_text.h"
 #include "w_wad.h"
 #include "p_acs.h"
@@ -118,6 +117,7 @@
 #include "network/cl_auth.h"
 #include "network/sv_auth.h"
 #include "unlagged.h" // [CK]
+#include "r_data/colormaps.h"
 
 //*****************************************************************************
 //	MISC CRAP THAT SHOULDN'T BE HERE BUT HAS TO BE BECAUSE OF SLOPPY CODING
@@ -500,6 +500,11 @@ void SERVER_Construct( void )
 	SERVER_MASTER_Construct( );
 	SERVER_SAVE_Construct( );
 	SERVER_RCON_Construct( );
+
+	for (int i = 0; i < MAXPLAYERS; i++)
+	{
+		players[i].userinfo.Reset();
+	}
 }
 
 //*****************************************************************************
@@ -672,7 +677,7 @@ void SERVER_Tick( void )
 			if ( g_aClients[ulIdx].lLastMoveTick != gametic && g_aClients[ulIdx].lOverMovementLevel > -MAX_OVERMOVEMENT_LEVEL )
 			{
 				g_aClients[ulIdx].lOverMovementLevel--;
-//					Printf( "%s: -- (%d)\n", players[ulIdx].userinfo.netname, g_aClients[ulIdx].lOverMovementLevel );
+//					Printf( "%s: -- (%d)\n", players[ulIdx].userinfo.GetName(), g_aClients[ulIdx].lOverMovementLevel );
 			}
 
 			// [BB] If the client didn't authenticate the new map by now, likely his authentication packet was lost.
@@ -1160,14 +1165,14 @@ void SERVER_SendChatMessage( ULONG ulPlayer, ULONG ulMode, const char *pszString
 		if ( ulPlayer == MAXPLAYERS )
 			Printf( "* <server>%s\n", pszString );
 		else
-			Printf( "* %s%s\n", players[ulPlayer].userinfo.netname, pszString );
+			Printf( "* %s%s\n", players[ulPlayer].userinfo.GetName(), pszString );
 	}
 	else
 	{
 		if ( ulPlayer == MAXPLAYERS )
 			Printf( "<server>: %s\n", pszString );
 		else
-			Printf( "%s: %s\n", players[ulPlayer].userinfo.netname, pszString );
+			Printf( "%s: %s\n", players[ulPlayer].userinfo.GetName(), pszString );
 	}
 	if( sv_markchatlines && sv_logfiletimestampOldValue )
 		sv_logfiletimestamp = true;
@@ -1235,7 +1240,7 @@ bool SERVER_PerformAuthenticationChecksum( BYTESTREAM_s *pByteStream )
 	FString		clientTextmapString;
 
 	// [BB] Open the map. Since we are already using the map, we won't get a NULL pointer.
-	pMap = P_OpenMapData( level.mapname );
+	pMap = P_OpenMapData( level.mapname, false );
 
 	// Generate checksums for the map lumps.
 	// [Dusk] Only if not UDMF. In UDMF, make the TEXTMAP checksum instead.
@@ -1474,6 +1479,7 @@ void SERVER_ConnectNewPlayer( BYTESTREAM_s *pByteStream )
 
 	// Read in the user's userinfo. If it returns false, the player was kicked for flooding
 	// (though this shouldn't happen anymore).
+	players[g_lCurrentClient].userinfo.Reset();
 	if ( SERVER_GetUserInfo( pByteStream, false ) == false )
 		return;
 
@@ -1574,7 +1580,7 @@ void SERVER_ConnectNewPlayer( BYTESTREAM_s *pByteStream )
 	}
 
 	// Check and see if this is a disconnected player. If so, restore his fragcount.
-	pSavedInfo = SERVER_SAVE_GetSavedInfo( players[g_lCurrentClient].userinfo.netname, g_aClients[g_lCurrentClient].Address );
+	pSavedInfo = SERVER_SAVE_GetSavedInfo( players[g_lCurrentClient].userinfo.GetName(), g_aClients[g_lCurrentClient].Address );
 	if (( pSavedInfo ) && ( g_aClients[g_lCurrentClient].bWantNoRestoreFrags == false ))
 	{
 		PLAYER_SetFragcount( &players[g_lCurrentClient], pSavedInfo->lFragCount, false, false );
@@ -1602,12 +1608,12 @@ void SERVER_ConnectNewPlayer( BYTESTREAM_s *pByteStream )
 			countryInfo.AppendFormat ( " (from: %s)", NETWORK_GetCountryCodeFromAddress ( SERVER_GetClient( g_lCurrentClient )->Address ).GetChars() );
 
 		if ( players[g_lCurrentClient].bSpectating )
-			SERVER_Printf( PRINT_HIGH, "%s \\c-has connected.%s\n", players[g_lCurrentClient].userinfo.netname, countryInfo.GetChars() );
+			SERVER_Printf( PRINT_HIGH, "%s \\c-has connected.%s\n", players[g_lCurrentClient].userinfo.GetName(), countryInfo.GetChars() );
 		else
-			SERVER_Printf( PRINT_HIGH, "%s \\c-entered the game.%s\n", players[g_lCurrentClient].userinfo.netname, countryInfo.GetChars() );
+			SERVER_Printf( PRINT_HIGH, "%s \\c-entered the game.%s\n", players[g_lCurrentClient].userinfo.GetName(), countryInfo.GetChars() );
 	}
 
-	BOTCMD_SetLastJoinedPlayer( players[g_lCurrentClient].userinfo.netname );
+	BOTCMD_SetLastJoinedPlayer( players[g_lCurrentClient].userinfo.GetName() );
 
 	// Tell the bots that a new players has joined the game!
 	for ( ulIdx = 0; ulIdx < MAXPLAYERS; ulIdx++ )
@@ -2112,18 +2118,19 @@ bool SERVER_GetUserInfo( BYTESTREAM_s *pByteStream, bool bAllowKick )
 	// Read in the player's name.
 	if ( ulFlags & USERINFO_NAME )
 	{
-		sprintf( szOldPlayerName, "%s", pPlayer->userinfo.netname );
+		sprintf( szOldPlayerName, "%s", pPlayer->userinfo.GetName() );
 		nameString = NETWORK_ReadString( pByteStream );
 
 		if ( nameString.Len() > MAXPLAYERNAME )
 			nameString.Truncate(MAXPLAYERNAME);
 
+		FString nameStringCopy = nameString;
+
 		// [RC] Remove bad characters from their username.
-		strcpy( pPlayer->userinfo.netname, nameString.GetChars() );
 		V_CleanPlayerName(nameString);
 
 		// The user really shouldn't have an invalid name unless they are using a hacked executable.
-		if ( nameString.Compare( pPlayer->userinfo.netname ) != 0 )
+		if ( nameString.Compare( nameStringCopy ) != 0 )
 		{
 			bKickPlayer = true;
 			kickReason = "User name contains illegal characters." ;
@@ -2132,14 +2139,14 @@ bool SERVER_GetUserInfo( BYTESTREAM_s *pByteStream, bool bAllowKick )
 		// [BB] It's extremely critical that we NEVER use the uncleaned player name!
 		// If this is omitted, for example the RCON password can be optained by just using
 		// a tampered name.
-		strcpy( pPlayer->userinfo.netname, nameString.GetChars() );
+		pPlayer->userinfo.NameChanged ( nameString.GetChars() );
 
 		if ( g_aClients[g_lCurrentClient].State == CLS_SPAWNED )
 		{
 			char	szPlayerNameNoColor[MAXPLAYERNAME+1];
 			char	szOldPlayerNameNoColor[MAXPLAYERNAME+1];
 
-			sprintf( szPlayerNameNoColor, "%s", pPlayer->userinfo.netname );
+			sprintf( szPlayerNameNoColor, "%s", pPlayer->userinfo.GetName() );
 			sprintf( szOldPlayerNameNoColor, "%s", szOldPlayerName );
 
 			V_ColorizeString( szPlayerNameNoColor );
@@ -2149,7 +2156,7 @@ bool SERVER_GetUserInfo( BYTESTREAM_s *pByteStream, bool bAllowKick )
 
 			if ( stricmp( szPlayerNameNoColor, szOldPlayerNameNoColor ) != 0 )
 			{
-				SERVER_Printf( PRINT_HIGH, "%s \\c-is now known as %s\n", szOldPlayerName, pPlayer->userinfo.netname );
+				SERVER_Printf( PRINT_HIGH, "%s \\c-is now known as %s\n", szOldPlayerName, pPlayer->userinfo.GetName() );
 
 				// [RC] Update clients using the RCON utility.
 				SERVER_RCON_UpdateInfo( SVRCU_PLAYERDATA );
@@ -2158,13 +2165,12 @@ bool SERVER_GetUserInfo( BYTESTREAM_s *pByteStream, bool bAllowKick )
 	}
 
 	// Read in gender, color, and aim distance.
-	// [BB] Make sure that the gender is valid.
 	if ( ulFlags & USERINFO_GENDER )
-		pPlayer->userinfo.gender = clamp ( NETWORK_ReadByte( pByteStream ), 0, 2 );
+		pPlayer->userinfo.GenderNumChanged ( NETWORK_ReadByte( pByteStream ) );
 	if ( ulFlags & USERINFO_COLOR )
-		pPlayer->userinfo.color = NETWORK_ReadLong( pByteStream );
+		pPlayer->userinfo.ColorChanged ( NETWORK_ReadLong( pByteStream ) );
 	if ( ulFlags & USERINFO_AIMDISTANCE )
-		pPlayer->userinfo.aimdist = NETWORK_ReadLong( pByteStream );
+		*static_cast<FFloatCVar *>(pPlayer->userinfo[NAME_Autoaim]) = static_cast<float> ( NETWORK_ReadLong( pByteStream ) ) / ANGLE_1 ;
 
 	// Read in the player's skin, and make sure it's valid.
 	if ( ulFlags & USERINFO_SKIN )
@@ -2174,29 +2180,23 @@ bool SERVER_GetUserInfo( BYTESTREAM_s *pByteStream, bool bAllowKick )
 
 	// Read in the player's railgun color.
 	if ( ulFlags & USERINFO_RAILCOLOR )
-		pPlayer->userinfo.lRailgunTrailColor = NETWORK_ReadLong( pByteStream );
+		pPlayer->userinfo.RailColorChanged ( NETWORK_ReadLong( pByteStream ) );
 
 	// Read in the player's handicap.
 	if ( ulFlags & USERINFO_HANDICAP )
-	{
-		pPlayer->userinfo.lHandicap = NETWORK_ReadByte( pByteStream );
-		if ( pPlayer->userinfo.lHandicap < 0 )
-			pPlayer->userinfo.lHandicap = 0;
-		else if ( pPlayer->userinfo.lHandicap > deh.MaxSoulsphere )
-			pPlayer->userinfo.lHandicap = deh.MaxSoulsphere;
-	}
+		pPlayer->userinfo.HandicapChanged ( NETWORK_ReadByte( pByteStream ) );
 
 	// [BB]
 	if ( ulFlags & USERINFO_TICSPERUPDATE )
-		pPlayer->userinfo.ulTicsPerUpdate = clamp ( NETWORK_ReadByte( pByteStream ), 1, 3 );
+		pPlayer->userinfo.TicsPerUpdateChanged ( NETWORK_ReadByte( pByteStream ) );
 
 	// [BB]
 	if ( ulFlags & USERINFO_CONNECTIONTYPE )
-		pPlayer->userinfo.ulConnectionType = clamp ( NETWORK_ReadByte( pByteStream ), 0, 1 );
+		pPlayer->userinfo.ConnectionTypeChanged ( NETWORK_ReadByte( pByteStream ) );
 
 	// [CK] We use a bitfield now.
 	if ( ulFlags & USERINFO_CLIENTFLAGS )
-		pPlayer->userinfo.clientFlags = NETWORK_ReadByte( pByteStream );
+		pPlayer->userinfo.ClientFlagsChanged ( NETWORK_ReadByte( pByteStream ) );
 
 	// If this is a Hexen game, read in the player's class.
 	if ( ulFlags & USERINFO_PLAYERCLASS )
@@ -2206,7 +2206,7 @@ bool SERVER_GetUserInfo( BYTESTREAM_s *pByteStream, bool bAllowKick )
 
 	if ( szClass[0] )
 	{
-		pPlayer->userinfo.PlayerClass = D_PlayerClassToInt( szClass );
+		pPlayer->userinfo.PlayerClassNumChanged ( D_PlayerClassToInt( szClass ) );
 
 		// If the player class is changed, we also have to reset cls.
 		// Otherwise cls will not be reinitialized in P_SpawnPlayer. 
@@ -2223,8 +2223,8 @@ bool SERVER_GetUserInfo( BYTESTREAM_s *pByteStream, bool bAllowKick )
 
 		// [BB] This can't be done if PlayerClass == -1, but shouldn't be necessary anyway,
 		// since it's done as soon as the player is spawned in P_SpawnPlayer.
-		if ( pPlayer->userinfo.PlayerClass != -1 )
-			pPlayer->userinfo.skin = R_FindSkin( szSkin, pPlayer->userinfo.PlayerClass );
+		if ( pPlayer->userinfo.GetPlayerClassNum() != -1 )
+			pPlayer->userinfo.SkinNumChanged ( R_FindSkin( szSkin, pPlayer->userinfo.GetPlayerClassNum() ) );
 	}
 
 	if ( bKickPlayer )
@@ -2682,11 +2682,13 @@ void SERVER_SendFullUpdate( ULONG ulClient )
 		}
 	}
 
-	// Tell clients the found/total item count.
+	// Tell clients the found/total item/secrets count.
 	if ( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode( )) & GMF_COOPERATIVE )
 	{
 		SERVERCOMMANDS_SetMapNumFoundItems( ulClient, SVCF_ONLYTHISCLIENT );
 		SERVERCOMMANDS_SetMapNumTotalItems( ulClient, SVCF_ONLYTHISCLIENT );
+		SERVERCOMMANDS_SetMapNumFoundSecrets( ulClient, SVCF_ONLYTHISCLIENT );
+		SERVERCOMMANDS_SetMapNumTotalSecrets( ulClient, SVCF_ONLYTHISCLIENT );
 	}
 
 	// Also let the client know about any cameras set to textures.
@@ -2743,7 +2745,7 @@ void SERVER_WriteCommands( void )
 		// [BB] The client decides how often he wants to be updated.
 		// The server sends origin and velocity of a 
 		// player and the client always knows origin on the next tic.
-		if (( gametic % players[ulIdx].userinfo.ulTicsPerUpdate ) != 0 )
+		if (( gametic % players[ulIdx].userinfo.GetTicsPerUpdate() ) != 0 )
 			continue;
 
 		// [BB] You can be watching through the eyes of someone, even if you are not a spectator.
@@ -2778,7 +2780,7 @@ void SERVER_WriteCommands( void )
 		if ( players[ulIdx].bSpectating || SERVER_GetClient ( ulIdx )->bFullUpdateIncomplete ) 
 		{
 			// Don't send this to bots.
-			if ((( gametic % ( players[ulIdx].userinfo.ulTicsPerUpdate * TICRATE )) == 0 ) && ( players[ulIdx].bIsBot == false ) ) 
+			if ((( gametic % ( players[ulIdx].userinfo.GetTicsPerUpdate() * TICRATE )) == 0 ) && ( players[ulIdx].bIsBot == false ) ) 
 			{
 				// Just send them one byte to let them know they're still alive.
 				// [BB] Send this as reliable packet to those who didn't get the full update yet (see above)
@@ -2871,12 +2873,12 @@ void SERVER_DisconnectClient( ULONG ulClient, bool bBroadcast, bool bSaveInfo )
 	{
 		// [BB] Only broadcast disconnects if we already announced the connect
 		// (which we do when the player is spawned in SERVER_ConnectNewPlayer)
-		if ( players[ulClient].userinfo.netname && ( SERVER_GetClient( ulClient )->State >= CLS_SPAWNED_BUT_NEEDS_AUTHENTICATION ) )
+		if ( players[ulClient].userinfo.GetName() && ( SERVER_GetClient( ulClient )->State >= CLS_SPAWNED_BUT_NEEDS_AUTHENTICATION ) )
 		{
 			if ( ( gametic - g_aClients[ulClient].ulLastCommandTic ) == ( CLIENT_TIMEOUT * 35 ) )
-				SERVER_Printf( PRINT_HIGH, "%s \\c-timed out.\n", players[ulClient].userinfo.netname );
+				SERVER_Printf( PRINT_HIGH, "%s \\c-timed out.\n", players[ulClient].userinfo.GetName() );
 			else
-				SERVER_Printf( PRINT_HIGH, "client %s \\c-disconnected.\n", players[ulClient].userinfo.netname );
+				SERVER_Printf( PRINT_HIGH, "client %s \\c-disconnected.\n", players[ulClient].userinfo.GetName() );
 		}
 		else
 			Printf( "%s \\c-disconnected.\n", NETWORK_AddressToString( g_aClients[ulClient].Address ));
@@ -2900,7 +2902,7 @@ void SERVER_DisconnectClient( ULONG ulClient, bool bBroadcast, bool bSaveInfo )
 		Info.lPointCount	= players[ulClient].lPointCount;
 		Info.lWinCount		= players[ulClient].ulWins;
 		Info.ulTime			= players[ulClient].ulTime; // [RC] Save time
-		sprintf( Info.szName, "%s", players[ulClient].userinfo.netname );
+		sprintf( Info.szName, "%s", players[ulClient].userinfo.GetName() );
 
 		SERVER_SAVE_SaveInfo( &Info );
 	}
@@ -2908,7 +2910,7 @@ void SERVER_DisconnectClient( ULONG ulClient, bool bBroadcast, bool bSaveInfo )
 	{
 		PLAYERSAVEDINFO_t	*pInfo;
 
-		pInfo = SERVER_SAVE_GetSavedInfo( players[ulClient].userinfo.netname, g_aClients[ulClient].Address );
+		pInfo = SERVER_SAVE_GetSavedInfo( players[ulClient].userinfo.GetName(), g_aClients[ulClient].Address );
 		if ( pInfo )
 		{
 			pInfo->Address.abIP[0] = 0;
@@ -3186,8 +3188,8 @@ void SERVER_UpdateSectors( ULONG ulClient )
 			SERVERCOMMANDS_SetSectorLightLevel( ulIdx, ulClient, SVCF_ONLYTHISCLIENT );
 
 		// Update the sector's reflection.
-		if (( pSector->ceiling_reflect != 0.0f ) ||
-			( pSector->floor_reflect != 0.0f ))
+		if (( pSector->reflect[sector_t::ceiling] != 0.0f ) ||
+			( pSector->reflect[sector_t::floor] != 0.0f ))
 		{
 			SERVERCOMMANDS_SetSectorReflection( ulIdx );
 		}
@@ -3387,6 +3389,9 @@ void SERVER_UpdateActorProperties( AActor *pActor, ULONG ulClient )
 	// [WS] Update the actor's reaction time if it's changed.
 	if ( pActor->reactiontime != pActor->GetDefault()->reactiontime )
 		SERVERCOMMANDS_SetThingReactionTime( pActor, ulClient, SVCF_ONLYTHISCLIENT );
+
+	// [EP] Update the actor's scale if it's changed.
+	SERVERCOMMANDS_UpdateThingScaleNotAtDefault ( pActor, ulClient, SVCF_ONLYTHISCLIENT );
 }
 
 //*****************************************************************************
@@ -3477,7 +3482,7 @@ void SERVER_KickPlayer( ULONG ulPlayer, const char *pszReason )
 	if (( ulPlayer >= MAXPLAYERS ) || ( !playeringame[ulPlayer] ))
 		return;
 
-	sprintf( szName, "%s", players[ulPlayer].userinfo.netname );
+	sprintf( szName, "%s", players[ulPlayer].userinfo.GetName() );
 	V_RemoveColorCodes( szName );
 
 	// Build the full kick string.
@@ -3485,7 +3490,7 @@ void SERVER_KickPlayer( ULONG ulPlayer, const char *pszReason )
 	Printf( "%s", szKickString );
 
 	// Rebuild the string that will be displayed to clients. This time, color codes are allowed.
-	sprintf( szKickString, "\\ci%s\\ci was kicked from the server! Reason: %s\n", players[ulPlayer].userinfo.netname, pszReason );
+	sprintf( szKickString, "\\ci%s\\ci was kicked from the server! Reason: %s\n", players[ulPlayer].userinfo.GetName(), pszReason );
 
 	// Send the message out to all clients.
 	for ( ulIdx = 0; ulIdx < MAXPLAYERS; ulIdx++ )
@@ -3524,7 +3529,7 @@ void SERVER_KickPlayerFromGame( ULONG ulPlayer, const char *pszReason )
 		return;
 	}
 
-	sprintf( szName, "%s", players[ulPlayer].userinfo.netname );
+	sprintf( szName, "%s", players[ulPlayer].userinfo.GetName() );
 	V_RemoveColorCodes( szName );
 
 	// Already a spectator! This should not happen.
@@ -3544,7 +3549,7 @@ void SERVER_KickPlayerFromGame( ULONG ulPlayer, const char *pszReason )
 	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
 	{
 		// Rebuild the string that will be displayed to clients. This time, color codes are allowed.
-		sprintf( szKickString, "\\ci%s\\ci has been forced to spectate! Reason: %s\n", players[ulPlayer].userinfo.netname, pszReason );
+		sprintf( szKickString, "\\ci%s\\ci has been forced to spectate! Reason: %s\n", players[ulPlayer].userinfo.GetName(), pszReason );
 
 		SERVERCOMMANDS_PlayerIsSpectator( ulPlayer );
 		for ( ulIdx = 0; ulIdx < MAXPLAYERS; ulIdx++ )
@@ -4531,11 +4536,11 @@ ULONG SERVER_GetPlayerIndexFromName( const char *pszName, bool bIgnoreColors, bo
 		// Optionally remove the color codes from the player name.
 		if ( bIgnoreColors )
 		{
-			sprintf( szPlayerName, "%s", players[ulIdx].userinfo.netname );
+			sprintf( szPlayerName, "%s", players[ulIdx].userinfo.GetName() );
 			V_RemoveColorCodes( szPlayerName );
 		}
 
-		if ( stricmp( bIgnoreColors ? szPlayerName : players[ulIdx].userinfo.netname, pszName ) == 0 )
+		if ( stricmp( bIgnoreColors ? szPlayerName : players[ulIdx].userinfo.GetName(), pszName ) == 0 )
 		{
 			if ( !players[ulIdx].bIsBot || bReturnBots )
 				return ulIdx;
@@ -4969,7 +4974,7 @@ ClientMoveCommand::ClientMoveCommand ( BYTESTREAM_s *pByteStream )
 		{
 			if ( SERVER_GetClient( g_lCurrentClient )->bSuspicious == false )
 			{
-				Printf ( "Warning: Inconsistency in packet received from client %d (IP: %s, name: %s)\n", g_lCurrentClient, NETWORK_AddressToString( SERVER_GetClient( g_lCurrentClient )->Address ), players[g_lCurrentClient].userinfo.netname );
+				Printf ( "Warning: Inconsistency in packet received from client %d (IP: %s, name: %s)\n", g_lCurrentClient, NETWORK_AddressToString( SERVER_GetClient( g_lCurrentClient )->Address ), players[g_lCurrentClient].userinfo.GetName() );
 				SERVER_GetClient( g_lCurrentClient )->bSuspicious = true;
 			}
 			SERVER_GetClient( g_lCurrentClient )->ulNumConsistencyWarnings++;
@@ -5178,7 +5183,7 @@ static bool server_MissingPacket( BYTESTREAM_s *pByteStream )
 		if  ( bFullUpdateRequired )
 		{
 			// Do we really need to print this? Nah.
-//			Printf( "*** Sequence screwed for client %d, %s!\n", g_lCurrentClient, players[g_lCurrentClient].userinfo.netname );
+//			Printf( "*** Sequence screwed for client %d, %s!\n", g_lCurrentClient, players[g_lCurrentClient].userinfo.GetName() );
 			SERVER_KickPlayer( g_lCurrentClient, "Too many missed packets." );
 			return ( true );
 		}
@@ -5447,7 +5452,7 @@ static bool server_RequestJoin( BYTESTREAM_s *pByteStream )
 			SERVERCOMMANDS_SetPlayerTeam( g_lCurrentClient );
 	}
 
-	SERVER_Printf( PRINT_HIGH, "%s \\c-joined the game.\n", players[g_lCurrentClient].userinfo.netname );
+	SERVER_Printf( PRINT_HIGH, "%s \\c-joined the game.\n", players[g_lCurrentClient].userinfo.GetName() );
 
 	// Update this player's info on the scoreboard.
 	SERVERCONSOLE_UpdatePlayerInfo( g_lCurrentClient, UDF_FRAGS );
@@ -5476,13 +5481,13 @@ static bool server_RequestRCON( BYTESTREAM_s *pByteStream )
 	{
 		g_aClients[g_lCurrentClient].bRCONAccess = true;
 		SERVER_PrintfPlayer( PRINT_HIGH, g_lCurrentClient, "RCON access granted.\n" );
-		Printf( "RCON access for %s is granted!\n", players[g_lCurrentClient].userinfo.netname );
+		Printf( "RCON access for %s is granted!\n", players[g_lCurrentClient].userinfo.GetName() );
 	}
 	else
 	{
 		g_aClients[g_lCurrentClient].bRCONAccess = false;
 		SERVER_PrintfPlayer( PRINT_HIGH, g_lCurrentClient, "Incorrect RCON password.\n" );
-		Printf( "Incorrect RCON password attempt from %s.\n", players[g_lCurrentClient].userinfo.netname );
+		Printf( "Incorrect RCON password attempt from %s.\n", players[g_lCurrentClient].userinfo.GetName() );
 	}
 
 	return ( false );
@@ -5501,7 +5506,7 @@ static bool server_RCONCommand( BYTESTREAM_s *pByteStream )
 	if ( !g_aClients[g_lCurrentClient].bRCONAccess )
 		return ( false );
 
-	Printf( "-> %s (RCON by %s - %s)\n", pszCommand, players[g_lCurrentClient].userinfo.netname, NETWORK_AddressToString( SERVER_GetClient( g_lCurrentClient )->Address ));
+	Printf( "-> %s (RCON by %s - %s)\n", pszCommand, players[g_lCurrentClient].userinfo.GetName(), NETWORK_AddressToString( SERVER_GetClient( g_lCurrentClient )->Address ));
 
 	// Set the RCON player so that output displays on his end.
 	CONSOLE_SetRCONPlayer( g_lCurrentClient );
@@ -5655,12 +5660,12 @@ static bool server_ChangeTeam( BYTESTREAM_s *pByteStream )
 	// Player was on a team, so tell everyone that he's changing teams.
 	if ( bOnTeam )
 	{
-		SERVER_Printf( PRINT_HIGH, "%s \\c-defected to the \\c%c%s \\c-team.\n", players[g_lCurrentClient].userinfo.netname, V_GetColorChar( TEAM_GetTextColor( players[g_lCurrentClient].ulTeam )), TEAM_GetName( players[g_lCurrentClient].ulTeam ));
+		SERVER_Printf( PRINT_HIGH, "%s \\c-defected to the \\c%c%s \\c-team.\n", players[g_lCurrentClient].userinfo.GetName(), V_GetColorChar( TEAM_GetTextColor( players[g_lCurrentClient].ulTeam )), TEAM_GetName( players[g_lCurrentClient].ulTeam ));
 	}
 	// Otherwise, tell everyone he's joining a team.
 	else
 	{
-		SERVER_Printf( PRINT_HIGH, "%s \\c-joined the \\c%c%s \\c-team.\n", players[g_lCurrentClient].userinfo.netname, V_GetColorChar( TEAM_GetTextColor( players[g_lCurrentClient].ulTeam )), TEAM_GetName( players[g_lCurrentClient].ulTeam ));
+		SERVER_Printf( PRINT_HIGH, "%s \\c-joined the \\c%c%s \\c-team.\n", players[g_lCurrentClient].userinfo.GetName(), V_GetColorChar( TEAM_GetTextColor( players[g_lCurrentClient].ulTeam )), TEAM_GetName( players[g_lCurrentClient].ulTeam ));
 	}
 
 	if ( players[g_lCurrentClient].mo )
@@ -6322,18 +6327,18 @@ static bool server_InventoryDrop( BYTESTREAM_s *pByteStream )
 //
 static bool server_Puke( BYTESTREAM_s *pByteStream )
 {
-	ULONG ulScript = NETWORK_ReadShort( pByteStream );
+	ULONG ulScript = NETWORK_ReadLong( pByteStream );
 	ULONG ulArgn = NETWORK_ReadByte( pByteStream );
 
-	// [BB] Valid clients don't send more than three args.
-	if ( ulArgn > 3 )
+	// [BB] Valid clients don't send more than four args.
+	if ( ulArgn > 4 )
 	{
 		SERVER_KickPlayer( g_lCurrentClient, "Sent a malformed packet!" );
 		return true;
 	}
 
-	int arg[3] = { 0, 0, 0 };
-	for ( ULONG ulIdx = 0; ulIdx < ulArgn; ++ulIdx)
+	int arg[4] = { 0, 0, 0, 0 };
+	for ( ULONG ulIdx = 0; ulIdx < ulArgn; ++ulIdx )
 		arg[ulIdx] = NETWORK_ReadLong ( pByteStream );
 	bool bAlways = !!NETWORK_ReadByte( pByteStream );
 
@@ -6349,8 +6354,8 @@ static bool server_Puke( BYTESTREAM_s *pByteStream )
 	}
 
 	// [BB] Execute the script as if it was invoked by the puke command.
-	P_StartScript (players[g_lCurrentClient].mo, NULL, ulScript, level.mapname, false,
-		arg[0], arg[1], arg[2], bAlways, false, true);
+	P_StartScript (players[g_lCurrentClient].mo, NULL, ulScript, level.mapname,
+		arg, 4, ( bAlways ? ACS_ALWAYS : 0 ) | ACS_NET );
 
 	return ( false );
 }
@@ -6526,7 +6531,7 @@ CCMD( kick )
 			continue;
 
 		// Removes the color codes from the player name so it appears as the server sees it in the window.
-		sprintf( szPlayerName, "%s", players[ulIdx].userinfo.netname );
+		sprintf( szPlayerName, "%s", players[ulIdx].userinfo.GetName() );
 		V_RemoveColorCodes( szPlayerName );
 
 		if ( stricmp( szPlayerName, argv[1] ) == 0 )
@@ -6596,7 +6601,7 @@ CCMD( kickfromgame )
 			continue;
 
 		// Removes the color codes from the player name so it appears as the server sees it in the window.
-		sprintf( szPlayerName, "%s", players[ulIdx].userinfo.netname );
+		sprintf( szPlayerName, "%s", players[ulIdx].userinfo.GetName() );
 		V_RemoveColorCodes( szPlayerName );
 
 		if ( stricmp( szPlayerName, argv[1] ) != 0 )

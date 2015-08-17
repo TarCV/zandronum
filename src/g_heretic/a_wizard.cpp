@@ -63,8 +63,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_WizAtk3)
 	CALL_ACTION(A_GhostOff, self);
 
 	// [BB] This is server-side, the client only needs to run A_GhostOff.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -82,8 +81,8 @@ DEFINE_ACTION_FUNCTION(AActor, A_WizAtk3)
 	if (self->CheckMeleeRange())
 	{
 		int damage = pr_wizatk3.HitDice (4);
-		P_DamageMobj (self->target, self, self, damage, NAME_Melee);
-		P_TraceBleed (damage, self->target, self);
+		int newdam = P_DamageMobj (self->target, self, self, damage, NAME_Melee);
+		P_TraceBleed (newdam > 0 ? newdam : damage, self->target, self);
 		return;
 	}
 	const PClass *fx = PClass::FindClass("WizardFX1");
