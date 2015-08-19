@@ -83,7 +83,9 @@ typedef enum
 	GS_TITLELEVEL,		// [RH] A combination of GS_LEVEL and GS_DEMOSCREEN
 
 	GS_FORCEWIPE = -1,
-	GS_FORCEWIPEFADE = -2
+	GS_FORCEWIPEFADE = -2,
+	GS_FORCEWIPEBURN = -3,
+	GS_FORCEWIPEMELT = -4
 } gamestate_t;
 
 extern	gamestate_t 	gamestate;
@@ -135,6 +137,7 @@ enum ESkillLevels
 #define KEY_F10 				0x44	// DIK_F10
 #define KEY_F11 				0x57	// DIK_F11
 #define KEY_F12 				0x58	// DIK_F12
+#define KEY_GRAVE				0x29	// DIK_GRAVE
 
 #define KEY_BACKSPACE			0x0e	// DIK_BACK
 
@@ -305,6 +308,7 @@ enum
 	DF2_NOAUTOAIM			= 1 << 23,	// Players cannot use autoaim.
 	DF2_DONTCHECKAMMO		= 1 << 24,	// Don't Check ammo when switching weapons.
 	DF2_KILLBOSSMONST		= 1 << 25,	// Kills all monsters spawned by a boss cube when the boss dies
+	DF2_NOCOUNTENDMONST		= 1 << 26,	// Do not count monsters in 'end level when dying' sectors towards kill count
 };
 
 // [BB] Zandronum dmflags.
@@ -392,6 +396,10 @@ enum
 	COMPATF_HITSCAN			= 1 << 28,	// Hitscans use original blockmap anf hit check code.
 	COMPATF_LIGHT			= 1 << 29,	// Find neighboring light level like Doom
 	COMPATF_POLYOBJ			= 1 << 30,	// Draw polyobjects the old fashioned way
+	COMPATF_MASKEDMIDTEX	= 1u << 31,	// Ignore compositing when drawing masked midtextures
+
+	COMPATF2_BADANGLES		= 1 << 0,	// It is impossible to face directly NSEW.
+	COMPATF2_FLOORMOVE		= 1 << 1,	// Use the same floor motion behavior as Doom.
 };
 
 // [BB] Zandronum compatibility flags.
@@ -469,6 +477,11 @@ enum
 	BCOMPATF_SETSLOPEOVERFLOW	= 1 << 0,	// SetSlope things can overflow
 	BCOMPATF_RESETPLAYERSPEED	= 1 << 1,	// Set player speed to 1.0 when changing maps
 	BCOMPATF_VILEGHOSTS			= 1 << 2,	// Monsters' radius and height aren't restored properly when resurrected.
+	BCOMPATF_BADTELEPORTERS		= 1 << 3,	// Ignore tags on Teleport specials
+	BCOMPATF_BADPORTALS			= 1 << 4,	// Restores the old unstable portal behavior
+	BCOMPATF_REBUILDNODES		= 1 << 5,	// Force node rebuild
+	BCOMPATF_LINKFROZENPROPS	= 1 << 6,	// Clearing PROP_TOTALLYFROZEN or PROP_FROZEN also clears the other
+	BCOMPATF_NOWINDOWCHECK		= 1 << 7,	// Disable the window check in CheckForPushSpecial()
 };
 
 // phares 3/20/98:

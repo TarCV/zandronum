@@ -307,7 +307,7 @@ void SCOREBOARD_Render( ULONG ulDisplayPlayer )
 		if ( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode() ) & GMF_PLAYERSONTEAMS )
 			 cColor = V_GetColorChar( TEAM_GetTextColor( players[ SCOREBOARD_GetViewPlayer() ].ulTeam ) );
 
-		g_BottomString.AppendFormat( "\\c%cFOLLOWING - %s\\c%c", cColor, players[ SCOREBOARD_GetViewPlayer() ].userinfo.netname, cColor );
+		g_BottomString.AppendFormat( "\\c%cFOLLOWING - %s\\c%c", cColor, players[ SCOREBOARD_GetViewPlayer() ].userinfo.GetName(), cColor );
 	}
 
 	// Print the totals for living and dead allies/enemies.
@@ -641,7 +641,7 @@ void SCOREBOARD_RenderStats_Holders( void )
 			sprintf( szPatchName, "HELLSTON" );
 			if ( g_pPossessionArtifactCarrier )
 			{
-				sprintf( szName, "%s", g_pPossessionArtifactCarrier->userinfo.netname );
+				sprintf( szName, "%s", g_pPossessionArtifactCarrier->userinfo.GetName() );
 				if ( teampossession )
 				{
 					V_RemoveColorCodes( szName );
@@ -657,14 +657,14 @@ void SCOREBOARD_RenderStats_Holders( void )
 		else if ( terminator )
 		{
 			sprintf( szPatchName, "TERMINAT" );
-			sprintf( szString, "\\cC%s \\cG:", g_pTerminatorArtifactCarrier ? g_pTerminatorArtifactCarrier->userinfo.netname : "-" );
+			sprintf( szString, "\\cC%s \\cG:", g_pTerminatorArtifactCarrier ? g_pTerminatorArtifactCarrier->userinfo.GetName() : "-" );
 		}
 		else if ( oneflagctf )
 		{
 			sprintf( szPatchName, "STFLA3" );
 			if ( g_pWhiteCarrier )
 			{
-				sprintf( szName, "%s", g_pWhiteCarrier->userinfo.netname );
+				sprintf( szName, "%s", g_pWhiteCarrier->userinfo.GetName() );
 				V_RemoveColorCodes( szName );
 				if ( TEAM_CheckIfValid ( g_pWhiteCarrier->ulTeam ) )
 					sprintf( szString, "\\cC%s \\cC:", szName );
@@ -729,7 +729,7 @@ void SCOREBOARD_RenderStats_Holders( void )
 					DTA_VirtualHeight, g_ValHeight.Int,
 					TAG_DONE );
 
-				sprintf( szString, "\\cC%s \\c%c:", TEAM_GetCarrier( i ) ? TEAM_GetCarrier( i )->userinfo.netname : TEAM_GetReturnTicks( i ) ? "?" : "-", V_GetColorChar( TEAM_GetTextColor( i )));
+				sprintf( szString, "\\cC%s \\c%c:", TEAM_GetCarrier( i ) ? TEAM_GetCarrier( i )->userinfo.GetName() : TEAM_GetReturnTicks( i ) ? "?" : "-", V_GetColorChar( TEAM_GetTextColor( i )));
 				V_ColorizeString( szString );
 
 				screen->DrawText( SmallFont, CR_GRAY,
@@ -747,7 +747,7 @@ void SCOREBOARD_RenderStats_Holders( void )
 					ulYPos,
 					TAG_DONE );
 
-				sprintf( szString, "\\cC%s \\c%c:", TEAM_GetCarrier( i ) ? TEAM_GetCarrier( i )->userinfo.netname : TEAM_GetReturnTicks( i ) ? "?" : "-", V_GetColorChar( TEAM_GetTextColor( i )));
+				sprintf( szString, "\\cC%s \\c%c:", TEAM_GetCarrier( i ) ? TEAM_GetCarrier( i )->userinfo.GetName() : TEAM_GetReturnTicks( i ) ? "?" : "-", V_GetColorChar( TEAM_GetTextColor( i )));
 				V_ColorizeString( szString );
 
 				screen->DrawText( SmallFont, CR_GRAY,
@@ -926,7 +926,7 @@ void SCOREBOARD_RenderInVoteClassic( void )
 
 	// Render who called the vote.
 	ulCurYPos += 24;
-	sprintf( szString, "Vote called by: %s", players[CALLVOTE_GetVoteCaller( )].userinfo.netname );
+	sprintf( szString, "Vote called by: %s", players[CALLVOTE_GetVoteCaller( )].userinfo.GetName() );
 	screen->DrawText( SmallFont, CR_UNTRANSLATED,
 		160 - ( SmallFont->StringWidth( szString ) / 2 ),
 		ulCurYPos,
@@ -1001,7 +1001,7 @@ void SCOREBOARD_RenderInVoteClassic( void )
 		ulCurYPos += 8;
 		if ( pulPlayersWhoVotedYes[ulIdx] != MAXPLAYERS )
 		{
-			sprintf( szString, "%s", players[pulPlayersWhoVotedYes[ulIdx]].userinfo.netname );
+			sprintf( szString, "%s", players[pulPlayersWhoVotedYes[ulIdx]].userinfo.GetName() );
 			screen->DrawText( SmallFont, CR_UNTRANSLATED,
 				32,
 				ulCurYPos,
@@ -1011,7 +1011,7 @@ void SCOREBOARD_RenderInVoteClassic( void )
 
 		if ( pulPlayersWhoVotedNo[ulIdx] != MAXPLAYERS )
 		{
-			sprintf( szString, "%s", players[pulPlayersWhoVotedNo[ulIdx]].userinfo.netname );
+			sprintf( szString, "%s", players[pulPlayersWhoVotedNo[ulIdx]].userinfo.GetName() );
 			screen->DrawText( SmallFont, CR_UNTRANSLATED,
 				320 - 32 - SmallFont->StringWidth( szString ),
 				ulCurYPos,
@@ -1211,7 +1211,7 @@ void SCOREBOARD_RenderDuelCountdown( ULONG ulTimeLeft )
 	ulCurYPos = 16;
 	if ( gamestate == GS_LEVEL )
 	{
-		sprintf( szString, "%s", players[lDueler1].userinfo.netname );
+		sprintf( szString, "%s", players[lDueler1].userinfo.GetName() );
 		screen->DrawText( BigFont, gameinfo.gametype == GAME_Doom ? CR_RED : CR_UNTRANSLATED,
 			160 - ( BigFont->StringWidth( szString ) / 2 ),
 			ulCurYPos,
@@ -1227,7 +1227,7 @@ void SCOREBOARD_RenderDuelCountdown( ULONG ulTimeLeft )
 			DTA_Clean, true, TAG_DONE );
 
 		ulCurYPos += 16;
-		sprintf( szString, "%s", players[lDueler2].userinfo.netname );
+		sprintf( szString, "%s", players[lDueler2].userinfo.GetName() );
 		screen->DrawText( BigFont, gameinfo.gametype == GAME_Doom ? CR_RED : CR_UNTRANSLATED,
 			160 - ( BigFont->StringWidth( szString ) / 2 ),
 			ulCurYPos,
@@ -1795,7 +1795,7 @@ void SCOREBOARD_DisplayFragMessage( player_t *pFraggedPlayer )
 	char	szString[128];
 	DHUDMessageFadeOut	*pMsg;
 
-	sprintf( szString, "You fragged %s\\c-!\n", pFraggedPlayer->userinfo.netname );
+	sprintf( szString, "You fragged %s\\c-!\n", pFraggedPlayer->userinfo.GetName() );
 
 	// Print the frag message out in the console.
 	Printf( "%s", szString );
@@ -1865,7 +1865,7 @@ void SCOREBOARD_DisplayFraggedMessage( player_t *pFraggingPlayer )
 	char	szString[128];
 	DHUDMessageFadeOut	*pMsg;
 
-	sprintf( szString, "You were fragged by %s\\c-.\n", pFraggingPlayer->userinfo.netname );
+	sprintf( szString, "You were fragged by %s\\c-.\n", pFraggingPlayer->userinfo.GetName() );
 
 	// Print the frag message out in the console.
 	Printf( "%s", szString );
@@ -2201,29 +2201,29 @@ static void scoreboard_RenderIndividualPlayer( ULONG ulDisplayPlayer, ULONG ulPl
 		{
 			case COLUMN_NAME:
 
-				sprintf( szString, "%s", players[ulPlayer].userinfo.netname );
+				sprintf( szString, "%s", players[ulPlayer].userinfo.GetName() );
 
 				// Track where we are to draw multiple icons.
 				lXPosOffset = -SmallFont->StringWidth( "  " );
 
 				// Draw the user's handicap, if any.
-				if ( players[ulPlayer].userinfo.lHandicap > 0 )
+				if ( players[ulPlayer].userinfo.GetHandicap() > 0 )
 				{
 					char	szHandicapString[8];
 
 					if ( lastmanstanding || teamlms )
 					{
-						if (( deh.MaxSoulsphere - (LONG)players[ulPlayer].userinfo.lHandicap ) < 1 )
+						if (( deh.MaxSoulsphere - (LONG)players[ulPlayer].userinfo.GetHandicap() ) < 1 )
 							sprintf( szHandicapString, "(1)" );
 						else
-							sprintf( szHandicapString, "(%d)", static_cast<int> (deh.MaxArmor - (LONG)players[ulPlayer].userinfo.lHandicap) );
+							sprintf( szHandicapString, "(%d)", static_cast<int> (deh.MaxArmor - (LONG)players[ulPlayer].userinfo.GetHandicap()) );
 					}
 					else
 					{
-						if (( deh.StartHealth - (LONG)players[ulPlayer].userinfo.lHandicap ) < 1 )
+						if (( deh.StartHealth - (LONG)players[ulPlayer].userinfo.GetHandicap() ) < 1 )
 							sprintf( szHandicapString, "(1)" );
 						else
-							sprintf( szHandicapString, "(%d)", static_cast<int> (deh.StartHealth - (LONG)players[ulPlayer].userinfo.lHandicap) );
+							sprintf( szHandicapString, "(%d)", static_cast<int> (deh.StartHealth - (LONG)players[ulPlayer].userinfo.GetHandicap()) );
 					}
 					
 					lXPosOffset -= SmallFont->StringWidth ( szHandicapString );
@@ -2240,7 +2240,7 @@ static void scoreboard_RenderIndividualPlayer( ULONG ulDisplayPlayer, ULONG ulPl
 					else
 					{
 						screen->DrawText( SmallFont, ulColor,
-							(LONG)( g_aulColumnX[ulIdx] * CleanXfac ) + lXPosOffset,
+							(LONG)( g_aulColumnX[ulIdx] / 320.0f * SCREENWIDTH ) + lXPosOffset,
 							g_ulCurYPos,
 							szHandicapString,
 							DTA_Clean,
@@ -2267,7 +2267,7 @@ static void scoreboard_RenderIndividualPlayer( ULONG ulDisplayPlayer, ULONG ulPl
 					else
 					{
 						screen->DrawTexture( TexMan[szPatchName],
-							(LONG)( g_aulColumnX[ulIdx] * CleanXfac ) + lXPosOffset,
+							(LONG)( g_aulColumnX[ulIdx] / 320.0f * SCREENWIDTH ) + lXPosOffset,
 							g_ulCurYPos - (( TexMan[szPatchName]->GetHeight( ) - SmallFont->GetHeight( )) / 2 ),
 							TAG_DONE );
 					}
@@ -2292,7 +2292,7 @@ static void scoreboard_RenderIndividualPlayer( ULONG ulDisplayPlayer, ULONG ulPl
 					else
 					{
 						screen->DrawTexture( TexMan[szPatchName],
-							(LONG)( g_aulColumnX[ulIdx] * CleanXfac ) + lXPosOffset,
+							(LONG)( g_aulColumnX[ulIdx] / 320.0f * SCREENWIDTH ) + lXPosOffset,
 							g_ulCurYPos,
 							DTA_Clean,
 							g_bScale,
@@ -2323,7 +2323,7 @@ static void scoreboard_RenderIndividualPlayer( ULONG ulDisplayPlayer, ULONG ulPl
 					else
 					{
 						screen->DrawTexture( TexMan[szPatchName],
-							(LONG)( g_aulColumnX[ulIdx] * CleanXfac ) + lXPosOffset,
+							(LONG)( g_aulColumnX[ulIdx] / 320.0f * SCREENWIDTH ) + lXPosOffset,
 							g_ulCurYPos - 1,
 							DTA_Clean,
 							g_bScale,
@@ -2384,7 +2384,7 @@ static void scoreboard_RenderIndividualPlayer( ULONG ulDisplayPlayer, ULONG ulPl
 						else
 						{
 							screen->DrawText( SmallFont, ( static_cast<signed> (CALLVOTE_GetVoteCaller()) == consoleplayer ) ? CR_RED : CR_GOLD,
-								(LONG)( g_aulColumnX[ulIdx] * CleanXfac ) + lXPosOffset,
+								(LONG)( g_aulColumnX[ulIdx] / 320.0f * SCREENWIDTH ) + lXPosOffset,
 								g_ulCurYPos,
 								szVoteString,
 								DTA_Clean,
@@ -2539,7 +2539,7 @@ static void scoreboard_RenderIndividualPlayer( ULONG ulDisplayPlayer, ULONG ulPl
 			else
 			{
 				screen->DrawText( SmallFont, ulColor,
-						(LONG)( g_aulColumnX[ulIdx] * CleanXfac ),
+						(LONG)( g_aulColumnX[ulIdx] / 320.0f * SCREENWIDTH ),
 						g_ulCurYPos,
 						szString,
 						TAG_DONE );
@@ -2633,7 +2633,7 @@ void SCOREBOARD_BuildLimitStrings( std::list<FString> &lines, bool bAcceptColors
 				bDraw = false;
 		}
 		else
-			sprintf( szString, "Champion is %s \\c-with %d win%s", players[lWinner].userinfo.netname, static_cast<unsigned int> (players[lWinner].ulWins), players[lWinner].ulWins == 1 ? "" : "s" );
+			sprintf( szString, "Champion is %s \\c-with %d win%s", players[lWinner].userinfo.GetName(), static_cast<unsigned int> (players[lWinner].ulWins), players[lWinner].ulWins == 1 ? "" : "s" );
 
 		if ( bDraw )
 		{
@@ -2849,7 +2849,7 @@ static void scoreboard_Prepare5ColumnDisplay( void )
 		g_aulColumnType[1] = COLUMN_FRAGS;
 		g_aulColumnType[2] = COLUMN_NAME;
 		g_aulColumnType[3] = COLUMN_DEATHS;
-		if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) || ( CLIENTDEMO_IsPlaying( )))
+		if ( NETWORK_InClientMode() )
 			g_aulColumnType[3] = COLUMN_PING;
 		g_aulColumnType[4] = COLUMN_TIME;
 
@@ -2864,7 +2864,7 @@ static void scoreboard_Prepare5ColumnDisplay( void )
 		g_aulColumnType[1] = COLUMN_FRAGS;
 		g_aulColumnType[2] = COLUMN_NAME;
 		g_aulColumnType[3] = COLUMN_EMPTY;
-		if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) || ( CLIENTDEMO_IsPlaying( )))
+		if ( NETWORK_InClientMode() )
 			g_aulColumnType[3] = COLUMN_PING;
 		g_aulColumnType[4] = COLUMN_TIME;
 
@@ -2914,7 +2914,7 @@ static void scoreboard_Prepare4ColumnDisplay( void )
 		scoreboard_SetColumnZeroToKillsAndSortPlayers();
 		g_aulColumnType[1] = COLUMN_NAME;
 		g_aulColumnType[2] = COLUMN_DEATHS;
-		if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) || ( CLIENTDEMO_IsPlaying( )))
+		if ( NETWORK_InClientMode() )
 			g_aulColumnType[2] = COLUMN_PING;
 		g_aulColumnType[3] = COLUMN_TIME;
 	}
@@ -2925,7 +2925,7 @@ static void scoreboard_Prepare4ColumnDisplay( void )
 		g_aulColumnType[0] = COLUMN_FRAGS;
 		g_aulColumnType[1] = COLUMN_NAME;
 		g_aulColumnType[2] = COLUMN_DEATHS;
-		if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) || ( CLIENTDEMO_IsPlaying( )))
+		if ( NETWORK_InClientMode() )
 			g_aulColumnType[2] = COLUMN_PING;
 		g_aulColumnType[3] = COLUMN_TIME;
 
@@ -2942,7 +2942,7 @@ static void scoreboard_Prepare4ColumnDisplay( void )
 		g_aulColumnType[0] = COLUMN_POINTS;
 		g_aulColumnType[1] = COLUMN_NAME;
 		g_aulColumnType[2] = COLUMN_DEATHS;
-		if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) || ( CLIENTDEMO_IsPlaying( )))
+		if ( NETWORK_InClientMode() )
 			g_aulColumnType[2] = COLUMN_PING;
 		g_aulColumnType[3] = COLUMN_TIME;
 
@@ -2956,7 +2956,7 @@ static void scoreboard_Prepare4ColumnDisplay( void )
 		g_aulColumnType[0] = COLUMN_WINS;
 		g_aulColumnType[1] = COLUMN_NAME;
 		g_aulColumnType[2] = COLUMN_FRAGS;
-		if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) || ( CLIENTDEMO_IsPlaying( )))
+		if ( NETWORK_InClientMode() )
 			g_aulColumnType[2] = COLUMN_PING;
 		g_aulColumnType[3] = COLUMN_TIME;
 
@@ -2984,7 +2984,7 @@ static void scoreboard_Prepare3ColumnDisplay( void )
 	// All boards share these two columns. However, you can still deviant on these columns if you want.
 	g_aulColumnType[1] = COLUMN_NAME;
 	g_aulColumnType[2] = COLUMN_TIME;
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) || ( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 		g_aulColumnType[2] = COLUMN_PING;
 
 	// Build columns for modes in which players try to earn kills.
@@ -3122,7 +3122,7 @@ static void scoreboard_DrawRankings( ULONG ulPlayer )
 		else
 		{
 			screen->DrawText( g_pColumnHeaderFont, CR_RED,
-				(LONG)( g_aulColumnX[ulIdx] * CleanXfac ),
+				(LONG)( g_aulColumnX[ulIdx] / 320.0f * SCREENWIDTH ),
 				g_ulCurYPos,
 				szString,
 				TAG_DONE );
