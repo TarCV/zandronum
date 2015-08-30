@@ -58,9 +58,9 @@ int C_ExecFile (const char *cmd, bool usePullin);
 void C_ArchiveAliases (FConfigFile *f);
 
 void C_SetAlias (const char *name, const char *cmd);
+void C_ClearAliases ();
 
 // build a single string out of multiple strings
-FString BuildString (int argc, char **argv);
 FString BuildString (int argc, FString *argv);
 
 // Class that can parse command lines
@@ -93,6 +93,7 @@ public:
 	void PrintCommand () { Printf ("%s\n", m_Name); }
 
 	virtual void Run (FCommandLine &args, APlayerPawn *instigator, int key);
+	static FConsoleCommand* FindByName (const char* name);
 
 	FConsoleCommand *m_Next, **m_Prev;
 	char *m_Name;
@@ -146,6 +147,7 @@ struct FButtonStatus
 	bool PressKey (int keynum);		// Returns true if this key caused the button to be pressed.
 	bool ReleaseKey (int keynum);	// Returns true if this key is no longer pressed.
 	void ResetTriggers () { bWentDown = bWentUp = false; }
+	void Reset () { bDown = bWentDown = bWentUp = false; }
 };
 
 extern FButtonStatus Button_Mlook, Button_Klook, Button_Use, Button_AltAttack,
@@ -155,6 +157,8 @@ extern FButtonStatus Button_Mlook, Button_Klook, Button_Use, Button_AltAttack,
 	Button_MoveUp, Button_Jump, Button_ShowScores, Button_Crouch,
 	Button_Zoom, Button_Reload,
 	Button_User1, Button_User2, Button_User3, Button_User4,
+	Button_AM_PanLeft, Button_AM_PanRight, Button_AM_PanDown, Button_AM_PanUp,
+	Button_AM_ZoomIn, Button_AM_ZoomOut,
 	Button_ShowMedals;	// [BC] New "show medals" button.
 extern bool ParsingKeyConf;
 
@@ -164,5 +168,7 @@ void ResetButtonStates ();		// Same as above, but also clear bDown
 extern unsigned int MakeKey (const char *s);
 extern unsigned int MakeKey (const char *s, size_t len);
 extern unsigned int SuperFastHash (const char *data, size_t len);
+
+void execLogfile(const char *fn);
 
 #endif //__C_DISPATCH_H__

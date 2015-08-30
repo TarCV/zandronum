@@ -153,7 +153,14 @@ enum FlagSet
 	FLAGSET_FLAGS4,
 	FLAGSET_FLAGS5,
 	FLAGSET_FLAGS6,
+	FLAGSET_FLAGS7,
 	FLAGSET_FLAGSST
+};
+
+enum ActorScaleFlag
+{
+	ACTORSCALE_X = 1,
+	ACTORSCALE_Y = 2
 };
 
 // Which actor sound is being updated?

@@ -203,7 +203,7 @@ BOOL CALLBACK SERVERCONSOLE_ServerDialogBoxCallback( HWND hDlg, UINT Message, WP
 			SendMessage( GetDlgItem( hDlg, IDC_MAPMODE ), WM_SETFONT, (WPARAM) CreateFont( 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "Tahoma" ), (LPARAM) 1 );
 
 			// Initialize the server console text.
-			SetDlgItemText( hDlg, IDC_CONSOLEBOX, "=== "GAMENAME " server ===" );
+			SetDlgItemText( hDlg, IDC_CONSOLEBOX, "=== " GAMENAME " server ===" );
 			Printf( "\nRunning version: %s\n", GetVersionStringRev() );
 
 			// Append the time.
@@ -1867,7 +1867,7 @@ void SERVERCONSOLE_ReListPlayers( void )
 		if ( playeringame[lIdx] == false )
 			continue;
 
-		sprintf( szString, "%s", players[lIdx].userinfo.netname );
+		sprintf( szString, "%s", players[lIdx].userinfo.GetName() );
 		V_RemoveColorCodes( szString );
 		Item.pszText = szString;
 
@@ -1909,7 +1909,7 @@ void SERVERCONSOLE_UpdatePlayerInfo( LONG lPlayer, ULONG ulUpdateFlags )
 	if ( ulUpdateFlags & UDF_NAME )
 	{
 		Item.iSubItem = COLUMN_NAME;
-		sprintf( szString, "%s", players[lPlayer].userinfo.netname );
+		sprintf( szString, "%s", players[lPlayer].userinfo.GetName() );
 		Item.pszText = szString;
 		V_RemoveColorCodes( szString );
 
