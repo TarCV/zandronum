@@ -53,6 +53,7 @@
 #include "sv_auth.h"
 #include "sv_commands.h"
 #include "srp.h"
+#include "network_enums.h"
 
 #define	DEFAULT_AUTH_SERVER_PORT 15301
 
@@ -144,19 +145,15 @@ void NETWORK_AUTH_Destruct( void )
 //
 NETADDRESS_s NETWORK_AUTH_GetServerAddress( void )
 {
-	NETADDRESS_s authServerAddress;
-	// [BB] Initialize the port with 0. NETWORK_StringToAddress will change
-	// it in case authhostname contains a port.
-	authServerAddress.usPort = 0;
+	bool ok;
+	NETADDRESS_s authServerAddress ( authhostname, &ok );
 
-	UCVarValue Val = authhostname.GetGenericRep( CVAR_String );
-
-	if ( NETWORK_StringToAddress( Val.String, &authServerAddress ) == false )
-		Printf ( "Warning: Can't find authhostname %s!\n", Val.String );
+	if ( ok == false )
+		Printf ( "Warning: Can't find authhostname %s!\n", *authhostname );
 
 	// [BB] If authhostname doesn't include the port, use the default port.
 	if ( authServerAddress.usPort == 0 )
-		NETWORK_SetAddressPort( authServerAddress, DEFAULT_AUTH_SERVER_PORT );
+		authServerAddress.SetPort( DEFAULT_AUTH_SERVER_PORT );
 
 	return ( authServerAddress );
 }
