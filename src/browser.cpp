@@ -460,10 +460,6 @@ bool BROWSER_GetServerList( BYTESTREAM_s *pByteStream )
 
 //*****************************************************************************
 //
-
-// geh
-void M_BuildServerList( void );
-
 void BROWSER_ParseServerQuery( BYTESTREAM_s *pByteStream, bool bLAN )
 {
 	GAMEMODE_e	GameMode = GAMEMODE_COOPERATIVE;
@@ -740,10 +736,6 @@ void BROWSER_ParseServerQuery( BYTESTREAM_s *pByteStream, bool bLAN )
 		for ( int i = NETWORK_ReadByte( pByteStream ); i > 0; --i )
 			NETWORK_ReadString( pByteStream );
 	}
-
-	// Now that this server has been read in, resort the servers in the menu.
-	if ( bResortList )
-		M_BuildServerList( );
 }
 
 //*****************************************************************************
@@ -754,8 +746,8 @@ void BROWSER_QueryMasterServer( void )
 	g_bWaitingForMasterResponse = true;
 
 	// Setup the master server IP.
-	NETWORK_StringToAddress( masterhostname.GetGenericRep( CVAR_String ).String, &g_AddressMasterServer );
-	NETWORK_SetAddressPort( g_AddressMasterServer, g_usMasterPort );
+	g_AddressMasterServer.LoadFromString( masterhostname );
+	g_AddressMasterServer.SetPort( g_usMasterPort );
 
 	// Clear out the buffer, and write out launcher challenge.
 	NETWORK_ClearBuffer( &g_MasterServerBuffer );
@@ -828,7 +820,7 @@ static LONG browser_GetListIDByAddress( NETADDRESS_s Address )
 
 	for ( ulIdx = 0; ulIdx < MAX_BROWSER_SERVERS; ulIdx++ )
 	{
-		if ( NETWORK_CompareAddress( g_BrowserServerList[ulIdx].Address, Address, false ))
+		if ( g_BrowserServerList[ulIdx].Address.Compare( Address ))
 			return ( ulIdx );
 	}
 
@@ -841,7 +833,7 @@ static void browser_QueryServer( ULONG ulServer )
 {
 	// Don't query a server that we're already connected to.
 	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) &&
-		( NETWORK_CompareAddress( g_BrowserServerList[ulServer].Address, CLIENT_GetServerAddress( ), false )))
+		( g_BrowserServerList[ulServer].Address.Compare( CLIENT_GetServerAddress() )))
 	{
 		return;
 	}
@@ -864,6 +856,20 @@ static void browser_QueryServer( ULONG ulServer )
 
 //*****************************************************************************
 //
+
+CCMD( querymaster )
+{
+	// Don't do anything if we're still waiting for a response from the master server.
+	if ( BROWSER_WaitingForMasterResponse( ))
+		return;
+
+	// First, clear the existing server list.
+	BROWSER_ClearServerList( );
+
+	// Then, query the master server.
+	BROWSER_QueryMasterServer( );
+}
+
 CCMD( dumpserverlist )
 {
 	ULONG	ulIdx;
@@ -875,7 +881,7 @@ CCMD( dumpserverlist )
 
 		Printf( "\nServer #%d\n----------------\n", static_cast<unsigned int> (ulIdx) );
 		Printf( "Name: %s\n", g_BrowserServerList[ulIdx].HostName.GetChars() );
-		Printf( "Address: %s\n", NETWORK_AddressToString( g_BrowserServerList[ulIdx].Address ));
+		Printf( "Address: %s\n", g_BrowserServerList[ulIdx].Address.ToString() );
 		Printf( "Gametype: %d\n", g_BrowserServerList[ulIdx].GameMode );
 		Printf( "Num PWADs: %d\n", static_cast<int> (g_BrowserServerList[ulIdx].lNumPWADs) );
 		Printf( "Players: %d/%d\n", static_cast<int> (g_BrowserServerList[ulIdx].lNumPlayers), static_cast<int> (g_BrowserServerList[ulIdx].lMaxClients) );
