@@ -104,7 +104,7 @@
 #include "callvote.h"
 #include "invasion.h"
 #include "r_sky.h"
-#include "r_translate.h"
+#include "r_data/r_translate.h"
 #include "domination.h"
 #include "p_3dmidtex.h"
 #include "a_lightning.h"
@@ -112,6 +112,9 @@
 #include "d_netinf.h"
 #include "po_man.h"
 #include "network/cl_auth.h"
+#include "r_data/colormaps.h"
+#include "r_main.h"
+#include "network_enums.h"
 
 //*****************************************************************************
 //	MISC CRAP THAT SHOULDN'T BE HERE BUT HAS TO BE BECAUSE OF SLOPPY CODING
@@ -119,7 +122,7 @@
 //void	ChangeSpy (bool forward);
 int		D_PlayerClassToInt (const char *classname);
 bool	P_OldAdjustFloorCeil (AActor *thing);
-void	ClientObituary (AActor *self, AActor *inflictor, AActor *attacker, FName MeansOfDeath);
+void	ClientObituary (AActor *self, AActor *inflictor, AActor *attacker, int dmgflags, FName MeansOfDeath);
 void	P_CrouchMove(player_t * player, int direction);
 extern	bool	SpawningMapThing;
 extern FILE *Logfile;
@@ -232,6 +235,7 @@ static	void	client_SetThingTics( BYTESTREAM_s *pByteStream );
 static	void	client_SetThingTID( BYTESTREAM_s *pByteStream );
 static	void	client_SetThingGravity( BYTESTREAM_s *pByteStream );
 static	void	client_SetThingFrame( BYTESTREAM_s *pByteStream, bool bCallStateFunction );
+static	void	client_SetThingScale( BYTESTREAM_s *pByteStream );
 static	void	client_SetWeaponAmmoGive( BYTESTREAM_s *pByteStream );
 static	void	client_ThingIsCorpse( BYTESTREAM_s *pByteStream );
 static	void	client_HideThing( BYTESTREAM_s *pByteStream );
@@ -336,6 +340,7 @@ static	void	client_ACSScriptExecute( BYTESTREAM_s *pByteStream );
 // Sound commands.
 static	void	client_Sound( BYTESTREAM_s *pByteStream );
 static	void	client_SoundActor( BYTESTREAM_s *pByteStream, bool bRespectActorPlayingSomething = false );
+static	void	client_SoundSector( BYTESTREAM_s *pByteStream );
 static	void	client_SoundPoint( BYTESTREAM_s *pByteStream );
 static	void	client_AnnouncerSound( BYTESTREAM_s *pByteSream );
 
@@ -433,7 +438,6 @@ static	void	client_SetPolyobjRotation( BYTESTREAM_s *pByteStream );
 
 // Miscellaneous commands.
 static	void	client_EarthQuake( BYTESTREAM_s *pByteStream );
-static	void	client_SetQueuePosition( BYTESTREAM_s *pByteStream );
 static	void	client_DoScroller( BYTESTREAM_s *pByteStream );
 static	void	client_SetScroller( BYTESTREAM_s *pByteStream );
 static	void	client_SetWallScroller( BYTESTREAM_s *pByteStream );
@@ -596,11 +600,11 @@ void CLIENT_Construct( void )
     if ( pszIPAddress )
     {
 		// Convert the given IP string into our server address.
-		NETWORK_StringToAddress( pszIPAddress, &g_AddressServer );
+		g_AddressServer.LoadFromString( pszIPAddress );
 
 		// If the user didn't specify a port, use the default one.
 		if ( g_AddressServer.usPort == 0 )
-			NETWORK_SetAddressPort( g_AddressServer, DEFAULT_SERVER_PORT );
+			g_AddressServer.SetPort( DEFAULT_SERVER_PORT );
 
 		// If we try to reconnect, use this address.
 		g_AddressLastConnected = g_AddressServer;
@@ -929,7 +933,7 @@ void CLIENT_AttemptConnection( void )
 	}
 
 	g_ulRetryTicks = CONNECTION_RESEND_TIME;
-	Printf( "Connecting to %s\n", NETWORK_AddressToString( g_AddressServer ));
+	Printf( "Connecting to %s\n", g_AddressServer.ToString() );
 
 	// Reset a bunch of stuff.
 	NETWORK_ClearBuffer( &g_LocalBuffer );
@@ -1050,14 +1054,13 @@ void CLIENT_GetPackets( void )
 #endif
 	while (( lSize = NETWORK_GetPackets( )) > 0 )
 	{
-		UCVarValue		Val;
 		BYTESTREAM_s	*pByteStream;
 
 		pByteStream = &NETWORK_GetNetworkMessageBuffer( )->ByteStream;
 
 		// If we're a client and receiving a message from the server...
-		if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) &&
-			( NETWORK_CompareAddress( NETWORK_GetFromAddress( ), CLIENT_GetServerAddress( ), false )))
+		if ( NETWORK_GetState() == NETSTATE_CLIENT
+			&& NETWORK_GetFromAddress().Compare( CLIENT_GetServerAddress() ))
 		{
 			// Statistics.
 			CLIENTSTATISTICS_AddToBytesReceived( lSize );
@@ -1116,12 +1119,10 @@ void CLIENT_GetPackets( void )
 			const char		*pszAddressBuf;
 			NETADDRESS_s	AddressFrom;
 			LONG			lCommand;
-			NETADDRESS_s	MasterAddress;
 			const char		*pszMasterPort;
-			Val = masterhostname.GetGenericRep( CVAR_String );
 			// [BB] This conversion potentially does a DNS lookup.
 			// There is absolutely no reason to call this at beginning of the while loop above (like done before). 
-			NETWORK_StringToAddress( Val.String, &MasterAddress );
+			NETADDRESS_s MasterAddress ( masterhostname );
 
 			// Allow the user to specify which port the master server is on.
 			pszMasterPort = Args->CheckValue( "-masterport" );
@@ -1131,7 +1132,7 @@ void CLIENT_GetPackets( void )
 				MasterAddress.usPort = NETWORK_ntohs( DEFAULT_MASTER_PORT );
 
 
-			pszAddressBuf = NETWORK_AddressToString( NETWORK_GetFromAddress( ));
+			pszAddressBuf = NETWORK_GetFromAddress().ToString();
 
 			// Skulltag is receiving a message from something on the LAN.
 			if (( strncmp( pszAddressBuf, pszPrefix1, 9 ) == 0 ) || 
@@ -1148,7 +1149,7 @@ void CLIENT_GetPackets( void )
 				AddressFrom = NETWORK_GetFromAddress( );
 
 			// If we're receiving info from the master server...
-			if ( NETWORK_CompareAddress( AddressFrom, MasterAddress, false ))
+			if ( AddressFrom.Compare( MasterAddress ))
 			{
 				lCommand = NETWORK_ReadLong( pByteStream );
 				switch ( lCommand )
@@ -1203,7 +1204,7 @@ void CLIENT_GetPackets( void )
 				else if ( lCommand == SERVER_LAUNCHER_IGNORING )
 					Printf( "WARNING! Please wait a full 10 seconds before refreshing the server list.\n" );
 				//else
-				//	Printf( "Unknown network message from %s.\n", NETWORK_AddressToString( g_AddressFrom ));
+				//	Printf( "Unknown network message from %s.\n", g_AddressFrom.ToString() );
 			}
 		}
 	}
@@ -1497,6 +1498,13 @@ void CLIENT_ProcessCommand( LONG lCommand, BYTESTREAM_s *pByteStream )
 				break;
 			case NETWORK_ERRORCODE_BANNED:
 
+				// [TP] Is this a master ban?
+				if ( !!NETWORK_ReadByte( pByteStream ))
+				{
+					szErrorString = "Couldn't connect. \\cgYou have been banned from " GAMENAME "'s master server!\\c-\n"
+						"If you feel this is in error, you may contact the staff at " FORUM_URL;
+				}
+				else
 				{
 					szErrorString = "Couldn't connect. \\cgYou have been banned from this server!\\c-";
 
@@ -1516,8 +1524,18 @@ void CLIENT_ProcessCommand( LONG lCommand, BYTESTREAM_s *pByteStream )
 						strftime( szDate, 32, "%m/%d/%Y %H:%M", pTimeInfo);
 						szErrorString = szErrorString + "\nYour ban expires on: " + szDate + " (server time)";
 					}
-					break;
+
+					// [TP] Read in contact information, if any.
+					FString contact = NETWORK_ReadString( pByteStream );
+					if ( contact.IsNotEmpty() )
+					{
+						szErrorString.AppendFormat( "\nIf you feel this is in error, you may contact the server "
+							"host at: %s", contact.GetChars() );
+					}
+					else
+						szErrorString += "\nThis server has not provided any contact information.";
 				}
+				break;
 			case NETWORK_ERRORCODE_SERVERISFULL:
 
 				szErrorString = "Server is full.";
@@ -2478,10 +2496,6 @@ void CLIENT_ProcessCommand( LONG lCommand, BYTESTREAM_s *pByteStream )
 
 		client_EarthQuake( pByteStream );
 		break;
-	case SVC_SETQUEUEPOSITION:
-
-		client_SetQueuePosition( pByteStream );
-		break;
 	case SVC_DOSCROLLER:
 
 		client_DoScroller( pByteStream );
@@ -2808,6 +2822,19 @@ void CLIENT_ProcessCommand( LONG lCommand, BYTESTREAM_s *pByteStream )
 				}
 				break;
 
+			case SVC2_SETPLAYERVIEWHEIGHT:
+				{
+					const ULONG ulPlayer = NETWORK_ReadByte( pByteStream );
+					const int viewHeight = NETWORK_ReadLong( pByteStream );
+
+					if ( PLAYER_IsValidPlayerWithMo( ulPlayer ) == false ) 
+						break;
+
+					players[ulPlayer].mo->ViewHeight = viewHeight;
+					players[ulPlayer].viewheight = viewHeight;
+				}
+				break;
+
 			case SVC2_SRP_USER_START_AUTHENTICATION:
 			case SVC2_SRP_USER_PROCESS_CHALLENGE:
 			case SVC2_SRP_USER_VERIFY_SESSION:
@@ -2856,6 +2883,12 @@ void CLIENT_ProcessCommand( LONG lCommand, BYTESTREAM_s *pByteStream )
 				}
 				break;
 
+			case SVC2_SETMAPNUMTOTALSECRETS:
+				{
+ 					level.total_secrets = NETWORK_ReadShort( pByteStream );
+				}
+				break;
+
 			// [EP]
 			case SVC2_STOPPOLYOBJSOUND:
 				client_StopPolyobjSound( pByteStream );
@@ -2864,6 +2897,52 @@ void CLIENT_ProcessCommand( LONG lCommand, BYTESTREAM_s *pByteStream )
 			// [EP]
 			case SVC2_BUILDSTAIR:
 				client_BuildStair( pByteStream );
+				break;
+
+			// [EP]
+			case SVC2_SETTHINGSCALE:
+				client_SetThingScale( pByteStream );
+				break;
+
+			case SVC2_SOUNDSECTOR:
+				client_SoundSector( pByteStream );
+				break;
+
+			case SVC2_SYNCJOINQUEUE:
+				JOINQUEUE_ClearList();
+
+				for ( int i = NETWORK_ReadByte( pByteStream ); i > 0; --i )
+				{
+					int player = NETWORK_ReadByte( pByteStream );
+					int team = NETWORK_ReadByte( pByteStream );
+					JOINQUEUE_AddPlayer( player, team );
+				}
+				break;
+
+			case SVC2_PUSHTOJOINQUEUE:
+				{
+					int player = NETWORK_ReadByte( pByteStream );
+					int team = NETWORK_ReadByte( pByteStream );
+					JOINQUEUE_AddPlayer( player, team );
+				}
+				break;
+
+			case SVC2_REMOVEFROMJOINQUEUE:
+				JOINQUEUE_RemovePlayerAtPosition( NETWORK_ReadByte( pByteStream ) );
+				break;
+
+			case SVC2_SETDEFAULTSKYBOX:
+				{
+					int mobjNetID = NETWORK_ReadShort( pByteStream );
+					if ( mobjNetID == -1  )
+						level.DefaultSkybox = NULL;
+					else
+					{
+						AActor *mo = CLIENT_FindThingByNetID( mobjNetID );
+						if ( mo && mo->GetClass()->IsDescendantOf( RUNTIME_CLASS( ASkyViewpoint ) ) )
+							level.DefaultSkybox = static_cast<ASkyViewpoint *>( mo );
+					}
+				}
 				break;
 
 			default:
@@ -2948,8 +3027,11 @@ void CLIENT_QuitNetworkGame( const char *pszString )
 		Printf( "%s\n", pszString );
 
 	// Set the consoleplayer back to 0 and keep our userinfo to avoid desync if we ever reconnect.
-	players[0].userinfo = players[consoleplayer].userinfo;
-	consoleplayer = 0;
+	if ( consoleplayer != 0 )
+	{
+		players[0].userinfo.TransferFrom ( players[consoleplayer].userinfo );
+		consoleplayer = 0;
+	}
 
 	// Clear out the existing players.
 	CLIENT_ClearAllPlayers();
@@ -2969,10 +3051,9 @@ void CLIENT_QuitNetworkGame( const char *pszString )
 	CLIENT_SetConnectionState( CTS_DISCONNECTED );
 
 	// Go back to the full console.
+	// [BB] This is what the CCMD endgame is doing and thus should be
+	// enough to handle all non-network related things.
 	gameaction = ga_fullconsole;
-
-	// View is no longer active.
-	viewactive = false;
 
 	g_lLastParsedSequence = -1;
 	g_lHighestReceivedSequence = -1;
@@ -2981,9 +3062,6 @@ void CLIENT_QuitNetworkGame( const char *pszString )
 
 	// Set the network state back to single player.
 	NETWORK_SetState( NETSTATE_SINGLE );
-
-	// [BB] This prevents the status bar from showing up shortly, if you start a new game, while connected to a server.
-	gamestate = GS_FULLCONSOLE;
 
 	// [BB] Reset gravity to its default, discarding the setting the server used.
 	// Although this is not done for any other sv_* CVAR, it is necessary here,
@@ -3072,7 +3150,7 @@ void CLIENT_AuthenticateLevel( const char *pszMapName )
 	MapData		*pMap;
 
 	// [BB] Check if the wads contain the map at all. If not, don't send any checksums.
-	pMap = P_OpenMapData( pszMapName );
+	pMap = P_OpenMapData( pszMapName, false );
 
 	if ( pMap == NULL )
 	{
@@ -3174,11 +3252,7 @@ AActor *CLIENT_SpawnThing( const PClass *pType, fixed_t X, fixed_t Y, fixed_t Z,
 	if ( pActor )
 	{
 		pActor->lNetID = lNetID;
-		if ( lNetID != -1 )
-		{
-			g_NetIDList[lNetID].bFree = false;
-			g_NetIDList[lNetID].pActor = pActor;
-		}
+		g_NetIDList.useID ( lNetID, pActor );
 
 		pActor->SpawnPoint[0] = X;
 		pActor->SpawnPoint[1] = Y;
@@ -3254,11 +3328,7 @@ void CLIENT_SpawnMissile( const PClass *pType, fixed_t X, fixed_t Y, fixed_t Z, 
 	pActor->angle = R_PointToAngle2( 0, 0, MomX, MomY );
 
 	pActor->lNetID = lNetID;
-	if ( lNetID != -1 )
-	{
-		g_NetIDList[lNetID].bFree = false;
-		g_NetIDList[lNetID].pActor = pActor;
-	}
+	g_NetIDList.useID ( lNetID, pActor );
 
 	// Play the seesound if this missile has one.
 	if ( pActor->SeeSound )
@@ -3308,7 +3378,7 @@ void CLIENT_AdjustPredictionToServerSideConsolePlayerMove( fixed_t X, fixed_t Y,
 bool CLIENT_CanClipMovement( AActor *pActor )
 {
 	// [WS] If it's not a client, of course clip its movement.
-	if ( !NETWORK_InClientMode( ) )
+	if ( NETWORK_InClientMode() == false )
 		return true;
 
 	// [Dusk] Clients clip missiles the server has no control over.
@@ -3370,13 +3440,7 @@ void CLIENT_DisplayMOTD( void )
 //
 AActor *CLIENT_FindThingByNetID( LONG lNetID )
 {
-	if (( lNetID < 0 ) || ( lNetID >= 65536 ))
-		return ( NULL );
-
-	if (( g_NetIDList[lNetID].bFree == false ) && ( g_NetIDList[lNetID].pActor ))
-		return ( g_NetIDList[lNetID].pActor );
-
-    return ( NULL );
+    return ( g_NetIDList.findPointerByID ( lNetID ) );
 }
 
 //*****************************************************************************
@@ -3572,8 +3636,6 @@ void PLAYER_ResetPlayerData( player_t *pPlayer )
 	pPlayer->respawn_time = 0;
 	pPlayer->camera = 0;
 	pPlayer->air_finished = 0;
-	pPlayer->accuracy = 0;
-	pPlayer->stamina = 0;
 	pPlayer->BlendR = 0;
 	pPlayer->BlendG = 0;
 	pPlayer->BlendB = 0;
@@ -3617,9 +3679,7 @@ void PLAYER_ResetPlayerData( player_t *pPlayer )
 	memset( &pPlayer->cmd, 0, sizeof( pPlayer->cmd ));
 	if (( pPlayer - players ) != consoleplayer )
 	{
-		memset( &pPlayer->userinfo, 0, sizeof( pPlayer->userinfo ));
-		// [BB] For now Zandronum doesn't let the player use the color sets.
-		pPlayer->userinfo.colorset = -1;
+		pPlayer->userinfo.Reset();
 	}
 	memset( pPlayer->psprites, 0, sizeof( pPlayer->psprites ));
 
@@ -3933,11 +3993,12 @@ static void client_SpawnPlayer( BYTESTREAM_s *pByteStream, bool bMorph )
 	if (( ulPlayer >= MAXPLAYERS ) || ( gamestate != GS_LEVEL ))
 		return;
 
+	AActor *pOldNetActor = g_NetIDList.findPointerByID ( lID );
 	// If there's already an actor with this net ID, kill it!
-	if ( g_NetIDList[lID].pActor != NULL )
+	if ( pOldNetActor != NULL )
 	{
 /*
-		if ( g_NetIDList[lID].pActor == players[consoleplayer].mo )
+		if ( pOldActor == players[consoleplayer].mo )
 		{
 #ifdef CLIENT_WARNING_MESSAGES
 			Printf( "client_SpawnPlayer: WARNING! Tried to delete console player's body!\n" );
@@ -3945,9 +4006,8 @@ static void client_SpawnPlayer( BYTESTREAM_s *pByteStream, bool bMorph )
 			return;
 		}
 */
-		g_NetIDList[lID].pActor->Destroy( );
-		g_NetIDList[lID].pActor = NULL;
-		g_NetIDList[lID].bFree = true;
+		pOldNetActor->Destroy( );
+		g_NetIDList.freeID ( lID );
 	}
 
 	// [BB] Remember if we were already ignoring WeaponSelect commands. If so, the server
@@ -4054,11 +4114,7 @@ static void client_SpawnPlayer( BYTESTREAM_s *pByteStream, bool bMorph )
 
 	// Set the network ID.
 	pPlayer->mo->lNetID = lID;
-	if ( lID != -1 )
-	{
-		g_NetIDList[lID].bFree = false;
-		g_NetIDList[lID].pActor = pPlayer->mo;
-	}
+	g_NetIDList.useID ( lID, pPlayer->mo );
 
 	// Set the spectator variables [after G_PlayerReborn so our data doesn't get lost] [BB] Why?.
 	// [BB] To properly handle that spectators don't get default inventory, we need to set this
@@ -4098,7 +4154,7 @@ static void client_SpawnPlayer( BYTESTREAM_s *pByteStream, bool bMorph )
 	// If this is the console player, and he's spawned as a regular player, he's definitely not
 	// in line anymore!
 	if ((( pPlayer - players ) == consoleplayer ) && ( pPlayer->bSpectating == false ))
-		JOINQUEUE_SetClientPositionInLine( -1 );
+		JOINQUEUE_RemovePlayerFromQueue( consoleplayer );
 
 	// Set the player's bot status.
 	pPlayer->bIsBot = bIsBot;
@@ -4109,11 +4165,11 @@ static void client_SpawnPlayer( BYTESTREAM_s *pByteStream, bool bMorph )
 		PLAYER_ClearWeapon ( pPlayer );
 
 	// [GRB] Reset skin
-	pPlayer->userinfo.skin = R_FindSkin (skins[pPlayer->userinfo.skin].name, pPlayer->CurrentPlayerClass);
+	pPlayer->userinfo.SkinNumChanged ( R_FindSkin (skins[pPlayer->userinfo.GetSkin()].name, pPlayer->CurrentPlayerClass) );
 
 	// [WS] Don't set custom skin color when the player is morphed.
 	// [BB] In team games (where we assume that all players are on a team), we allow the team color for morphed players.
-	if (!(pActor->flags2 & MF2_DONTTRANSLATE) && ( !bMorph || ( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode( )) & GMF_PLAYERSONTEAMS )))
+	if (!(pActor->flags2 & MF2_DONTTRANSLATE) && ( !bMorph || ( GAMEMODE_GetCurrentFlags() & GMF_PLAYERSONTEAMS )))
 	{
 		// [RH] Be sure the player has the right translation
 		R_BuildPlayerTranslation ( ulPlayer );
@@ -4138,16 +4194,16 @@ static void client_SpawnPlayer( BYTESTREAM_s *pByteStream, bool bMorph )
 	}
 	else if ( cl_skins >= 2 )
 	{
-		if ( skins[pPlayer->userinfo.skin].bCheat )
+		if ( skins[pPlayer->userinfo.GetSkin()].bCheat )
 		{
 			lSkin = R_FindSkin( "base", pPlayer->CurrentPlayerClass );
 			pActor->flags4 |= MF4_NOSKIN;
 		}
 		else
-			lSkin = pPlayer->userinfo.skin;
+			lSkin = pPlayer->userinfo.GetSkin();
 	}
 	else
-		lSkin = pPlayer->userinfo.skin;
+		lSkin = pPlayer->userinfo.GetSkin();
 
 	if (( lSkin < 0 ) || ( lSkin >= static_cast<LONG>(skins.Size()) ))
 		lSkin = R_FindSkin( "base", pPlayer->CurrentPlayerClass );
@@ -4194,7 +4250,7 @@ static void client_SpawnPlayer( BYTESTREAM_s *pByteStream, bool bMorph )
 		players[consoleplayer].camera = players[consoleplayer].mo;
 */
 	// setup gun psprite
-	P_SetupPsprites (pPlayer);
+	P_SetupPsprites (pPlayer, false);
 
 	// If this console player is looking through this player's eyes, attach the status
 	// bar to this player.
@@ -4536,7 +4592,7 @@ static void client_KillPlayer( BYTESTREAM_s *pByteStream )
 	players[ulPlayer].mo->DamageType = DamageType;
 
 	// Kill the player.
-	players[ulPlayer].mo->Die( pSource, pInflictor );
+	players[ulPlayer].mo->Die( pSource, pInflictor, 0 );
 
 	// [BB] Set the attacker, necessary to let the death view follow the killer.
 	players[ulPlayer].attacker = pSource;
@@ -4561,16 +4617,16 @@ static void client_KillPlayer( BYTESTREAM_s *pByteStream )
 		}
 	}
 
-	if (( (GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode( )) & GMF_COOPERATIVE) == false ) &&
+	if (( (GAMEMODE_GetCurrentFlags() & GMF_COOPERATIVE) == false ) &&
 		( cl_showlargefragmessages ) &&
 		( ulSourcePlayer < MAXPLAYERS ) &&
 		( ulPlayer != ulSourcePlayer ) &&
 		( MOD != NAME_SpawnTelefrag ) &&
 		( GAMEMODE_IsGameInProgress() ))
 	{
-		if ((( ( GAMEMODE_GetFlags(GAMEMODE_GetCurrentMode()) & GMF_PLAYERSEARNFRAGS ) == false ) || (( fraglimit == 0 ) || ( players[ulSourcePlayer].fragcount < fraglimit ))) &&
-			(( ( ( GAMEMODE_GetFlags(GAMEMODE_GetCurrentMode()) & GMF_PLAYERSEARNWINS ) && !( GAMEMODE_GetFlags(GAMEMODE_GetCurrentMode()) & GMF_PLAYERSONTEAMS ) ) == false ) || (( winlimit == 0 ) || ( players[ulSourcePlayer].ulWins < static_cast<ULONG>(winlimit) ))) &&
-			(( ( ( GAMEMODE_GetFlags(GAMEMODE_GetCurrentMode()) & GMF_PLAYERSEARNWINS ) && ( GAMEMODE_GetFlags(GAMEMODE_GetCurrentMode()) & GMF_PLAYERSONTEAMS ) ) == false ) || (( winlimit == 0 ) || ( TEAM_GetWinCount( players[ulSourcePlayer].ulTeam ) < winlimit ))))
+		if ((( ( GAMEMODE_GetCurrentFlags() & GMF_PLAYERSEARNFRAGS ) == false ) || (( fraglimit == 0 ) || ( players[ulSourcePlayer].fragcount < fraglimit ))) &&
+			(( ( ( GAMEMODE_GetCurrentFlags() & GMF_PLAYERSEARNWINS ) && !( GAMEMODE_GetCurrentFlags() & GMF_PLAYERSONTEAMS ) ) == false ) || (( winlimit == 0 ) || ( players[ulSourcePlayer].ulWins < static_cast<ULONG>(winlimit) ))) &&
+			(( ( ( GAMEMODE_GetCurrentFlags() & GMF_PLAYERSEARNWINS ) && ( GAMEMODE_GetCurrentFlags() & GMF_PLAYERSONTEAMS ) ) == false ) || (( winlimit == 0 ) || ( TEAM_GetWinCount( players[ulSourcePlayer].ulTeam ) < winlimit ))))
 		{
 			// Display a large "You were fragged by <name>." message in the middle of the screen.
 			if ( ulPlayer == static_cast<ULONG>(consoleplayer) )
@@ -4600,7 +4656,7 @@ static void client_KillPlayer( BYTESTREAM_s *pByteStream )
 	}
 
 	// Finally, print the obituary string.
-	ClientObituary( players[ulPlayer].mo, pInflictor, pSource, MOD );
+	ClientObituary( players[ulPlayer].mo, pInflictor, pSource, ( ulSourcePlayer < MAXPLAYERS ) ? DMG_PLAYERATTACK : 0, MOD );
 
 	// [BB] Restore the weapon the player actually is using now.
 	if ( ( ulSourcePlayer < MAXPLAYERS ) && ( players[ulSourcePlayer].ReadyWeapon != pSavedReadyWeapon ) )
@@ -4720,7 +4776,7 @@ static void client_SetPlayerState( BYTESTREAM_s *pByteStream )
 		// [BB] SERVERCOMMANDS_MovePlayer/client_MovePlayer now informs a client about BT_ATTACK or BT_ALTATTACK
 		// of every player. This hopefully properly fixes these problems once and for all.
 		/*
-		if ( ( CLIENTDEMO_IsPlaying( ) || ( ( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode( )) & GMF_COOPERATIVE ) && static_cast<signed> (ulPlayer) != consoleplayer ) )
+		if ( ( CLIENTDEMO_IsPlaying( ) || ( ( GAMEMODE_GetCurrentFlags() & GMF_COOPERATIVE ) && static_cast<signed> (ulPlayer) != consoleplayer ) )
 				&& players[ulPlayer].ReadyWeapon )
 		{
 			if ( ulState == STATE_PLAYER_ATTACK )
@@ -4824,29 +4880,21 @@ static void client_SetPlayerUserInfo( BYTESTREAM_s *pByteStream )
 	{
 		if ( strlen( szName ) > MAXPLAYERNAME )
 			szName[MAXPLAYERNAME] = '\0';
-		strcpy( pPlayer->userinfo.netname, szName );
-
-		// Remove % signs from names.
-		for ( ulIdx = 0; ulIdx < strlen( pPlayer->userinfo.netname ); ulIdx++ )
-		{
-			if ( pPlayer->userinfo.netname[ulIdx] == '%' )
-				pPlayer->userinfo.netname[ulIdx] = ' ';
-		}
+		pPlayer->userinfo.NameChanged ( szName );
 	}
 
 	// Other info.
-	// [BB] Make sure that the gender is valid.
 	if ( ulFlags & USERINFO_GENDER )
-		pPlayer->userinfo.gender = clamp ( static_cast<int>(lGender), 0, 2 );
+		pPlayer->userinfo.GenderNumChanged ( static_cast<int>(lGender) );
 	if ( ulFlags & USERINFO_COLOR )
-	    pPlayer->userinfo.color = lColor;
+	    pPlayer->userinfo.ColorChanged ( lColor );
 	if ( ulFlags & USERINFO_RAILCOLOR )
-		pPlayer->userinfo.lRailgunTrailColor = lRailgunTrailColor;
+		pPlayer->userinfo.RailColorChanged ( lRailgunTrailColor );
 
 	// Make sure the skin is valid.
 	if ( ulFlags & USERINFO_SKIN )
 	{
-		pPlayer->userinfo.skin = R_FindSkin( pszSkin, pPlayer->CurrentPlayerClass );
+		pPlayer->userinfo.SkinNumChanged ( R_FindSkin( pszSkin, pPlayer->CurrentPlayerClass ) );
 
 		// [BC] Handle cl_skins here.
 		if ( cl_skins <= 0 )
@@ -4857,17 +4905,17 @@ static void client_SetPlayerUserInfo( BYTESTREAM_s *pByteStream )
 		}
 		else if ( cl_skins >= 2 )
 		{
-			if ( skins[pPlayer->userinfo.skin].bCheat )
+			if ( skins[pPlayer->userinfo.GetSkin()].bCheat )
 			{
 				lSkin = R_FindSkin( "base", pPlayer->CurrentPlayerClass );
 				if ( pPlayer->mo )
 					pPlayer->mo->flags4 |= MF4_NOSKIN;
 			}
 			else
-				lSkin = pPlayer->userinfo.skin;
+				lSkin = pPlayer->userinfo.GetSkin();
 		}
 		else
-			lSkin = pPlayer->userinfo.skin;
+			lSkin = pPlayer->userinfo.GetSkin();
 
 		if (( lSkin < 0 ) || ( lSkin >= static_cast<LONG>(skins.Size()) ))
 			lSkin = R_FindSkin( "base", pPlayer->CurrentPlayerClass );
@@ -4882,23 +4930,17 @@ static void client_SetPlayerUserInfo( BYTESTREAM_s *pByteStream )
 
 	// Read in the player's handicap.
 	if ( ulFlags & USERINFO_HANDICAP )
-	{
-		pPlayer->userinfo.lHandicap = lHandicap;
-		if ( pPlayer->userinfo.lHandicap < 0 )
-			pPlayer->userinfo.lHandicap = 0;
-		else if ( pPlayer->userinfo.lHandicap > deh.MaxSoulsphere )
-			pPlayer->userinfo.lHandicap = deh.MaxSoulsphere;
-	}
+		pPlayer->userinfo.HandicapChanged ( lHandicap );
 
 	if ( ulFlags & USERINFO_TICSPERUPDATE )
-		pPlayer->userinfo.ulTicsPerUpdate = ulTicsPerUpdate;
+		pPlayer->userinfo.TicsPerUpdateChanged ( ulTicsPerUpdate );
 
 	if ( ulFlags & USERINFO_CONNECTIONTYPE )
-		pPlayer->userinfo.ulConnectionType = ulConnectionType;
+		pPlayer->userinfo.ConnectionTypeChanged ( ulConnectionType );
 
 	// [CK] We do compressed bitfields now.
 	if ( ulFlags & USERINFO_CLIENTFLAGS )
-		pPlayer->userinfo.clientFlags = clientFlags;
+		pPlayer->userinfo.ClientFlagsChanged ( clientFlags );
 
 	// Build translation tables, always gotta do this!
 	R_BuildPlayerTranslation( ulPlayer );
@@ -4922,8 +4964,8 @@ static void client_SetPlayerFrags( BYTESTREAM_s *pByteStream )
 		return;
 
 	if (( g_ConnectionState == CTS_ACTIVE ) &&
-		( GAMEMODE_GetFlags(GAMEMODE_GetCurrentMode()) & GMF_PLAYERSEARNFRAGS ) &&
-		!( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode( )) & GMF_PLAYERSONTEAMS ) &&
+		( GAMEMODE_GetCurrentFlags() & GMF_PLAYERSEARNFRAGS ) &&
+		!( GAMEMODE_GetCurrentFlags() & GMF_PLAYERSONTEAMS ) &&
 		( GAMEMODE_IsGameInProgress() ) &&
 		// [BB] If we are still in the first tic of the level, we are receiving the frag count
 		// as part of the full update (that is not considered as a snapshot after a "changemap"
@@ -6708,6 +6750,10 @@ static void client_SetThingFlags( BYTESTREAM_s *pByteStream )
 
 		pActor->flags6 = ulFlags;
 		break;
+	case FLAGSET_FLAGS7:
+
+		pActor->flags7 = ulFlags;
+		break;
 	case FLAGSET_FLAGSST:
 
 		pActor->ulSTFlags = ulFlags;
@@ -7197,6 +7243,43 @@ static void client_SetThingFrame( BYTESTREAM_s *pByteStream, bool bCallStateFunc
 		else
 			pActor->SetState( pNewState, true );
 	}
+}
+
+//*****************************************************************************
+//
+static void client_SetThingScale( BYTESTREAM_s *pByteStream )
+{
+	fixed_t scaleX = 0, scaleY = 0;
+
+	// Get the ID of the actor whose scale is being updated.
+	int mobjNetID = NETWORK_ReadShort( pByteStream );
+
+	// Get which side of the scale is being updated.
+	unsigned ActorScaleFlags = NETWORK_ReadByte( pByteStream );
+
+	// Get the new scaleX if needed.
+	if ( ActorScaleFlags & ACTORSCALE_X )
+		scaleX = NETWORK_ReadLong( pByteStream );
+
+	// Get the new scaleY if needed.
+	if ( ActorScaleFlags & ACTORSCALE_Y )
+		scaleY = NETWORK_ReadLong( pByteStream );
+
+	// Now try to find the corresponding actor.
+	AActor *mo = CLIENT_FindThingByNetID( mobjNetID );
+	if ( mo == NULL )
+	{
+#ifdef CLIENT_WARNING_MESSAGES
+		Printf( "client_SetThingScale: Couldn't find thing: %d\n", mobjNetID );
+#endif
+		return;
+	}
+
+	// Finally, set the actor's scale.
+	if ( ActorScaleFlags & ACTORSCALE_X )
+		mo->scaleX = scaleX;
+	if ( ActorScaleFlags & ACTORSCALE_Y )
+		mo->scaleY = scaleY;
 }
 
 //*****************************************************************************
@@ -8055,6 +8138,10 @@ static void client_SetGameDMFlags( BYTESTREAM_s *pByteStream )
 	Value.Int = NETWORK_ReadLong( pByteStream );
 	compatflags.ForceSet( Value, CVAR_Int );
 
+	// ... and compatflags.
+	Value.Int = NETWORK_ReadLong( pByteStream );
+	compatflags2.ForceSet( Value, CVAR_Int );
+
 	// [BB] ... and zacompatflags.
 	Value.Int = NETWORK_ReadLong( pByteStream );
 	zacompatflags.ForceSet( Value, CVAR_Int );
@@ -8098,7 +8185,9 @@ static void client_SetGameModeLimits( BYTESTREAM_s *pByteStream )
 	Value.Int = NETWORK_ReadByte( pByteStream );
 	sv_cheats.ForceSet( Value, CVAR_Int );
 	// [BB] This ensures that am_cheat respects the sv_cheats value we just set.
-	am_cheat = am_cheat;
+	am_cheat.Callback();
+	// [TP] Same for turbo
+	turbo.Callback();
 
 	// Read in, and set the value for sv_fastweapons.
 	Value.Int = NETWORK_ReadByte( pByteStream );
@@ -9357,8 +9446,8 @@ static void client_SetSectorReflection( BYTESTREAM_s *pByteStream )
 	}
 
 	// Set the sector's reflection.
-	pSector->ceiling_reflect = fCeilingReflect;
-	pSector->floor_reflect = fFloorReflect;
+	pSector->reflect[sector_t::ceiling] = fCeilingReflect;
+	pSector->reflect[sector_t::floor] = fFloorReflect;
 }
 
 //*****************************************************************************
@@ -9848,7 +9937,6 @@ static void client_SetSideFlags( BYTESTREAM_s *pByteStream )
 //
 static void client_ACSScriptExecute( BYTESTREAM_s *pByteStream )
 {
-	ULONG			ulScript;
 	LONG			lID;
 	LONG			lLineIdx;
 	bool			bBackSide;
@@ -9862,7 +9950,15 @@ static void client_ACSScriptExecute( BYTESTREAM_s *pByteStream )
 	BYTE			argheader;
 
 	// Read in the script to be executed.
-	ulScript = NETWORK_ReadShort( pByteStream );
+	int scriptId = NETWORK_ReadShort( pByteStream );
+
+	// [TP] Resolve the script netid into a script number
+	int scriptNum;
+
+	if ( scriptId != NO_SCRIPT_NETID )
+		scriptNum = NETWORK_ACSScriptFromNetID( scriptId );
+	else
+		scriptNum = -FName( NETWORK_ReadString( pByteStream ));
 
 	// Read in the ID of the activator.
 	lID = NETWORK_ReadShort( pByteStream );
@@ -9930,7 +10026,7 @@ static void client_ACSScriptExecute( BYTESTREAM_s *pByteStream )
 	else
 		pLine = &lines[lLineIdx];
 
-	P_StartScript( pActor, pLine, ulScript, mapname, bBackSide, args[0], args[1], args[2], bAlways, false );
+	P_StartScript( pActor, pLine, scriptNum, mapname, args, 3, ( bBackSide ? ACS_BACKSIDE : 0 ) | ( bAlways ? ACS_ALWAYS : 0 ) );
 }
 
 //*****************************************************************************
@@ -10005,6 +10101,35 @@ static void client_SoundActor( BYTESTREAM_s *pByteStream, bool bRespectActorPlay
 
 	// Finally, play the sound.
 	S_Sound( pActor, lChannel, pszSoundString, (float)lVolume / 127.f, NETWORK_AttenuationIntToFloat ( lAttenuation ) );
+}
+
+//*****************************************************************************
+//
+static void client_SoundSector( BYTESTREAM_s *pByteStream )
+{
+	// Read in the spot ID.
+	int sectorID = NETWORK_ReadShort( pByteStream );
+
+	// Read in the channel.
+	int channel = NETWORK_ReadShort( pByteStream );
+
+	// Read in the name of the sound to play.
+	const char *soundString = NETWORK_ReadString( pByteStream );
+
+	// Read in the volume.
+	int volume = NETWORK_ReadByte( pByteStream );
+	if ( volume > 127 )
+		volume = 127;
+
+	// Read in the attenuation.
+	int attenuation = NETWORK_ReadByte( pByteStream );
+
+	// Make sure the sector ID is valid.
+	if (( sectorID < 0 ) && ( sectorID >= numsectors ))
+		return;
+
+	// Finally, play the sound.
+	S_Sound( &sectors[sectorID], channel, soundString, (float)volume / 127.f, NETWORK_AttenuationIntToFloat ( attenuation ) );
 }
 
 //*****************************************************************************
@@ -10209,10 +10334,7 @@ static void client_MapNew( BYTESTREAM_s *pByteStream )
 	// Also, the view is no longer active.
 	viewactive = false;
 
-	// [Dusk] We're also no longer in line at this point.
-	JOINQUEUE_SetClientPositionInLine( -1 );
-
-	Printf( "Connecting to %s\n%s\n", NETWORK_AddressToString( g_AddressServer ), pszMapName );
+	Printf( "Connecting to %s\n%s\n", g_AddressServer.ToString(), pszMapName );
 
 	// Update the connection state, and begin trying to reconnect.
 	CLIENT_SetConnectionState( CTS_ATTEMPTINGCONNECTION );
@@ -10546,8 +10668,11 @@ static void client_GivePowerup( BYTESTREAM_s *pByteStream )
 	// Read in the amount of this inventory type the player has.
 	lAmount = NETWORK_ReadShort( pByteStream );
 
+	// [TP]
+	bool isRune = NETWORK_ReadByte( pByteStream );
+
 	// Read in the amount of time left on this powerup.
-	lEffectTics = NETWORK_ReadShort( pByteStream );
+	lEffectTics = ( isRune == false ) ? NETWORK_ReadShort( pByteStream ) : 0;
 
 	// Check to make sure everything is valid. If not, break out.
 	if (( PLAYER_IsValidPlayer( ulPlayer ) == false ) || ( players[ulPlayer].mo == NULL ))
@@ -10586,7 +10711,13 @@ static void client_GivePowerup( BYTESTREAM_s *pByteStream )
 	}
 
 	if ( pInventory )
+	{
 		static_cast<APowerup *>( pInventory )->EffectTics = lEffectTics;
+
+		// [TP]
+		if ( isRune )
+			pInventory->Owner->Rune = static_cast<APowerup *>( pInventory );
+	}
 
 	// Since an item displayed on the HUD may have been given, refresh the HUD.
 	SCOREBOARD_RefreshHUD( );
@@ -10680,7 +10811,7 @@ static void client_DestroyAllInventory( BYTESTREAM_s *pByteStream )
 	// Finally, destroy the player's inventory.
 	// [BB] Be careful here, we may not use mo->DestroyAllInventory( ), otherwise
 	// AHexenArmor messes up.
-	DoClearInv ( players[ulPlayer].mo );
+	players[ulPlayer].mo->ClearInventory();
 }
 
 //*****************************************************************************
@@ -12128,35 +12259,6 @@ static void client_EarthQuake( BYTESTREAM_s *pByteStream )
 
 //*****************************************************************************
 //
-static void client_SetQueuePosition( BYTESTREAM_s *pByteStream )
-{
-	LONG	lPosition;
-
-	// Read in our position in the join queue.
-	lPosition = NETWORK_ReadByte( pByteStream );
-
-	// [BB] We were removed from the queue for whatever reason.
-	if ( lPosition == 255 )
-	{
-		JOINQUEUE_SetClientPositionInLine( -1 );
-		return;
-	}
-	// [BB] This should never happen!
-	else if ( lPosition == MAXPLAYERS )
-	{
-		Printf( "Join queue full!\n" );
-		JOINQUEUE_SetClientPositionInLine( -1 );
-		return;
-	}
-	else
-		Printf( "Your position in line is: %d\n", static_cast<int> (lPosition + 1) );
-
-	// Update the joinqueue module with our position in line.
-	JOINQUEUE_SetClientPositionInLine( lPosition );
-}
-
-//*****************************************************************************
-//
 static void client_DoScroller( BYTESTREAM_s *pByteStream )
 {
 	DScroller::EScrollType	Type;
@@ -12442,7 +12544,7 @@ static void client_IgnorePlayer( BYTESTREAM_s *pByteStream )
 		players[ulPlayer].bIgnoreChat = true;
 		players[ulPlayer].lIgnoreChatTicks = lTicks;
 
-		Printf( "%s\\c- will be ignored, because you're ignoring %s IP.\n", players[ulPlayer].userinfo.netname, players[ulPlayer].userinfo.gender == GENDER_MALE ? "his" : players[ulPlayer].userinfo.gender == GENDER_FEMALE ? "her" : "its" );
+		Printf( "%s\\c- will be ignored, because you're ignoring %s IP.\n", players[ulPlayer].userinfo.GetName(), players[ulPlayer].userinfo.GetGender() == GENDER_MALE ? "his" : players[ulPlayer].userinfo.GetGender() == GENDER_FEMALE ? "her" : "its" );
 	}
 }
 
@@ -12542,11 +12644,11 @@ CCMD( connect )
 	R_SetVisibility( 8.0f );
 
 	// Create a server IP from the given string.
-	NETWORK_StringToAddress( argv[1], &g_AddressServer );
+	g_AddressServer.LoadFromString( argv[1] );
 
 	// If the user didn't specify a port, use the default port.
 	if ( g_AddressServer.usPort == 0 )
-		NETWORK_SetAddressPort( g_AddressServer, DEFAULT_SERVER_PORT );
+		g_AddressServer.SetPort( DEFAULT_SERVER_PORT );
 
 	g_AddressLastConnected = g_AddressServer;
 
@@ -12573,9 +12675,7 @@ CCMD( disconnect )
 	if ( NETWORK_GetState( ) != NETSTATE_CLIENT )
 		return;
 
-	// [BB] While disconnecting is not an error, I_Error is a convenient way to abort the current game and reset everything.
-	// [Dusk] Use a whitespace to suppress GCC warnings.
-	I_Error ( " " );
+	CLIENT_QuitNetworkGame ( NULL );
 }
 
 //*****************************************************************************

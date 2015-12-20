@@ -64,6 +64,7 @@
 #include "team.h"
 #include "sbar.h"
 #include "scoreboard.h"
+#include "v_video.h"
 
 //*****************************************************************************
 //	PROTOTYPES
@@ -99,8 +100,7 @@ void POSSESSION_Tick( void )
 	case PSNS_WAITINGFORPLAYERS:
 
 		// No need to do anything here for clients.
-		if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-			( CLIENTDEMO_IsPlaying( )))
+		if ( NETWORK_InClientMode() )
 		{
 			break;
 		}
@@ -136,8 +136,7 @@ void POSSESSION_Tick( void )
 
 			// FIGHT!
 			if (( g_ulPSNCountdownTicks == 0 ) &&
-				( NETWORK_GetState( ) != NETSTATE_CLIENT ) &&
-				( CLIENTDEMO_IsPlaying( ) == false ))
+				( NETWORK_InClientMode() == false ))
 			{
 				POSSESSION_DoFight( );
 			}
@@ -165,8 +164,7 @@ void POSSESSION_Tick( void )
 
 			// The holder has held the artifact for the required time! Give the holder a point!
 			if (( g_ulPSNArtifactHoldTicks == 0 ) &&
-				( NETWORK_GetState( ) != NETSTATE_CLIENT ) &&
-				( CLIENTDEMO_IsPlaying( ) == false ))
+				( NETWORK_InClientMode() == false ))
 			{
 				POSSESSION_ScorePossessionPoint( g_pPossessionArtifactCarrier );
 			}
@@ -185,8 +183,7 @@ void POSSESSION_Tick( void )
 	case PSNS_PRENEXTROUNDCOUNTDOWN:
 
 		// No need to do anything here for clients.
-		if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-			( CLIENTDEMO_IsPlaying( )))
+		if ( NETWORK_InClientMode() )
 		{
 			break;
 		}
@@ -226,8 +223,7 @@ void POSSESSION_Tick( void )
 
 			// FIGHT!
 			if (( g_ulPSNCountdownTicks == 0 ) &&
-				( NETWORK_GetState( ) != NETSTATE_CLIENT ) &&
-				( CLIENTDEMO_IsPlaying( ) == false ))
+				( NETWORK_InClientMode() == false ))
 			{
 				POSSESSION_DoFight( );
 			}
@@ -332,8 +328,7 @@ void POSSESSION_StartCountdown( ULONG ulTicks )
 	}
 */
 	// Put the game in a countdown state.
-	if (( NETWORK_GetState( ) != NETSTATE_CLIENT ) &&
-		( CLIENTDEMO_IsPlaying( ) == false ))
+	if ( NETWORK_InClientMode() == false )
 	{
 		POSSESSION_SetState( PSNS_COUNTDOWN );
 	}
@@ -368,8 +363,7 @@ void POSSESSION_StartNextRoundCountdown( ULONG ulTicks )
 	}
 */
 	// Put the game in a countdown state.
-	if (( NETWORK_GetState( ) != NETSTATE_CLIENT ) &&
-		( CLIENTDEMO_IsPlaying( ) == false ))
+	if ( NETWORK_InClientMode() == false )
 	{
 		POSSESSION_SetState( PSNS_NEXTROUNDCOUNTDOWN );
 	}
@@ -393,8 +387,7 @@ void POSSESSION_DoFight( void )
 	AActor				*pActor;
 
 	// The match is now in progress.
-	if (( NETWORK_GetState( ) != NETSTATE_CLIENT ) &&
-		( CLIENTDEMO_IsPlaying( ) == false ))
+	if ( NETWORK_InClientMode() == false )
 	{
 		POSSESSION_SetState( PSNS_INPROGRESS );
 	}
@@ -435,8 +428,7 @@ void POSSESSION_DoFight( void )
 	else
 		Printf( "FIGHT!\n" );
 
-	if (( NETWORK_GetState( ) != NETSTATE_CLIENT ) &&
-		( CLIENTDEMO_IsPlaying( ) == false ))
+	if ( NETWORK_InClientMode() == false )
 	{
 		// Reload the items on this level.
 		TThinkerIterator<AActor> iterator;
@@ -484,8 +476,7 @@ void POSSESSION_DoFight( void )
 	GAMEMODE_RespawnAllPlayers ( BOTEVENT_LMS_FIGHT, PST_REBORNNOINVENTORY );
 
 	// Also, spawn the possession artifact so that we can actually play!
-	if (( NETWORK_GetState( ) != NETSTATE_CLIENT ) &&
-		( CLIENTDEMO_IsPlaying( ) == false ))
+	if ( NETWORK_InClientMode() == false )
 	{
 		GAME_SpawnPossessionArtifact( );
 	}
@@ -566,8 +557,7 @@ void POSSESSION_ArtifactPickedUp( player_t *pPlayer, ULONG ulTicks )
 	g_ulPSNArtifactHoldTicks = ulTicks;
 
 	// Change the game state to the artifact being held, and begin the countdown.
-	if (( NETWORK_GetState( ) != NETSTATE_CLIENT ) &&
-		( CLIENTDEMO_IsPlaying( ) == false ))
+	if ( NETWORK_InClientMode() == false )
 	{
 		POSSESSION_SetState( PSNS_ARTIFACTHELD );
 	}
@@ -779,7 +769,7 @@ void possession_DisplayScoreInfo( ULONG ulPlayer )
 	if ( teampossession && ( players[ulPlayer].bOnTeam ))
 	{
 		sprintf( szString, "\\c%c%s %s!", V_GetColorChar( TEAM_GetTextColor( players[ulPlayer].ulTeam )), TEAM_GetName( players[ulPlayer].ulTeam ) ,bPointLimitReached ? "WINS" : "SCORES" );
-		sprintf( szScorer, "\\c%cScored by: %s", V_GetColorChar( TEAM_GetTextColor( players[ulPlayer].ulTeam )), players[ulPlayer].userinfo.netname );
+		sprintf( szScorer, "\\c%cScored by: %s", V_GetColorChar( TEAM_GetTextColor( players[ulPlayer].ulTeam )), players[ulPlayer].userinfo.GetName() );
 
 		// [BB] I don't see why we should remove the player name's color codes here. It's not done in CTF either
 		// and the player's team is apparent from the rest of the message.
@@ -787,7 +777,7 @@ void possession_DisplayScoreInfo( ULONG ulPlayer )
 		V_ColorizeString( szScorer );
 	}
 	else
-		sprintf( szString, "%s \\c-%s!", players[ulPlayer].userinfo.netname, bPointLimitReached ? "WINS" : "SCORES" );
+		sprintf( szString, "%s \\c-%s!", players[ulPlayer].userinfo.GetName(), bPointLimitReached ? "WINS" : "SCORES" );
 	V_ColorizeString( szString );
 
 	// Print out the HUD message that displays who scored/won. If we're the server, just
