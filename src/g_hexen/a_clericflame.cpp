@@ -83,8 +83,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_CFlameAttack)
 	}
 
 	// [BC] Weapons are handled by the server.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		S_Sound (self, CHAN_WEAPON, "ClericFlameFire", 1, ATTN_NORM);
 		return;
@@ -93,7 +92,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_CFlameAttack)
 	P_SpawnPlayerMissile (self, RUNTIME_CLASS(ACFlameMissile));
 	
 	// [BC] Apply spread.
-	if ( player->cheats & CF_SPREAD )
+	if ( player->cheats2 & CF2_SPREAD )
 	{
 		P_SpawnPlayerMissile( self, RUNTIME_CLASS(ACFlameMissile), self->angle + ( ANGLE_45 / 3 ));
 		P_SpawnPlayerMissile( self, RUNTIME_CLASS(ACFlameMissile), self->angle - ( ANGLE_45 / 3 ));
@@ -138,8 +137,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_CFlameMissile)
 	S_Sound (self, CHAN_BODY, "ClericFlameExplode", 1, ATTN_NORM);
 
 	// [BC] Let the server handle this.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}

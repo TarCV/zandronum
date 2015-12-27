@@ -31,7 +31,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_SpectralLightningTail)
 	AActor *foo = Spawn("SpectralLightningHTail", self->x - self->velx, self->y - self->vely, self->z, ALLOW_REPLACE);
 
 	foo->angle = self->angle;
-	foo->health = self->health;
+	foo->FriendPlayer = self->FriendPlayer;
 }
 
 DEFINE_ACTION_FUNCTION(AActor, A_SpectralBigBallLightning)
@@ -56,7 +56,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_SpectralLightning)
 	fixed_t x, y;
 
 	// [CW] Clients may not do this.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) || ( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 		return;
 
 	if (self->threshold != 0)
@@ -77,7 +77,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_SpectralLightning)
 
 	flash->target = self->target;
 	flash->velz = -18*FRACUNIT;
-	flash->health = self->health;
+	flash->FriendPlayer = self->FriendPlayer;
 
 	flash = Spawn(NAME_SpectralLightningV2, self->x, self->y, ONCEILINGZ, ALLOW_REPLACE);
 
@@ -88,7 +88,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_SpectralLightning)
 
 	flash->target = self->target;
 	flash->velz = -18*FRACUNIT;
-	flash->health = self->health;
+	flash->FriendPlayer = self->FriendPlayer;
 
 	// [CW] Tell clients to spawn the missile.
 	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
@@ -106,8 +106,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_Tracer2)
 	fixed_t slope;
 
 	// [BC] Server takes care of movement.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
