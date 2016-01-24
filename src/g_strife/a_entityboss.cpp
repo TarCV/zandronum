@@ -29,8 +29,7 @@ void A_SpectralMissile (AActor *self, const char *missilename)
 		if (missile != NULL)
 		{
 			missile->tracer = self->target;
-			missile->health = -2;
-			P_CheckMissileSpawn(missile);
+			P_CheckMissileSpawn(missile, self->radius);
 		}
 	}
 }
@@ -72,7 +71,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_EntityAttack)
 DEFINE_ACTION_FUNCTION(AActor, A_SpawnEntity)
 {
 	// [CW] Clients may not do this.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) || ( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 		return;
 
 	AActor *entity = Spawn("EntityBoss", self->x, self->y, self->z + 70*FRACUNIT, ALLOW_REPLACE);
@@ -96,7 +95,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_EntityDeath)
 	angle_t an;
 
 	// [CW] Clients may not do this.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) || ( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 		return;
 
 	AActor *spot = self->tracer;
@@ -104,7 +103,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_EntityDeath)
 
 	fixed_t SpawnX = spot->x;
 	fixed_t SpawnY = spot->y;
-	fixed_t SpawnZ = spot->z + self->tracer? 70*FRACUNIT : 0;
+	fixed_t SpawnZ = spot->z + (self->tracer? 70*FRACUNIT : 0);
 	
 	an = self->angle >> ANGLETOFINESHIFT;
 	second = Spawn("EntitySecond", SpawnX + FixedMul (secondRadius, finecosine[an]),
