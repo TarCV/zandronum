@@ -12,7 +12,6 @@
 #include "thingdef/thingdef.h"
 */
 
- FRandom pr_lost ("LostMissileRange");
  FRandom pr_oldsoul ("BetaLostSoul");
 
 //
@@ -27,8 +26,7 @@ void A_SkullAttack(AActor *self, fixed_t speed)
 	int dist;
 
 	// [BC] This is handled server-side.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}

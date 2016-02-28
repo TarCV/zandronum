@@ -153,7 +153,14 @@ enum FlagSet
 	FLAGSET_FLAGS4,
 	FLAGSET_FLAGS5,
 	FLAGSET_FLAGS6,
+	FLAGSET_FLAGS7,
 	FLAGSET_FLAGSST
+};
+
+enum ActorScaleFlag
+{
+	ACTORSCALE_X = 1,
+	ACTORSCALE_Y = 2
 };
 
 // Which actor sound is being updated?
@@ -189,42 +196,6 @@ enum FlagSet
 //*****************************************************************************
 enum
 {
-	// Client has the wrong password.
-	NETWORK_ERRORCODE_WRONGPASSWORD,
-
-	// Client has the wrong version.
-	NETWORK_ERRORCODE_WRONGVERSION,
-
-	// Client is using a version with different network protocol.
-	NETWORK_ERRORCODE_WRONGPROTOCOLVERSION,
-
-	// Client has been banned.
-	NETWORK_ERRORCODE_BANNED,
-
-	// The server is full.
-	NETWORK_ERRORCODE_SERVERISFULL,
-
-	// Client has the wrong version of the current level.
-	NETWORK_ERRORCODE_AUTHENTICATIONFAILED,
-
-	// Client failed to send userinfo when connecting.
-	NETWORK_ERRORCODE_FAILEDTOSENDUSERINFO,
-
-	// [RC] Too many connections from the IP.
-	NETWORK_ERRORCODE_TOOMANYCONNECTIONSFROMIP,
-
-	// [BB] The protected lump authentication failed.
-	NETWORK_ERRORCODE_PROTECTED_LUMP_AUTHENTICATIONFAILED,
-
-	// [TP] The client sent bad userinfo
-	NETWORK_ERRORCODE_USERINFOREJECTED,
-
-	NUM_NETWORK_ERRORCODES
-};
-
-//*****************************************************************************
-enum
-{
 	// Program is being run in single player mode.
 	NETSTATE_SINGLE,
 
@@ -238,87 +209,6 @@ enum
 	NETSTATE_SERVER,
 
 	NUM_NETSTATES
-};
-
-//*****************************************************************************
-enum
-{
-	// The server has properly received the client's challenge, and is telling
-	// the client to authenticate his map.
-	SVCC_AUTHENTICATE,
-
-	// The server received the client's checksum, and it's valid. Now the server
-	// is telling the client to load the map.
-	SVCC_MAPLOAD,
-
-	// There was an error during the course of the client trying to connect.
-	SVCC_ERROR,
-
-	NUM_SERVERCONNECT_COMMANDS
-};
-
-// [BB] The SVC and SVC2 defines are in a separate header so that they can be used with "EnumToString".
-#include "network_enums.h"
-
-//*****************************************************************************
-enum
-{
-	// Client is telling the server he wishes to connect.
-	CLCC_ATTEMPTCONNECTION,
-
-	// Client is attempting to authenticate the map.
-	CLCC_ATTEMPTAUTHENTICATION,
-
-	// Client has loaded the map, and is requesting the snapshot.
-	CLCC_REQUESTSNAPSHOT,
-
-	NUM_CLIENTCONNECT_COMMANDS
-};
-
-//*****************************************************************************
-enum
-{
-	CLC_USERINFO = NUM_CLIENTCONNECT_COMMANDS,
-	CLC_QUIT,
-	CLC_STARTCHAT,
-	CLC_ENDCHAT,
-	CLC_SAY,
-	CLC_CLIENTMOVE,
-	CLC_MISSINGPACKET,
-	CLC_PONG,
-	CLC_WEAPONSELECT,
-	CLC_TAUNT,
-	CLC_SPECTATE,
-	CLC_REQUESTJOIN,
-	CLC_REQUESTRCON,
-	CLC_RCONCOMMAND,
-	CLC_SUICIDE,
-	CLC_CHANGETEAM,
-	CLC_SPECTATEINFO,
-	CLC_GENERICCHEAT,
-	CLC_GIVECHEAT,
-	CLC_SUMMONCHEAT,
-	CLC_READYTOGOON,
-	CLC_CHANGEDISPLAYPLAYER,
-	CLC_AUTHENTICATELEVEL,
-	CLC_CALLVOTE,
-	CLC_VOTEYES,
-	CLC_VOTENO,
-	CLC_INVENTORYUSEALL,
-	CLC_INVENTORYUSE,
-	CLC_INVENTORYDROP,
-	CLC_SUMMONFRIENDCHEAT,
-	CLC_SUMMONFOECHEAT,
-	CLC_ENTERCONSOLE,
-	CLC_EXITCONSOLE,
-	CLC_IGNORE,
-	CLC_PUKE,
-	CLC_MORPHEX,
-	CLC_FULLUPDATE,
-	CLC_INFOCHEAT,
-
-	NUM_CLIENT_COMMANDS
-
 };
 
 //*****************************************************************************
@@ -337,9 +227,6 @@ int				NETWORK_GetPackets( void );
 int				NETWORK_GetLANPackets( void );
 NETADDRESS_s	NETWORK_GetFromAddress( void );
 void			NETWORK_LaunchPacket( NETBUFFER_s *pBuffer, NETADDRESS_s Address );
-const char		*NETWORK_AddressToString( NETADDRESS_s Address );
-const char		*NETWORK_AddressToStringIgnorePort( NETADDRESS_s Address );
-void			NETWORK_SetAddressPort( NETADDRESS_s &Address, USHORT usPort );
 NETADDRESS_s	NETWORK_GetLocalAddress( void );
 NETADDRESS_s	NETWORK_GetCachedLocalAddress( void );
 NETBUFFER_s		*NETWORK_GetNetworkMessageBuffer( void );
@@ -364,6 +251,13 @@ void			NETWORK_GenerateLumpMD5Hash( const int LumpNum, FString &MD5Hash );
 FString			NETWORK_MapCollectionChecksum( ); // [Dusk]
 void			NETWORK_MakeMapCollectionChecksum( ); // [Dusk]
 
+enum { NO_SCRIPT_NETID = -1 };
+int				NETWORK_ACSScriptFromNetID( int netid );
+int				NETWORK_ACSScriptToNetID( int script );
+void			NETWORK_MakeScriptNameIndex();
+FName			NETWORK_ReadName( BYTESTREAM_s* bytestream );
+void			NETWORK_WriteName( BYTESTREAM_s* bytestream, FName name );
+
 const char		*NETWORK_GetClassNameFromIdentification( USHORT usActorNetworkIndex );
 const PClass	*NETWORK_GetClassFromIdentification( USHORT usActorNetworkIndex );
 
@@ -378,6 +272,9 @@ bool			NETWORK_IsClientPredictedSpecial( const int Special );
 
 // [BB] Generate a checksum from a ticcmd_t.
 SDWORD			NETWORK_Check ( ticcmd_t *pCmd );
+
+// [TP] Announce something to all clients if the server or just print if not
+void STACK_ARGS NETWORK_Printf( const char* format, ... );
 
 // [BB] Sound attenuation is a float, but we only want to sent a byte for the 
 // attenuation to instructs clients to play a sound. The enum is used for the

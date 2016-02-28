@@ -80,6 +80,7 @@ void	CLIENTCOMMANDS_ChangeTeam( const char *pszJoinPassword, LONG lDesiredTeam )
 void	CLIENTCOMMANDS_SpectateInfo( void );
 void	CLIENTCOMMANDS_GenericCheat( LONG lCheat );
 void	CLIENTCOMMANDS_GiveCheat( char *pszItem, LONG lAmount );
+void	CLIENTCOMMANDS_TakeCheat( const char *item, LONG amount );
 void	CLIENTCOMMANDS_SummonCheat( const char *pszItem, LONG lType, const bool bSetAngle, const SHORT sAngle );
 void	CLIENTCOMMANDS_ReadyToGoOn( void );
 void	CLIENTCOMMANDS_ChangeDisplayPlayer( LONG lDisplayPlayer );
@@ -92,9 +93,12 @@ void	CLIENTCOMMANDS_RequestInventoryUse( AInventory *item );
 void	CLIENTCOMMANDS_RequestInventoryDrop( AInventory *pItem );
 void	CLIENTCOMMANDS_EnterConsole( void );
 void	CLIENTCOMMANDS_ExitConsole( void );
-void	CLIENTCOMMANDS_Puke ( LONG lScript, int args[3] );
+void	CLIENTCOMMANDS_Puke ( int script, int args[4], bool always );
 void	CLIENTCOMMANDS_MorphCheat ( const char *pszMorphClass );
 void	CLIENTCOMMANDS_FullUpdateReceived ( void );
 void	CLIENTCOMMANDS_InfoCheat( AActor* mobj, bool extended );
+void	CLIENTCOMMANDS_WarpCheat( fixed_t x, fixed_t y );
+void	CLIENTCOMMANDS_KillCheat( const char* what );
+void	CLIENTCOMMANDS_SpecialCheat( int special, const TArray<int>& args );
 
 #endif	// __CL_COMMANDS_H__
