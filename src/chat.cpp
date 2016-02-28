@@ -105,7 +105,8 @@ CVAR( String, chatmacro0, "No", CVAR_ARCHIVE )
 CVAR( Bool, chat_substitution, false, CVAR_ARCHIVE )
 
 EXTERN_CVAR( Int, con_colorinmessages );
-EXTERN_CVAR( Int, chat_sound );
+// [RC] Played when a chat message arrives. Values: off, default, Doom 1 (dstink), Doom 2 (dsradio).
+CVAR (Int, chat_sound, 1, CVAR_ARCHIVE)
 
 //*****************************************************************************
 FStringCVar	*g_ChatMacros[10] =
@@ -405,11 +406,11 @@ void CHAT_PrintChatString( ULONG ulPlayer, ULONG ulMode, const char *pszString )
 		{
 			ulChatLevel = PRINT_HIGH;
 			pszString += 3;
-			OutString.AppendFormat( "* %s\\cc", players[ulPlayer].userinfo.netname );
+			OutString.AppendFormat( "* %s\\cc", players[ulPlayer].userinfo.GetName() );
 		}
 		else
 		{
-			OutString.AppendFormat( "%s" TEXTCOLOR_CHAT ": ", players[ulPlayer].userinfo.netname );
+			OutString.AppendFormat( "%s" TEXTCOLOR_CHAT ": ", players[ulPlayer].userinfo.GetName() );
 		}
 	}
 	else if ( ulMode == CHATMODE_TEAM )
@@ -429,11 +430,11 @@ void CHAT_PrintChatString( ULONG ulPlayer, ULONG ulMode, const char *pszString )
 		{
 			ulChatLevel = PRINT_HIGH;
 			pszString += 3;
-			OutString.AppendFormat( "\\cc* %s\\cc", players[ulPlayer].userinfo.netname );
+			OutString.AppendFormat( "\\cc* %s\\cc", players[ulPlayer].userinfo.GetName() );
 		}
 		else
 		{
-			OutString.AppendFormat( "\\cd%s" TEXTCOLOR_TEAMCHAT ": ", players[ulPlayer].userinfo.netname );
+			OutString.AppendFormat( "\\cd%s" TEXTCOLOR_TEAMCHAT ": ", players[ulPlayer].userinfo.GetName() );
 		}
 	}
 
@@ -476,7 +477,7 @@ void CHAT_PrintChatString( ULONG ulPlayer, ULONG ulMode, const char *pszString )
 	}
 
 	BOTCMD_SetLastChatString( pszString );
-	BOTCMD_SetLastChatPlayer( players[ulPlayer].userinfo.netname );
+	BOTCMD_SetLastChatPlayer( PLAYER_IsValidPlayer( ulPlayer ) ? players[ulPlayer].userinfo.GetName() : "" );
 
 	{
 		ULONG	ulIdx;
@@ -600,7 +601,7 @@ void chat_GetIgnoredPlayers( FString &Destination )
 	{
 		if ( players[i].bIgnoreChat )
 		{
-			Destination += players[i].userinfo.netname;
+			Destination += players[i].userinfo.GetName();
 			Destination += "\\c-";
 			
 			// Add the time remaining.
@@ -776,7 +777,7 @@ CCMD( say_team )
 	}
 
 	// Make sure we have teammates to talk to before we use team chat.
-	if ( GAMEMODE_GetFlags( GAMEMODE_GetCurrentMode( )) & GMF_PLAYERSONTEAMS )
+	if ( GAMEMODE_GetCurrentFlags() & GMF_PLAYERSONTEAMS )
 	{
 		// Not on a team. No one to talk to.
 		if ( ( players[consoleplayer].bOnTeam == false ) && ( PLAYER_IsTrueSpectator ( &players[consoleplayer] ) == false ) )
@@ -848,12 +849,12 @@ void chat_IgnorePlayer( FCommandLine &argv, const ULONG ulPlayer )
 	else if ( ( ulPlayer == (ULONG)consoleplayer ) && ( NETWORK_GetState( ) != NETSTATE_SERVER ) )
 		Printf( "You can't ignore yourself.\n" );
 	else if ( players[ulPlayer].bIgnoreChat && ( players[ulPlayer].lIgnoreChatTicks == lTicks ))
-		Printf( "You're already ignoring %s\\c-.\n", players[ulPlayer].userinfo.netname );
+		Printf( "You're already ignoring %s\\c-.\n", players[ulPlayer].userinfo.GetName() );
 	else
 	{
 		players[ulPlayer].bIgnoreChat = true;
 		players[ulPlayer].lIgnoreChatTicks = lTicks;
-		Printf( "%s\\c- will now be ignored", players[ulPlayer].userinfo.netname );
+		Printf( "%s\\c- will now be ignored", players[ulPlayer].userinfo.GetName() );
 		if ( lTicks > 0 )
 			Printf( ", for %d minutes", static_cast<int>(lArgv2));
 		Printf( ".\n" );
@@ -876,12 +877,14 @@ CCMD( ignore )
 
 CCMD( ignore_idx )
 {
-	const ULONG ulPlayer = ( argv.argc( ) >= 2 ) ? atoi( argv[1] ) : MAXPLAYERS;
-
-	if ( PLAYER_IsValidPlayer( ulPlayer ) == false ) 
+	int playerIndex;
+	if ( argv.SafeGetNumber( 1, playerIndex ) == false )
 		return;
 
-	chat_IgnorePlayer( argv, ulPlayer );
+	if ( PLAYER_IsValidPlayer( playerIndex ) == false )
+		return;
+
+	chat_IgnorePlayer( argv, playerIndex );
 }
 
 //*****************************************************************************
@@ -910,12 +913,12 @@ void chat_UnignorePlayer( FCommandLine &argv, const ULONG ulPlayer )
 	else if ( ( ulPlayer == (ULONG)consoleplayer ) && ( NETWORK_GetState( ) != NETSTATE_SERVER ) )
 		Printf( "You can't unignore yourself.\n" );
 	else if ( !players[ulPlayer].bIgnoreChat )
-		Printf( "You're not ignoring %s\\c-.\n", players[ulPlayer].userinfo.netname );
+		Printf( "You're not ignoring %s\\c-.\n", players[ulPlayer].userinfo.GetName() );
 	else 
 	{
 		players[ulPlayer].bIgnoreChat = false;
 		players[ulPlayer].lIgnoreChatTicks = -1;
-		Printf( "%s\\c- will no longer be ignored.\n", players[ulPlayer].userinfo.netname );
+		Printf( "%s\\c- will no longer be ignored.\n", players[ulPlayer].userinfo.GetName() );
 
 		// Notify the server so that others using this IP are also ignored.
 		if ( NETWORK_GetState( ) == NETSTATE_CLIENT )
@@ -930,11 +933,35 @@ CCMD( unignore )
 
 CCMD( unignore_idx )
 {
-	const ULONG ulPlayer = ( argv.argc( ) >= 2 ) ? atoi( argv[1] ) : MAXPLAYERS;
-
-	if ( PLAYER_IsValidPlayer( ulPlayer ) == false ) 
+	int playerIndex;
+	if ( argv.SafeGetNumber( 1, playerIndex ) == false )
 		return;
 
-	chat_UnignorePlayer( argv, ulPlayer );
+	if ( PLAYER_IsValidPlayer( playerIndex ) == false )
+		return;
+
+	chat_UnignorePlayer( argv, playerIndex );
+}
+
+// [TP]
+CCMD( messagemode )
+{
+	if ( NETWORK_GetState() != NETSTATE_SERVER )
+	{
+		chat_SetChatMode( CHATMODE_GLOBAL );
+		C_HideConsole( );
+		chat_ClearChatMessage( );
+	}
+}
+
+// [TP]
+CCMD( messagemode2 )
+{
+	if ( NETWORK_GetState() != NETSTATE_SERVER )
+	{
+		chat_SetChatMode( CHATMODE_TEAM );
+		C_HideConsole( );
+		chat_ClearChatMessage( );
+	}
 }
 

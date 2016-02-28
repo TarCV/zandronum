@@ -56,6 +56,8 @@
 #include "i_net.h"
 #include "networkshared.h"
 #include "s_sndseq.h"
+#include "r_data/sprites.h"
+#include "network/packetarchive.h"
 #include <list>
 #include <queue>
 
@@ -226,19 +228,7 @@ typedef struct
 
 	// We back up the last PACKET_BUFFER_SIZE packets we've sent to the client so that we can
 	// retransmit them if necessary.
-	NETBUFFER_s		SavedPacketBuffer;
-
-	// This is the position of each saved packet within SavedPacketBuffer.
-	LONG			lPacketBeginning[PACKET_BUFFER_SIZE];
-
-	// This is the packet size for each of the PACKET_BUFFER_SIZE stored packets.
-	LONG			lPacketSize[PACKET_BUFFER_SIZE];
-
-	// This is the packet sequence for each of the PACKET_BUFFER_SIZE stored packets.
-	LONG			lPacketSequence[PACKET_BUFFER_SIZE];
-
-	// Last packet number sent to this client.
-	ULONG			ulPacketSequence;
+	PacketArchive	SavedPackets;
 
 	// This is the last tic in which we received a command from this client. Used for timeouts.
 	ULONG			ulLastCommandTic;
@@ -421,7 +411,10 @@ void		SERVER_AdjustPlayersReactiontime( const ULONG ulPlayer );
 void		SERVER_DisconnectClient( ULONG ulClient, bool bBroadcast, bool bSaveInfo );
 void		SERVER_SendHeartBeat( void );
 void		STACK_ARGS SERVER_Printf( ULONG ulPrintLevel, const char *pszString, ... ) GCCPRINTF(2,3);
+void		STACK_ARGS SERVER_Printf( const char *pszString, ... ) GCCPRINTF(1,2);
 void		STACK_ARGS SERVER_PrintfPlayer( ULONG ulPrintLevel, ULONG ulPlayer, const char *pszString, ... ) GCCPRINTF(3,4);
+void		STACK_ARGS SERVER_PrintfPlayer( ULONG ulPlayer, const char *pszString, ... ) GCCPRINTF(2,3);
+void		SERVER_VPrintf( int printlevel, const char* format, va_list argptr, int playerToPrintTo );
 void		SERVER_UpdateSectors( ULONG ulClient );
 void		SERVER_UpdateMovers( ULONG ulClient );
 void		SERVER_UpdateLines( ULONG ulClient );
@@ -431,7 +424,7 @@ void		SERVER_ReconnectNewLevel( const char *pszMapName );
 void		SERVER_LoadNewLevel( const char *pszMapName );
 void		SERVER_KickAllPlayers( const char *pszReason );
 void		SERVER_KickPlayer( ULONG ulPlayer, const char *pszReason );
-void		SERVER_KickPlayerFromGame( ULONG ulPlayer, const char *pszReason );
+void		SERVER_ForceToSpectate( ULONG ulPlayer, const char *pszReason );
 void		SERVER_AddCommand( const char *pszCommand );
 void		SERVER_DeleteCommand( void );
 bool		SERVER_IsEveryoneReadyToGoOn( void );
@@ -470,6 +463,7 @@ const FString& SERVER_GetMasterBanlistVerificationString( void );
 void		SERVER_UpdateThingMomentum( AActor *pActor, bool updateZ, bool updateXY = true );
 void		SERVER_SyncSharedKeys( int playerToSync, bool withmessage );
 void		SERVER_SyncServerModCVars ( const int PlayerToSync );
+void		SERVER_KillCheat( const char* what );
 
 // From sv_master.cpp
 void		SERVER_MASTER_Construct( void );

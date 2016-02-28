@@ -18,6 +18,7 @@
 #include "templates.h"
 #include "d_event.h"
 #include "v_font.h"
+#include "farchive.h"
 // [BB] New #includes.
 #include "cl_demo.h"
 #include "sv_commands.h"
@@ -181,7 +182,7 @@
 	117 Blood
 	118 TeleportFog
 	119 ItemFog
-	120 --- Doomednum is 14, which makes it a teleport destination. Don't know why it's in the mobjinfo table.
+	120 teleport destination
 	121 KlaxonWarningLight
 	122 CeilingTurret
 	123 Piston
@@ -452,8 +453,7 @@ static FRandom pr_gethurt ("HurtMe!");
 DEFINE_ACTION_FUNCTION(AActor, A_GetHurt)
 {
 	// [BB] The server handles this.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		if (( self->ulNetworkFlags & NETFL_CLIENTSIDEONLY ) == false )
 			return;
@@ -540,14 +540,14 @@ class APowerCoupling : public AActor
 {
 	DECLARE_CLASS (APowerCoupling, AActor)
 public:
-	void Die (AActor *source, AActor *inflictor);
+	void Die (AActor *source, AActor *inflictor, int dmgflags);
 };
 
 IMPLEMENT_CLASS (APowerCoupling)
 
-void APowerCoupling::Die (AActor *source, AActor *inflictor)
+void APowerCoupling::Die (AActor *source, AActor *inflictor, int dmgflags)
 {
-	Super::Die (source, inflictor);
+	Super::Die (source, inflictor, dmgflags);
 
 	int i;
 
@@ -708,7 +708,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_DropFire)
 {
 	AActor *drop = Spawn("FireDroplet", self->x, self->y, self->z + 24*FRACUNIT, ALLOW_REPLACE);
 	drop->velz = -FRACUNIT;
-	P_RadiusAttack (self, self, 64, 64, NAME_Fire, false);
+	P_RadiusAttack (self, self, 64, 64, NAME_Fire, 0);
 }
 
 DEFINE_ACTION_FUNCTION(AActor, A_CrispyPlayer)
