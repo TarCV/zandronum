@@ -112,8 +112,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_SmBounce)
 DEFINE_ACTION_FUNCTION(AActor, A_FiredAttack)
 {
 	// [BC] Let the server do this.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -148,8 +147,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_FiredChase)
 	fixed_t dist;
 
 	// [BC] Let the server do this.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		// make active sound
 		if (pr_firedemonchase() < 3)
@@ -168,8 +166,8 @@ DEFINE_ACTION_FUNCTION(AActor, A_FiredChase)
 	if (self->threshold) self->threshold--;
 
 	// Float up and down
-	self->z += FloatBobOffsets[weaveindex];
-	self->special1 = (weaveindex+2)&63;
+	self->z += finesine[weaveindex << BOBTOFINESHIFT] * 8;
+	self->special1 = (weaveindex + 2) & 63;
 
 	// Ensure it stays above certain height
 	if (self->z < self->floorz + (64*FRACUNIT))
@@ -216,7 +214,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_FiredChase)
 		// [BC] If we're the server, update the thing's z position.
 		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
 		{
-			SERVERCOMMANDS_MoveThingExact( self, CM_MOMX|CM_MOMY );
+			SERVERCOMMANDS_MoveThingExact( self, CM_VELX|CM_VELY );
 			SERVERCOMMANDS_SetThingSpecial2( self );
 		}
 	}

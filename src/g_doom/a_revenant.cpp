@@ -23,8 +23,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_SkelMissile)
 	AActor *missile;
 		
 	// [BC] This is handled server-side.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -83,8 +82,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_Tracer)
 		smoke->tics = 1;
 	
 	// [BC] Server takes care of movement.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -145,17 +143,16 @@ DEFINE_ACTION_FUNCTION(AActor, A_Tracer)
 			self->velz += FRACUNIT/8;
 	}
 
-	// [BC] Update the thing's position, angle and momentum.
+	// [BC] Update the thing's position, angle and velocity.
 	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
-		SERVERCOMMANDS_MoveThingExact( self, CM_X|CM_Y|CM_Z|CM_ANGLE|CM_MOMX|CM_MOMY|CM_MOMZ );
+		SERVERCOMMANDS_MoveThingExact( self, CM_X|CM_Y|CM_Z|CM_ANGLE|CM_VELX|CM_VELY|CM_VELZ );
 }
 
 
 DEFINE_ACTION_FUNCTION(AActor, A_SkelWhoosh)
 {
 	// [BC] This is handled server-side.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -173,8 +170,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_SkelWhoosh)
 DEFINE_ACTION_FUNCTION(AActor, A_SkelFist)
 {
 	// [BC] This is handled server-side.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -188,8 +184,8 @@ DEFINE_ACTION_FUNCTION(AActor, A_SkelFist)
 	{
 		int damage = ((pr_skelfist()%10)+1)*6;
 		S_Sound (self, CHAN_WEAPON, "skeleton/melee", 1, ATTN_NORM);
-		P_DamageMobj (self->target, self, self, damage, NAME_Melee);
-		P_TraceBleed (damage, self->target, self);
+		int newdam = P_DamageMobj (self->target, self, self, damage, NAME_Melee);
+		P_TraceBleed (newdam > 0 ? newdam : damage, self->target, self);
 
 		// [BC] If we're the server, tell clients to play the sound.
 		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
