@@ -32,8 +32,7 @@ IMPLEMENT_CLASS (AArtiDarkServant)
 bool AArtiDarkServant::Use (bool pickup)
 {
 	// [BC] Don't do this in client mode.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return ( true );
 	}
@@ -47,7 +46,7 @@ bool AArtiDarkServant::Use (bool pickup)
 
 		// [BC] If we're the server, send clients this missile's updated properties.
 		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
-			SERVERCOMMANDS_MoveThing( mo, CM_MOMZ );
+			SERVERCOMMANDS_MoveThing( mo, CM_VELZ );
 	}
 	return true;
 }
@@ -63,8 +62,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_Summon)
 	AMinotaurFriend *mo;
 
 	// [BC] Don't do this in client mode.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -101,10 +99,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_Summon)
 			mo->tracer = self->tracer;		// Pointer to master
 			AInventory *power = Spawn<APowerMinotaur> (0, 0, 0, NO_REPLACE);
 			power->CallTryPickup (self->tracer);
-			if (self->tracer->player != NULL)
-			{
-				mo->FriendPlayer = int(self->tracer->player - players + 1);
-			}
+			mo->SetFriendPlayer(self->tracer->player);
 		}
 
 		// Make smoke puff

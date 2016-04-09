@@ -12,7 +12,6 @@
 #include "thingdef/thingdef.h"
 */
 
- FRandom pr_lost ("LostMissileRange");
  FRandom pr_oldsoul ("BetaLostSoul");
 
 //
@@ -27,8 +26,7 @@ void A_SkullAttack(AActor *self, fixed_t speed)
 	int dist;
 
 	// [BC] This is handled server-side.
-	if (( NETWORK_GetState( ) == NETSTATE_CLIENT ) ||
-		( CLIENTDEMO_IsPlaying( )))
+	if ( NETWORK_InClientMode() )
 	{
 		return;
 	}
@@ -60,9 +58,9 @@ void A_SkullAttack(AActor *self, fixed_t speed)
 		dist = 1;
 	self->velz = (dest->z + (dest->height>>1) - self->z) / dist;
 
-	// [BC] Update the lost soul's momentum.
+	// [BC] Update the lost soul's velocity.
 	if ( NETWORK_GetState( ) == NETSTATE_SERVER )
-		SERVERCOMMANDS_MoveThingExact( self, CM_X|CM_Y|CM_Z|CM_MOMX|CM_MOMY|CM_MOMZ );
+		SERVERCOMMANDS_MoveThingExact( self, CM_X|CM_Y|CM_Z|CM_VELX|CM_VELY|CM_VELZ );
 }
 
 DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_SkullAttack)

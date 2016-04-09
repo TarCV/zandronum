@@ -17,8 +17,6 @@ static FRandom pr_troopattack ("TroopAttack");
 //
 DEFINE_ACTION_FUNCTION(AActor, A_TroopAttack)
 {
-	AActor	*pMissile;
-
 	if (!self->target)
 		return;
 				
@@ -32,15 +30,11 @@ DEFINE_ACTION_FUNCTION(AActor, A_TroopAttack)
 		if ( NETWORK_GetState( ) == NETSTATE_SERVER )
 			SERVERCOMMANDS_SoundActor( self, CHAN_WEAPON, "imp/melee", 1, ATTN_NORM );
 
-		P_DamageMobj (self->target, self, self, damage, NAME_Melee);
-		P_TraceBleed (damage, self->target, self);
+		int newdam = P_DamageMobj (self->target, self, self, damage, NAME_Melee);
+		P_TraceBleed (newdam > 0 ? newdam : damage, self->target, self);
 		return;
 	}
 	
 	// launch a missile
-	pMissile = P_SpawnMissile (self, self->target, PClass::FindClass("DoomImpBall"));
-
-	// [BC] If we're the server, tell clients to spawn the missile.
-	if (( NETWORK_GetState( ) == NETSTATE_SERVER ) && ( pMissile ))
-		SERVERCOMMANDS_SpawnMissile( pMissile );
+	P_SpawnMissile (self, self->target, PClass::FindClass("DoomImpBall"), NULL, true); // [BB] Inform clients
 }
