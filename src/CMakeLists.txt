@@ -1128,6 +1128,7 @@ add_executable( zdoom WIN32
 	m_random.cpp
 	m_specialpaths.cpp
 	maprotation.cpp #ST
+	match_stats.cpp #ZA [TCV]MatchStats
 	memarena.cpp
 	md5.cpp
 	medal.cpp #ST

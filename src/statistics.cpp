@@ -74,6 +74,9 @@
 // [BB] New #includes.
 #include "deathmatch.h"
 
+// [TCV] For match stats
+#include "match_stats.h"
+
 CVAR(Int, savestatistics, 0, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 CVAR(String, statfile, "zdoomstat.txt", CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 
@@ -448,6 +451,7 @@ static void StoreLevelStats()
 void STAT_ChangeLevel(const char *newl)
 {
 	// record the current level's stats.
+    MSTAT_Write_Stats();
 	StoreLevelStats();
 
 	level_info_t *thisinfo = level.info;
