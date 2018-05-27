@@ -475,6 +475,53 @@ void FileReaderLZMA::FillBuffer ()
 
 //==========================================================================
 //
+// FileTextAppender
+//
+// appends text data to an uncompressed file or part of it
+//
+//==========================================================================
+
+FileTextAppender::FileTextAppender (const char *filename)
+: File(NULL), CloseOnDestruct(false)
+{
+    if (!Open(filename))
+    {
+        I_Error ("Could not open %s", filename);
+    }
+}
+
+FileTextAppender::~FileTextAppender ()
+{
+    if (File != NULL && CloseOnDestruct)
+    {
+        fclose (File);
+        File = NULL;
+    }
+}
+
+bool FileTextAppender::Open (const char *filename)
+{
+    File = fopen (filename, "at");
+    if (File == NULL) return false;
+    CloseOnDestruct = true;
+    return true;
+}
+
+long FileTextAppender::WriteF (const char *format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    WriteF(format, args);
+    va_end(args);
+}
+
+long FileTextAppender::WriteF (const char *format, va_list args)
+{
+    return vfprintf(File, format, args);
+}
+
+//==========================================================================
+//
 // MemoryReader
 //
 // reads data from a block of memory

@@ -322,6 +322,20 @@ private:
 	FileReaderLZMA &operator= (const FileReaderLZMA &) { return *this; }
 };
 
+class FileTextAppender
+{
+public:
+    FileTextAppender (const char *filename);
+    ~FileTextAppender ();
+
+    bool Open (const char *filename);
+    long WriteF (const char *format, ...);
+private:
+    FILE *File;
+    long WriteF (const char *format, va_list args);
+    bool CloseOnDestruct;
+};
+
 class MemoryReader : public FileReader
 {
 public:
