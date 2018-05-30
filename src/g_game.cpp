@@ -113,6 +113,7 @@
 #include "p_3dmidtex.h"
 #include "a_lightning.h"
 #include "po_man.h"
+#include "match_stats.h" // [TCV]
 
 #include <zlib.h>
 
@@ -1759,7 +1760,9 @@ void G_Ticker ()
 				if ( NETWORK_GetState( ) == NETSTATE_SERVER )
 					SERVERCOMMANDS_SetGameEndLevelDelay( g_ulEndLevelDelay );
 
-				// If we're in a duel, set up the next duel.
+                MSTAT_Write_Stats();
+
+                // If we're in a duel, set up the next duel.
 				if ( duel )
 				{
 					// If the player must win all duels, and lost this one, then he's DONE!
@@ -3306,7 +3309,7 @@ void GAME_ResetMap( bool bRunEnterScripts )
 	fixed_t							Z;
 	TThinkerIterator<AActor>		ActorIterator;
 
-	// Unload decals.
+    // Unload decals.
 	DECAL_ClearDecals( );
 
 	// [BB] Possibly reset level time to 0.

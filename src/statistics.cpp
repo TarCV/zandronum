@@ -451,7 +451,6 @@ static void StoreLevelStats()
 void STAT_ChangeLevel(const char *newl)
 {
 	// record the current level's stats.
-    MSTAT_Write_Stats();
 	StoreLevelStats();
 
 	level_info_t *thisinfo = level.info;
