@@ -7,16 +7,37 @@
 #include "sv_main.h"
 #include <time.h>
 
-void MSTAT_Write_Stats() {
-    if (NETWORK_GetState( ) != NETSTATE_SERVER && NETWORK_GetState() != NETSTATE_SINGLE_MULTIPLAYER) return;
+CVAR(String, matchstatdir, "", CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 
-    long epoch = static_cast<long>(time(NULL));
-    const int fn_len = 100;
-    char fn[fn_len];
-    if (snprintf(fn, fn_len, "matchstat-%li.tsv", epoch) <= 0) return;
+#define WRITE_CVAR(format, type, name) { f.WriteF(#name "=" format "\n", static_cast<type>(name)); }
 
-    FileTextAppender f = FileTextAppender(fn);
+void WriteConfigFile(FString actualdir, const char* slash, long epoch)
+{
+    FString infofile;
+    infofile.Format ("%s%smatchinfo-%li.tsv", actualdir.GetChars(), slash, epoch);
 
+    FileTextAppender f = FileTextAppender(infofile);
+    WRITE_CVAR("%d", bool, deathmatch);
+    WRITE_CVAR("%d", bool, teamplay);
+    WRITE_CVAR("%d", bool, duel);
+    WRITE_CVAR("%d", bool, terminator);
+    WRITE_CVAR("%d", bool, lastmanstanding);
+    WRITE_CVAR("%d", bool, teamlms);
+    WRITE_CVAR("%d", bool, possession);
+    WRITE_CVAR("%d", int, teampossession);
+    WRITE_CVAR("%ud", int, dmflags);
+    WRITE_CVAR("%ud", int, dmflags2);
+    WRITE_CVAR("%ud", int, zadmflags);
+    WRITE_CVAR("%ud", int, compatflags);
+    WRITE_CVAR("%ud", int, compatflags2);
+    WRITE_CVAR("%ud", int, zacompatflags);
+}
+void WriteMatchFile(FString actualdir, const char* slash, long epoch)
+{
+    FString matchfile;
+    matchfile.Format ("%s%smatchstat-%li.tsv", actualdir.GetChars(), slash, epoch);
+
+    FileTextAppender f = FileTextAppender(matchfile);
     if (deathmatch || duel)
     {
         // account and name are not quoted
@@ -38,4 +59,17 @@ void MSTAT_Write_Stats() {
                 }
         }
     }
+}
+
+void MSTAT_Write_Stats() {
+    if (NETWORK_GetState( ) != NETSTATE_SERVER && NETWORK_GetState() != NETSTATE_SINGLE_MULTIPLAYER) return;
+
+    FString actualdir = NicePath(matchstatdir);
+    FixPathSeperator(actualdir);
+    const char *slash = (actualdir.IsNotEmpty() && actualdir[actualdir.Len()-1] != '/') ? "/" : "";
+
+    long epoch = static_cast<long>(time(NULL));
+
+    WriteConfigFile(actualdir, slash, epoch);
+    WriteMatchFile(actualdir, slash, epoch);
 }
